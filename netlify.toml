@@ -1,0 +1,22 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+[build.environment]
+  VITE_APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxJepmT3RAyAHb3NMe2z67iQn8UHr8HJXQgLfn0HJg0dzKUfth6TEajvpgAgu5cWbVctg/exec"
+  SECRETS_SCAN_SMART_DETECTION_ENABLED = "false"
+
+# SPA fallback: serve index.html for all unmatched routes (except API)
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
