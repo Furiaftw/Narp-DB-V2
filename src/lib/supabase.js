@@ -65,7 +65,16 @@ export const fetchMyProfile = async () => {
     .eq('id', session.user.id)
     .maybeSingle();
   if (error) throw error;
-  return data;
+  if (data) return data;
+
+  try {
+    const res = await fetch('/.netlify/functions/ensure-profile', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    });
+    if (res.ok) return await res.json();
+  } catch {}
+  return null;
 };
 
 export const fetchAllProfiles = async () => {
