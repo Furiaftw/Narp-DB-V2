@@ -14,9 +14,12 @@ import { createClient } from '@supabase/supabase-js';
    - VITE_SUPABASE_DATABASE_URL / VITE_SUPABASE_ANON_KEY  (Netlify extension)
    ============================================================================ */
 
+const runtimeConfig = typeof window !== 'undefined' && window.__SUPABASE_CONFIG__;
 const url = import.meta.env.VITE_SUPABASE_URL
-         || import.meta.env.VITE_SUPABASE_DATABASE_URL;
-const key = import.meta.env.VITE_SUPABASE_ANON_KEY;
+         || import.meta.env.VITE_SUPABASE_DATABASE_URL
+         || (runtimeConfig && runtimeConfig.url);
+const key = import.meta.env.VITE_SUPABASE_ANON_KEY
+         || (runtimeConfig && runtimeConfig.key);
 
 export const supabase = url && key ? createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
