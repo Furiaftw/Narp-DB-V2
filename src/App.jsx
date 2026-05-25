@@ -536,7 +536,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
   const [tagInput, setTagInput] = useState('');
 
   const topTags = [
-    j.nature && j.nature !== 'N/A' && { l: j.nature, c: getNatureColor(j.nature) },
+    ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
     j.limited &&  showAskStaff     && { l: 'Ask Staff',             c: 'bg-amber-100 text-amber-800 border-amber-300' },
@@ -547,11 +547,12 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
 
   /* ---- Collapsed row ---- */
   if (!isExpanded) {
+    const firstNat = toArray(j.nature)[0];
     return (
       <div onClick={() => setExpRow(j._id)}
            className={`bg-white rounded-xl shadow-sm border px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-all ${j.locked ? 'border-amber-300' : 'border-slate-200'} relative group`}>
         <div className="flex items-center gap-4 flex-1 overflow-hidden pr-20">
-          <span className={`w-3 h-3 rounded-full shrink-0 ${j.nature && j.nature !== 'N/A' ? getNatureColor(j.nature).split(' ')[0].replace('100', '400') : 'bg-slate-200'}`} />
+          <span className={`w-3 h-3 rounded-full shrink-0 ${firstNat && firstNat !== 'N/A' ? getNatureColor(firstNat).split(' ')[0].replace('100', '400') : 'bg-slate-200'}`} />
           <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 flex-1 overflow-hidden">
             <h3 className="font-bold text-slate-800 text-sm truncate flex items-center gap-2">
               {j.locked && <Icon n="Lock" size={12} className="text-amber-500 shrink-0" />}{j.name}
@@ -2391,7 +2392,7 @@ export default function App() {
       (!f.q || j.name.toLowerCase().includes(lowerQ)
             || toArray(j.custom_tags).some(t => t.toLowerCase().includes(lowerQ))
             || (j.bloodline || '').toLowerCase().includes(lowerQ)) &&
-      (!f.nat.length || f.nat.includes(j.nature)) &&
+      (!f.nat.length || f.nat.some(n => toArray(j.nature).includes(n))) &&
       (!f.org.length || f.org.includes(j.origin)) &&
       (!f.spc.length || f.spc.some(s => toArray(j.spec).includes(s))) &&
       (!f.typ.length || f.typ.some(t => toArray(j.types).includes(t))) &&
