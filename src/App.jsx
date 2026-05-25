@@ -27,10 +27,6 @@ import {
 
 /* ============================================================================
    NARP DATABASE — Clean Unified Build
-   Merges the strong filter system from Version B (Show/Hide exclusion filters,
-   custom tags, central specialization management) with the polished UI
-   components from Version A (categorized BloodlineDropdown, dropdown-based
-   bloodline picker in the admin form).
    ============================================================================ */
 
 /* ---------------------------------------------------------------------------
@@ -97,8 +93,6 @@ const getSlotStatus = (slotsJson) => {
 
 const getIdVal = (id) => parseInt(String(id).replace(/\D/g, '') || '0', 10);
 
-// Returns a numeric sort key — uses created_at timestamp if present (Supabase rows),
-// otherwise falls back to extracting digits from the _id (legacy seed/local rows).
 const getSortKey = (item) => {
   if (item._createdAt) {
     const t = new Date(item._createdAt).getTime();
@@ -163,11 +157,8 @@ const Icon = ({ n, size = 24, className = '' }) => (
 /* ---------------------------------------------------------------------------
    SEED DATA
    --------------------------------------------------------------------------- */
-// Slot-tracking for bloodlines and limited specs moved to a separate site (v3+).
-// Jutsus keep their own slot field for Limited jutsus.
-
 const baseJutsus = [
-  { name: 'Fireball',           nature: 'Fire',     rank: ['C'],          types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], bloodline: 'Sharingan' },
+  { name: 'Fireball',           nature: 'Fire',     rank: ['C'],         types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], bloodline: 'Sharingan' },
   { name: 'Chidori',             nature: 'Lightning', rank: ['B', 'A'],   types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], locked: true, multiRank: true },
   { name: 'Water Dragon',        nature: 'Water',     rank: ['B'],        types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'] },
   { name: 'Earth Wall',          nature: 'Earth',     rank: ['B'],        types: ['Continuous'], origin: 'Canon',  spec: ['Ninjutsu'] },
@@ -185,7 +176,6 @@ const baseBloodlines = [
   { name: 'Storm Release',   category: 'Custom', subcategory: 'KKG',     link: '#' },
 ];
 
-// Multiplies seed data so the demo has enough items to make filtering visible.
 const multiplyData = (arr, prefix, times) => {
   const out = [];
   for (let i = 0; i < times; i++) {
@@ -205,14 +195,14 @@ const STATIC_SEED = {
 };
 
 /* ---------------------------------------------------------------------------
-   FORM SCHEMA — describes fields rendered by the AdminFormModal
+   FORM SCHEMA
    --------------------------------------------------------------------------- */
 const MANAGE_TABLES = {
   jutsus: {
     label: 'Jutsus',
     fields: [
-      { k: 'name',        l: 'Jutsu Name',                  req: true, col: 1 },
-      { k: 'link',        l: 'Doc Link',                              col: 1 },
+      { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
+      { k: 'link',        l: 'Doc Link',                               col: 1 },
       { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
       { k: 'types',       l: 'Jutsu Types',     t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
@@ -238,12 +228,8 @@ const MANAGE_TABLES = {
   },
 };
 
-/* ---------------------------------------------------------------------------
-   DATA NORMALIZATION + LOAD
-   --------------------------------------------------------------------------- */
 const normalizeDB = (d) => ({
   jutsus: (d.jutsus || []).map((j, i) => {
-    // If a stored cost matches what we'd auto-generate from rank, drop it so the UI keeps showing the auto value.
     const rArr = toArray(j.rank);
     let cost = j.cost || '';
     if (cost) {
@@ -291,8 +277,6 @@ const normalizeDB = (d) => ({
   specializations: Array.isArray(d.specializations) ? d.specializations : STATIC_SEED.specializations,
 });
 
-// Async loader: Supabase first (when configured), falling back to localStorage
-// cache, falling back to seed data. The same shape comes out either way.
 const loadDB = async () => {
   if (isSupabaseConfigured()) {
     try {
@@ -314,8 +298,6 @@ const loadDB = async () => {
 
 /* ============================================================================
    COMPONENT: BloodlineDropdown
-   Picker with internal Category/Subcategory chip filters and a search box.
-   Used both as a multi-select filter and as a single-select admin form input.
    ============================================================================ */
 function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen, onToggle, isMulti = true }) {
   const [fCat, setFCat] = useState('All');
@@ -363,7 +345,6 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
 
       {isOpen && (
         <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-96 flex flex-col absolute z-40 top-full">
-          {/* Category / subcategory / search filters */}
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-3 shrink-0">
             <div className="flex flex-wrap gap-1.5">
               {['All', ...BL_CATS].map(c => (
@@ -394,7 +375,6 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
             )}
           </div>
 
-          {/* Result list */}
           <div className="overflow-y-auto p-2 flex flex-col gap-1 flex-1 custom-scrollbar">
             {filtered.length === 0 ? (
               <div className="p-4 text-center text-sm text-slate-400 font-medium">No matches found</div>
@@ -418,7 +398,6 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
             })}
           </div>
 
-          {/* Footer: clear */}
           {isMulti && sel.length > 0 && (
             <div className="border-t border-slate-100 p-2 shrink-0 bg-slate-50">
               <button type="button" onClick={() => onChange([])}
@@ -443,7 +422,6 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
 
 /* ============================================================================
    COMPONENT: GenericDropdown
-   Searchable multi-select dropdown for the Specialization filter.
    ============================================================================ */
 function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle }) {
   const [str, setStr] = useState('');
@@ -500,7 +478,7 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
 }
 
 /* ============================================================================
-   COMPONENT: SlotsEditor — admin-form sub-component for editing player slots
+   COMPONENT: SlotsEditor
    ============================================================================ */
 function SlotsEditor({ value, onChange, defCount = 1 }) {
   const parsed = (() => { try { return JSON.parse(value || '[]'); } catch { return []; } })();
@@ -542,6 +520,7 @@ function SlotsEditor({ value, onChange, defCount = 1 }) {
 
 /* ============================================================================
    COMPONENT: JutsuCard
+   UPDATED: Clean layout, proper rounded corners, inset rank/cost box.
    ============================================================================ */
 function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
@@ -611,7 +590,8 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
 
   /* ---- Expanded card ---- */
   return (
-    <div className={`bg-white rounded-2xl shadow-sm border ${j.locked ? 'border-amber-300 shadow-amber-500/10' : 'border-slate-200'} flex flex-col relative`}>
+    <div className={`bg-white rounded-2xl shadow-sm border ${j.locked ? 'border-amber-300 shadow-amber-500/10' : 'border-slate-200'} flex flex-col relative overflow-hidden transition-all hover:shadow-md h-full`}>
+      {/* Top absolute controls */}
       {viewMode === 'row' && (
         <button onClick={(e) => { e.stopPropagation(); setExpRow(null); }}
                 className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 bg-slate-100 p-1.5 rounded-full z-10">
@@ -625,34 +605,41 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
         </div>
       )}
 
-      <div className="p-4 pb-0 flex-1 flex flex-col">
-        <h2 className="text-xl font-bold leading-tight mb-2 pr-24">{j.name}</h2>
+      {/* Main Content Area */}
+      <div className="p-5 flex-1 flex flex-col">
+        {/* Title */}
+        <h2 className="text-xl font-extrabold text-slate-900 leading-tight mb-3 pr-24 tracking-tight">{j.name}</h2>
 
+        {/* Top Badges (Nature, Origin, Locked) */}
         <div className="flex flex-wrap gap-2 mb-4">
           {topTags.map((t, i) => (
-            <span key={i} className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border flex items-center gap-1 ${t.c}`}>
-              {t.ic && <Icon n={t.ic} size={10}/>} {t.l}
+            <span key={i} className={`px-2 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wide border flex items-center gap-1.5 ${t.c}`}>
+              {t.ic && <Icon n={t.ic} size={11}/>} {t.l}
             </span>
           ))}
         </div>
 
-        {/* Spec / type / custom tags / bloodline / personal tags */}
-        <div className="flex flex-wrap gap-1.5 mb-4 items-center">
+        {/* Specs, Types, Bloodlines, Personal Tags */}
+        <div className="flex flex-wrap gap-1.5 mb-5 items-center">
           {[...toArray(j.spec), ...tArr, ...cTags].map((s, i) => (
-            <span key={i} className="text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded border border-slate-200">{s}</span>
+            <span key={i} className="text-xs font-semibold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
+              {s}
+            </span>
           ))}
           {j.bloodline && (
-            <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2 py-1 rounded border border-purple-200 flex items-center gap-1">
+            <span className="text-xs font-bold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-md border border-purple-200 flex items-center gap-1.5 shadow-sm">
               <Icon n="Tag" size={12}/> {j.bloodline}
             </span>
           )}
           {myTags.map(t => (
-            <span key={t} className="group text-xs font-bold text-indigo-700 bg-indigo-50 px-2 py-1 rounded border border-indigo-200 flex items-center gap-1">
+            <span key={t} className="group text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200 flex items-center gap-1.5 shadow-sm">
               {t}
               <button onClick={() => setPersonalTagsForJutsu(j._id, myTags.filter(x => x !== t))}
-                      className="opacity-50 hover:text-red-600 hover:opacity-100">×</button>
+                      className="opacity-40 hover:text-red-600 hover:opacity-100 transition-opacity">×</button>
             </span>
           ))}
+          
+          {/* Tag Add Button */}
           {tagging ? (
             <form onSubmit={(e) => {
               e.preventDefault();
@@ -663,84 +650,97 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
               <input autoFocus value={tagInput} onChange={e => setTagInput(e.target.value)}
                      onBlur={() => { setTagging(false); setTagInput(''); }}
                      onKeyDown={e => { if (e.key === 'Escape') { setTagging(false); setTagInput(''); } }}
-                     className="text-xs px-2 py-0.5 border border-indigo-300 rounded outline-none w-20 bg-white"
+                     className="text-xs px-2 py-0.5 border-2 border-indigo-300 rounded-md outline-none w-24 bg-white shadow-sm"
                      placeholder="Type & Enter" />
             </form>
           ) : (
             <button onClick={(e) => { e.stopPropagation(); setTagging(true); }}
-                    className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2 py-1 rounded flex items-center gap-1">
+                    className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2.5 py-1 rounded-md flex items-center gap-1 transition-colors">
               <Icon n="Plus" size={11}/> Tag
             </button>
           )}
         </div>
 
-        {/* Rank / Cost row */}
-        <div className="bg-slate-50 border-t border-slate-100 px-4 py-3 flex items-center justify-between -mx-4 mt-auto">
-          <div className="flex items-center gap-4">
-            <div>
-              <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">Rank</div>
-              {isBm && j.bm_tier ? (
-                <div className="text-sm font-black text-slate-700">{`${j.bm_tier} (${rArr[0] || '-'})`}</div>
-              ) : (
-                <div className="flex items-center gap-1">
-                  {rArr.length > 0
-                    ? rArr.map((r, i) => <span key={i} className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md text-xs font-black">{r}</span>)
-                    : <span className="text-sm font-black text-slate-700">-</span>}
-                </div>
-              )}
-            </div>
-            {!isBm && (
-              <>
-                <div className="h-6 w-px bg-slate-200"/>
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase mb-1">Cost</span>
-                  <div className="flex items-center gap-1 flex-wrap">
+        {/* Pushes footer to the bottom */}
+        <div className="mt-auto flex flex-col gap-4">
+          
+          {/* INSET BOX: Rank / Cost */}
+          <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-4">
+            
+            <div className="flex items-center gap-5 flex-wrap">
+              {/* Rank Block */}
+              <div>
+                <div className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5">Rank</div>
+                {isBm && j.bm_tier ? (
+                  <div className="text-[13px] font-black text-slate-700">{`${j.bm_tier} (${rArr[0] || '-'})`}</div>
+                ) : (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {rArr.length > 0
+                      ? rArr.map((r, i) => <span key={i} className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md text-xs font-black border border-slate-300 shadow-sm">{r}</span>)
+                      : <span className="text-sm font-black text-slate-700">-</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Separator */}
+              {!isBm && <div className="hidden sm:block w-px h-8 bg-slate-200 rounded-full" />}
+
+              {/* Cost Block */}
+              {!isBm && (
+                <div>
+                  <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest mb-1.5 block">Cost</span>
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     {j.cost ? (
-                      <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black">{j.cost}</span>
+                      <span className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black shadow-sm">{j.cost}</span>
                     ) : rArr.length > 0 ? (
                       rArr.map((r, i) => (
-                        <span key={i} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black">
+                        <span key={i} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black shadow-sm">
                           {RANK_COST_MAP[r] || '-'}
                         </span>
                       ))
                     ) : <span className="text-sm font-black text-indigo-600">-</span>}
                   </div>
                 </div>
-              </>
+              )}
+            </div>
+
+            {/* Multi-Rank Badge */}
+            {j.multiRank && !isBm && (
+              <span className="text-[10px] font-extrabold text-indigo-500 border border-indigo-200 bg-white px-2 py-1 rounded-full uppercase tracking-wider shadow-sm ml-auto">Multi-Rank</span>
             )}
           </div>
-          {j.multiRank && !isBm && (
-            <span className="text-[10px] font-bold text-indigo-500 border border-indigo-200 bg-indigo-50 px-2 py-1 rounded-full uppercase shrink-0">Multi-Rank</span>
-          )}
-        </div>
-      </div>
 
-      {/* Footer actions */}
-      <div className="p-4 pt-0 bg-slate-50 border-t border-slate-100 flex gap-2 pt-3">
-        {j.link && j.link !== '#' ? (
-          <a href={j.link} target="_blank" rel="noopener noreferrer"
-             className="flex-1 bg-white border border-slate-200 text-indigo-700 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2">
-            <Icon n="ExtLink" size={16}/> Doc
-          </a>
-        ) : (
-          <span className="flex-1 bg-slate-100 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm">No Doc</span>
-        )}
-        {j.limited && (
-          <button onClick={(e) => { e.stopPropagation(); onViewSlots && onViewSlots(j); }}
-                  className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 flex items-center justify-center min-w-[50px]"
-                  title="View slot holders">
-            <Icon n="Eye" size={18}/>
-          </button>
-        )}
-        <button onClick={(e) => { e.stopPropagation(); handleCopy(j); }}
-                className={`p-2.5 rounded-xl border flex items-center justify-center min-w-[50px] ${
-                  copiedId === j._id ? 'bg-emerald-500 border-emerald-500 text-white'
-                  : inList ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
-                  : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-                title={inList ? 'In Session List' : 'Add to Session List'}>
-          {copiedId === j._id ? <Icon n="Check" size={18}/> : inList ? <Icon n="CheckCir" size={18}/> : <Icon n="Copy" size={18}/>}
-        </button>
+          {/* Action Buttons (Footer) */}
+          <div className="flex gap-2">
+            {j.link && j.link !== '#' ? (
+              <a href={j.link} target="_blank" rel="noopener noreferrer"
+                 className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
+                <Icon n="ExtLink" size={16}/> Doc
+              </a>
+            ) : (
+              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Doc</span>
+            )}
+            
+            {j.limited && (
+              <button onClick={(e) => { e.stopPropagation(); onViewSlots && onViewSlots(j); }}
+                      className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 flex items-center justify-center min-w-[50px] transition-colors shadow-sm"
+                      title="View slot holders">
+                <Icon n="Eye" size={18}/>
+              </button>
+            )}
+            
+            <button onClick={(e) => { e.stopPropagation(); handleCopy(j); }}
+                    className={`p-2.5 rounded-xl border flex items-center justify-center min-w-[50px] transition-colors shadow-sm ${
+                      copiedId === j._id ? 'bg-emerald-500 border-emerald-500 text-white'
+                      : inList ? 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100'
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
+                    }`}
+                    title={inList ? 'In Session List' : 'Add to Session List'}>
+              {copiedId === j._id ? <Icon n="Check" size={18}/> : inList ? <Icon n="CheckCir" size={18}/> : <Icon n="Copy" size={18}/>}
+            </button>
+          </div>
+          
+        </div>
       </div>
     </div>
   );
@@ -748,24 +748,19 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
 
 /* ============================================================================
    SESSION LIST FORMATTING
-   Groups jutsus by Battlemode > Bloodline > Nature > Other, sorts each group
-   with multi-rank entries on top then by lowest rank ascending, and outputs
-   Discord-friendly markdown with [name](link) hyperlinks where available.
    ============================================================================ */
 const RANK_ORDER_NUM = { E: 1, D: 2, C: 3, B: 4, A: 5, S: 6 };
 
 const groupForJutsu = (j) => {
   if (toArray(j.types).includes('Battlemode')) return { type: 'battlemode', name: 'Battlemode' };
-  if (j.bloodline)                              return { type: 'bloodline',  name: j.bloodline };
+  if (j.bloodline)                               return { type: 'bloodline',  name: j.bloodline };
   const firstNature = toArray(j.nature)[0];
   if (firstNature && firstNature !== 'N/A')     return { type: 'nature',     name: firstNature };
   return { type: 'other', name: 'Other' };
 };
 
 const compareForList = (a, b) => {
-  // Multi-rank always first
   if (!!a.multiRank !== !!b.multiRank) return a.multiRank ? -1 : 1;
-  // Then by lowest rank ascending (E first, S last)
   const lowestRank = (j) => {
     const rArr = toArray(j.rank);
     return rArr.length ? Math.min(...rArr.map(r => RANK_ORDER_NUM[r] || 99)) : 99;
@@ -777,7 +772,6 @@ const compareForList = (a, b) => {
 const formatSessionList = (items) => {
   if (!items.length) return '';
 
-  // Bucket by group key
   const groups = new Map();
   for (const j of items) {
     const g = groupForJutsu(j);
@@ -786,7 +780,6 @@ const formatSessionList = (items) => {
   }
   for (const grp of groups.values()) grp.items.sort(compareForList);
 
-  // Header order: standard natures (canonical order) → other natures → bloodlines (a-z) → Other → Battlemode
   const ordered = [];
   NATURES.forEach(n => {
     if (groups.has(n) && groups.get(n).type === 'nature') ordered.push(n);
@@ -802,7 +795,6 @@ const formatSessionList = (items) => {
   if (groups.has('Other'))      ordered.push('Other');
   if (groups.has('Battlemode')) ordered.push('Battlemode');
 
-  // Build the text
   const out = ['**My NARP List**'];
   ordered.forEach(name => {
     const grp = groups.get(name);
@@ -836,7 +828,7 @@ const formatSessionList = (items) => {
 };
 
 /* ============================================================================
-   COMPONENT: SessionListCart — floating dock at bottom of screen
+   COMPONENT: SessionListCart
    ============================================================================ */
 function SessionListCart({ list, onClear, onRemove }) {
   const [copied, setCopied]     = useState(false);
@@ -898,17 +890,12 @@ function SessionListCart({ list, onClear, onRemove }) {
 
 /* ============================================================================
    COMPONENT: FilterBar
-   Combines Show-Only + Hide-Exclude filter sections.
    ============================================================================ */
-
-// Pairs of (show-only filter key, hide-exclude filter key) — selecting one
-// auto-deselects its mate so contradictory filters can never both be active.
 const TOGGLE_PAIRS = [
   { showKey: 'lck', hideKey: 'hLck', label: 'Locked'     },
   { showKey: 'lim', hideKey: 'hLim', label: 'Limited'    },
   { showKey: 'mul', hideKey: 'hMul', label: 'Multi-Rank' },
 ];
-// Hide-only filters (no matching "show only" twin)
 const HIDE_ONLY = [
   { hideKey: 'hMP',  label: 'Multi-Post' },
   { hideKey: 'hAsk', label: 'Ask Staff'  },
@@ -950,7 +937,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 
   return (
     <>
-      {/* Top dark bar — search, sort, filter toggle, admin add */}
       <div className="bg-slate-900 text-white p-4 shadow-md z-30 shrink-0">
         <div className="max-w-6xl mx-auto flex flex-col gap-3">
           <div className="flex gap-2">
@@ -999,35 +985,27 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
             )}
           </div>
 
-          {/* Active filter chips bar */}
           {activeFilterCount > 0 && (
             <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
               <span className="text-xs font-bold text-slate-400 mr-1 shrink-0 uppercase tracking-widest">Active:</span>
-
-              {/* Multi-select array filters */}
               {['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'].map(k =>
                 f[k].map(v => <ActiveChip key={`${k}-${v}`} label={v} onRemove={() => toggleArr(k, v)} />)
               )}
-
-              {/* Boolean show/hide toggles */}
               {TOGGLE_PAIRS.map(p => f[p.showKey] && (
                 <ActiveChip key={p.showKey} label={`${p.label} Only`} onRemove={() => setF(s => ({ ...s, [p.showKey]: false }))} />
               ))}
               {[...TOGGLE_PAIRS, ...HIDE_ONLY].map(p => f[p.hideKey] && (
                 <ActiveChip key={p.hideKey} label={`Hide: ${p.label}`} onRemove={() => setF(s => ({ ...s, [p.hideKey]: false }))} />
               ))}
-
               <button onClick={clearF} className="text-xs font-semibold text-slate-400 hover:text-white underline ml-2">Clear All</button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Expanded filter panel — only relevant for the jutsus tab */}
       {f.showFilters && tab === 'jutsus' && (
         <div className="bg-slate-50 border-b border-slate-200 p-6 md:p-8 relative z-20 shadow-inner">
           <div className="max-w-6xl mx-auto space-y-10">
-              {/* Section: Basic Properties — full-width rows let chips flow horizontally */}
               <div>
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Basic Properties</h3>
                 <div className="space-y-6">
@@ -1045,7 +1023,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                 </div>
               </div>
 
-              {/* Section: Detailed Tags */}
               <div>
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Detailed Tags</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl">
@@ -1062,11 +1039,9 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                 </div>
               </div>
 
-              {/* Section: Conditions & Exclusions (the merged feature) */}
               <div>
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Conditions &amp; Exclusions</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  {/* Show only */}
                   <div>
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Show Only</label>
                     <div className="flex flex-wrap gap-4">
@@ -1079,7 +1054,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                                  onChange={e => setF(prev => ({
                                    ...prev,
                                    [p.showKey]: e.target.checked,
-                                   // Turning a "show only" on disables its matching "hide" filter.
                                    ...(e.target.checked ? { [p.hideKey]: false } : {}),
                                  }))} />
                           {p.label}
@@ -1088,7 +1062,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     </div>
                   </div>
 
-                  {/* Hide / exclude */}
                   <div>
                     <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Hide (Exclude)</label>
                     <div className="flex flex-wrap gap-4">
@@ -1101,7 +1074,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                                  onChange={e => setF(prev => ({
                                    ...prev,
                                    [p.hideKey]: e.target.checked,
-                                   // Turning a "hide" on disables its matching "show only" filter.
                                    ...(e.target.checked && p.showKey ? { [p.showKey]: false } : {}),
                                  }))} />
                           {p.label}
@@ -1119,8 +1091,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 }
 
 /* ============================================================================
-   MODAL: SlotsViewModal — read-only list of who holds a Limited jutsu's slots,
-   with each character name linking out to their character thread.
+   MODAL: SlotsViewModal
    ============================================================================ */
 function SlotsViewModal({ jutsu, onClose }) {
   const { parsed, total } = getSlotStatus(jutsu.slots);
@@ -1191,7 +1162,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // Hydrate the form whenever the row to edit changes.
   useEffect(() => {
     const next = {};
     MANAGE_TABLES[tab].fields.forEach(field => {
@@ -1205,7 +1175,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
       }
     });
 
-    // Sync derived fields
     if (tab === 'jutsus') {
       const conds = [];
       if (eRow.locked)  conds.push('Locked');
@@ -1217,7 +1186,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
     setFd(next);
   }, [eRow, tab]);
 
-  // Bloodlines sorted alphabetically for the picker (admin form is always A-Z).
   const sortedBloodlinesForForm = useMemo(
     () => [...(db.bloodlines || [])].sort((a, b) => a.name.localeCompare(b.name)),
     [db.bloodlines]
@@ -1377,7 +1345,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
               </div>
             ))}
 
-            {/* Cost row, jutsus only and not Battlemode */}
             {tab === 'jutsus' && !toArray(fd.types).includes('Battlemode') && (
               <div className="md:col-span-2 pt-4 border-t">
                 <label className="text-xs font-bold text-slate-500 uppercase block mb-2.5">
@@ -1436,7 +1403,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
 }
 
 /* ============================================================================
-   MODAL: AuditLogModal — read-only role change history
+   MODAL: AuditLogModal
    ============================================================================ */
 function AuditLogModal({ onClose }) {
   const [entries, setEntries] = useState([]);
@@ -1507,7 +1474,7 @@ function AuditLogModal({ onClose }) {
 }
 
 /* ============================================================================
-   MODAL: SystemToolsModal — sync, export, manage specializations, audit log
+   MODAL: SystemToolsModal
    ============================================================================ */
 function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner }) {
   const [msg, setMsg]         = useState('');
@@ -1679,7 +1646,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
 }
 
 /* ============================================================================
-   COMPONENT: UserMenu — sign-in button when signed out, avatar+dropdown when in
+   COMPONENT: UserMenu
    ============================================================================ */
 function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseReady, devRole, onToggleDevRole }) {
   const [open, setOpen] = useState(false);
@@ -1708,7 +1675,6 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
     role: devRole,
   };
 
-  // Signed out (only possible if supabase is ready and profile is null)
   if (supabaseReady && !activeProfile) {
     return (
       <button onClick={onSignIn}
@@ -1788,8 +1754,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
 }
 
 /* ============================================================================
-   MODAL: UserManagementModal — admin+ access; Owner sees more than Admin
-   Two tabs: People (existing profiles) and Whitelist (pre-approved emails).
+   MODAL: UserManagementModal
    ============================================================================ */
 function UserManagementModal({ currentUserId, isOwner, onClose }) {
   const [activeTab, setActiveTab] = useState('people'); // 'people' | 'whitelist'
@@ -1820,8 +1785,6 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // What an Admin (not Owner) is allowed to see/touch.
-  // Owner sees everything. Admin sees only User / Staff entries.
   const visibleProfiles = isOwner
     ? profiles
     : profiles.filter(p => p.role === 'user' || p.role === 'staff' || p.id === currentUserId);
@@ -1866,14 +1829,12 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
     }
   };
 
-  // Allowed role options for a given target profile, based on the actor's tier.
   const allowedRolesFor = (target) => {
-    if (target.id === currentUserId) return null;          // can't change own role
-    if (target.role === 'owner')     return null;          // owner only modifiable via SQL
+    if (target.id === currentUserId) return null;
+    if (target.role === 'owner')     return null;
     if (isOwner)                      return ['user', 'staff', 'admin'];
-    // Admin: can only flip user↔staff
     if (target.role === 'user' || target.role === 'staff') return ['user', 'staff'];
-    return null;                                           // admin can't touch admins
+    return null;
   };
 
   return (
@@ -1887,7 +1848,6 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
           <button onClick={onClose}><Icon n="X" size={18} /></button>
         </div>
 
-        {/* Sub-tabs */}
         <div className="border-b border-slate-200 px-6 pt-3 shrink-0 flex gap-1">
           {['people', 'whitelist'].map(t => (
             <button key={t} onClick={() => setActiveTab(t)}
@@ -1902,7 +1862,6 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
             <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold">{error}</div>
           )}
 
-          {/* ---- PEOPLE TAB ---- */}
           {activeTab === 'people' && (
             <>
               <p className="text-sm text-slate-600 mb-6">
@@ -1961,7 +1920,6 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
             </>
           )}
 
-          {/* ---- WHITELIST TAB ---- */}
           {activeTab === 'whitelist' && (
             <>
               <p className="text-sm text-slate-600 mb-4">
@@ -2022,7 +1980,7 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
 }
 
 /* ============================================================================
-   COMPONENT: PendingJutsuCard — used inside the Pending tab
+   COMPONENT: PendingJutsuCard
    ============================================================================ */
 function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel }) {
   const isMine     = pending.submitted_by === currentUserId;
@@ -2036,7 +1994,6 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
     delete: 'bg-rose-100   text-rose-800   border-rose-300',
   };
 
-  // Pull display-friendly fields from data (for insert/update) or originalJutsu (for delete)
   const display = op === 'delete' ? (originalJutsu || {}) : (pending.data || {});
   const name = display.name || originalJutsu?.name || '(no name)';
 
@@ -2057,7 +2014,6 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
         </div>
       </div>
 
-      {/* Brief preview of the data */}
       {op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
           {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
@@ -2099,11 +2055,9 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 }
 
 /* ============================================================================
-   MODAL: CatalogManagementModal — generic list-management for bloodlines /
-   limited specs. Admin+ only. Uses AdminFormModal for the actual editing.
+   MODAL: CatalogManagementModal
    ============================================================================ */
 function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete }) {
-  // `which` is 'bloodlines'. (Was 'bloodlines' | 'limitedSpecs' before v4.)
   const cfg = {
     bloodlines: {
       title:    'Manage Bloodlines',
@@ -2114,7 +2068,6 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
     },
   }[which];
 
-  // Group by category for readability.
   const grouped = useMemo(() => {
     const out = {};
     cfg.list.forEach(item => {
@@ -2204,13 +2157,9 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
    ============================================================================ */
 const INITIAL_FILTER_STATE = {
   q: '',
-  // multi-select arrays
   nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [],
-  // show-only booleans
   lck: false, lim: false, mul: false,
-  // hide-exclude booleans
   hLck: false, hLim: false, hMul: false, hMP: false, hAsk: false,
-  // ui state
   showFilters: false,
   sort: 'az',
 };
@@ -2219,15 +2168,9 @@ const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'];
 const BOOL_FILTER_KEYS  = ['lck', 'lim', 'mul', 'hLck', 'hLim', 'hMul', 'hMP', 'hAsk'];
 
 export default function App() {
-  /* --- Database --- */
   const [db, setDb]           = useState({ jutsus: [], bloodlines: [], specializations: [] });
   const [loading, setLoading] = useState(true);
 
-  /* --- Auth (mock) --- */
-  /* --- Auth ---
-     When Supabase is configured: real Google auth, role from profiles table.
-     When it isn't: keep the legacy role toggle so the UI stays testable.
-     Roles: 'user' (signed in, no powers) | 'staff' | 'admin' | 'owner'. */
   const [profile, setProfile] = useState(null);
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
   const supabaseReady = isSupabaseConfigured();
@@ -2236,22 +2179,16 @@ export default function App() {
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
-  // For convenience in dev-mode toggle (no real staff role).
-  // In dev mode without Supabase, isStaff === isAdmin === isOwner when toggled.
 
-  /* --- Pending submissions & whitelist (only loaded for staff+) --- */
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
 
-
-  /* --- UI state --- */
   const [tab, setTab]           = useState('jutsus');
   const [viewMode, setViewMode] = useState(() => LS.get(STORAGE.VIEW_MODE, 'card'));
   const [expRow, setExpRow]     = useState(null);
   const [cart, setCart]         = useState([]);
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
 
-  /* --- Filters --- */
   const [f, setF] = useState(INITIAL_FILTER_STATE);
   const clearF = useCallback(() => setF(p => {
     const next = { ...p };
@@ -2261,13 +2198,11 @@ export default function App() {
     return next;
   }), []);
 
-  /* --- Modals --- */
   const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, userMgmt: false, audit: false, manageBL: false });
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
 
-  /* --- Persistence side effects --- */
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
   useEffect(() => {
@@ -2277,9 +2212,6 @@ export default function App() {
   }, []);
   useEffect(() => { if (!loading) LS.set(STORAGE.CACHE, { ...db, ts: Date.now() }); }, [db, loading]);
 
-  /* --- Auth lifecycle ---
-     1) Try to load existing session and profile on mount.
-     2) Subscribe to auth events so SIGNED_IN / SIGNED_OUT triggers a refresh. */
   useEffect(() => {
     if (!supabaseReady) return;
     let cancelled = false;
@@ -2305,7 +2237,6 @@ export default function App() {
   const handleSignIn  = async () => { try { await signInWithGoogle(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
   const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
-  /* --- Pending submissions: load when user is staff+, clear otherwise --- */
   const refreshPending = useCallback(async () => {
     if (!supabaseReady || !isStaff) { setPendingJutsus([]); setPendingLoaded(false); return; }
     try {
@@ -2319,7 +2250,6 @@ export default function App() {
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
-  /* --- Manual catalog refresh (Sync Data button — admin only) --- */
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
     setRefreshing(true);
@@ -2334,17 +2264,11 @@ export default function App() {
     }
   }, [refreshPending]);
 
-  /* --- The single chokepoint for jutsu/bloodline/spec changes ---
-     Decides between direct write (admin+) and pending submission (staff)
-     based on tab + current role. Returns true if applied directly, false
-     if it went to the pending queue. */
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity }) => {
     const isJutsus = t === 'jutsus';
 
-    // Staff is restricted to jutsus only and must go through pending.
     if (!isAdmin && isStaff && isJutsus) {
       if (!supabaseReady) {
-        // Dev mode fallback: just apply directly with no backend.
         applyChangeLocally(t, operation, targetId, entity);
         return true;
       }
@@ -2354,7 +2278,6 @@ export default function App() {
       return false;
     }
 
-    // Admin+ (or dev-mode admin) writes directly.
     if (isAdmin) {
       applyChangeLocally(t, operation, targetId, entity);
       if (supabaseReady) {
@@ -2375,10 +2298,8 @@ export default function App() {
     }
 
     throw new Error('Permission denied');
-  }, [isAdmin, isStaff, supabaseReady, refreshPending]); // applyChangeLocally is a stable closure defined below
+  }, [isAdmin, isStaff, supabaseReady, refreshPending]); 
 
-  // Mutates local state immediately (optimistic) — Supabase syncs happen
-  // alongside this in submitChange.
   const applyChangeLocally = (t, operation, targetId, entity) => {
     setDb(d => {
       const list = d[t] || [];
@@ -2390,12 +2311,11 @@ export default function App() {
     });
   };
 
-  /* --- Pending actions --- */
   const handleApprovePending = async (id) => {
     try {
       await approvePendingJutsu(id);
       await refreshPending();
-      await refreshDB();   // approving a pending changes the main catalog
+      await refreshDB();
     } catch (e) {
       alert('Approve failed: ' + e.message);
     }
@@ -2410,9 +2330,6 @@ export default function App() {
     }
   };
 
-
-
-  /* --- Personal tags --- */
   const setPersonalTagsForJutsu = useCallback((jid, list) => {
     setPTags(prev => {
       const next = { ...prev };
@@ -2423,7 +2340,6 @@ export default function App() {
     });
   }, []);
 
-  /* --- Copy to session list --- */
   const handleCopy = (j) => {
     copyText(j.link, () => {
       setModals(m => ({ ...m, copiedId: j._id }));
@@ -2432,7 +2348,6 @@ export default function App() {
     setCart(prev => prev.some(i => i._id === j._id) ? prev : [...prev, j]);
   };
 
-  /* --- Filter count for badge --- */
   const fCount = useMemo(() => {
     let n = 0;
     ARRAY_FILTER_KEYS.forEach(k => n += f[k].length);
@@ -2440,12 +2355,11 @@ export default function App() {
     return n;
   }, [f]);
 
-  /* --- Sorting helpers --- */
   const sortByCommon = useCallback((a, b) => {
     if (f.sort === 'az')      return a.name.localeCompare(b.name);
     if (f.sort === 'za')      return b.name.localeCompare(a.name);
     if (f.sort === 'oldest')  return getSortKey(a) - getSortKey(b);
-    return getSortKey(b) - getSortKey(a); // newest
+    return getSortKey(b) - getSortKey(a); 
   }, [f.sort]);
 
   const sortByJutsu = useCallback((a, b) => {
@@ -2454,10 +2368,6 @@ export default function App() {
     return sortByCommon(a, b);
   }, [f.sort, sortByCommon]);
 
-  /* --- Picker-dropdown ordering ---
-     The Bloodline and Specialization filter pickers respect the active sort
-     setting where it makes sense (A-Z, Z-A, Newest, Oldest), and fall back
-     to alphabetical for everything else (e.g. Rank-based sorts). */
   const sortedBloodlines = useMemo(() => {
     return [...(db.bloodlines || [])].sort((a, b) => {
       if (f.sort === 'za')     return b.name.localeCompare(a.name);
@@ -2470,21 +2380,17 @@ export default function App() {
   const sortedSpecs = useMemo(() => {
     const specs = db.specializations || [];
     if (f.sort === 'za')     return [...specs].sort((a, b) => b.localeCompare(a));
-    // Specs are plain strings — array index serves as insertion order.
     if (f.sort === 'oldest') return [...specs];
     if (f.sort === 'newest') return [...specs].reverse();
     return [...specs].sort((a, b) => a.localeCompare(b));
   }, [db.specializations, f.sort]);
 
-  /* --- Filtered & sorted lists --- */
   const filtJ = useMemo(() => {
     const lowerQ = f.q.toLowerCase();
     return (db.jutsus || []).filter(j =>
-      // text search (matches name, custom tags, or bloodline)
       (!f.q || j.name.toLowerCase().includes(lowerQ)
             || toArray(j.custom_tags).some(t => t.toLowerCase().includes(lowerQ))
             || (j.bloodline || '').toLowerCase().includes(lowerQ)) &&
-      // array include filters
       (!f.nat.length || f.nat.includes(j.nature)) &&
       (!f.org.length || f.org.includes(j.origin)) &&
       (!f.spc.length || f.spc.some(s => toArray(j.spec).includes(s))) &&
@@ -2492,16 +2398,13 @@ export default function App() {
       (!f.rnk.length || f.rnk.some(r => toArray(j.rank).includes(r))) &&
       (!f.bm.length  || f.bm.includes(j.bm_tier)) &&
       (!f.bl.length  || f.bl.includes(j.bloodline)) &&
-      // show-only filters
       (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.mul || j.multiRank) &&
-      // hide/exclude filters
       (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hMul || !j.multiRank) &&
       (!f.hMP  || !toArray(j.types).includes('Multi-Post')) &&
       (!f.hAsk || !getSlotStatus(j.slots).showAskStaff)
     ).sort(sortByJutsu);
   }, [db.jutsus, f, sortByJutsu]);
 
-  /* --- Loading --- */
   if (loading) {
     return (
       <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
@@ -2532,8 +2435,8 @@ export default function App() {
           <Icon n="Book" size={18} className="text-indigo-400" />
           <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
         </h1>
-        <div className="flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-end">
-          <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide pb-1 sm:pb-0">
+        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
+          <div className="flex items-center gap-2">
             {isAdmin && (
               <button onClick={() => setModals(m => ({ ...m, system: true }))}
                       className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
@@ -2570,7 +2473,7 @@ export default function App() {
         isAdmin={tab === 'jutsus' ? isStaff : isAdmin}
         onAdd={() => setAdminForm({ r: {} })} />
 
-      {/* TAB BAR — only shown to staff+ since regular users have just the jutsus tab */}
+      {/* TAB BAR */}
       {isStaff && (
         <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky top-[138px] sm:top-[72px] z-10">
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
@@ -2588,7 +2491,7 @@ export default function App() {
       {/* MAIN CONTENT */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20">
         {tab === 'jutsus' && (
-          <div className="max-w-6xl mx-auto">
+          <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
               <div className="text-center py-16">
                 <Icon n="Alert" size={40} className="text-slate-300 mx-auto mb-3" />
@@ -2598,7 +2501,7 @@ export default function App() {
             ) : (
               <>
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{filtJ.length} Results</div>
-                <div className={viewMode === 'card' ? 'grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-start' : 'flex flex-col gap-2'}>
+                <div className={viewMode === 'card' ? 'grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch' : 'flex flex-col gap-2'}>
                   {filtJ.slice(0, 200).map(j => (
                     <JutsuCard key={j._id} j={j}
                                viewMode={viewMode} expRow={expRow} setExpRow={setExpRow}
