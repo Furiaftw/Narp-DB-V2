@@ -2651,7 +2651,7 @@ export default function App() {
               <button onClick={() => setModals(m => ({ ...m, credits: false }))}><Icon n="X" size={18} /></button>
             </div>
             <div className="p-6 space-y-4 text-sm text-slate-700">
-              <p>A jutsu reference guide for our text-based Naruto roleplay Discord server.</p>
+              <p>Conceptualized by A Road Sign; Developed by Hexagon.</p>
               <div className="border-t pt-4">
                 <p className="text-[10px] font-bold uppercase text-slate-400">Credits</p>
                 <p className="font-semibold">Hexagon &amp; A Road Sign</p>
