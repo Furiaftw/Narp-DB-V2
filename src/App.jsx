@@ -2479,7 +2479,7 @@ export default function App() {
         specOptions={sortedSpecs}
         clearF={clearF}
         isAdmin={tab === 'jutsus' ? isStaff : isAdmin}
-        onAdd={() => setAdminForm({ r: {} })} />
+        onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })} />
 
       {/* TAB BAR */}
       {isStaff && (
