@@ -1158,7 +1158,9 @@ function SlotsViewModal({ jutsu, onClose }) {
 /* ============================================================================
    MODAL: AdminFormModal
    ============================================================================ */
-function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
+function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPending }) {
+  const tab = MANAGE_TABLES[rawTab] ? rawTab : 'jutsus';
+  const schema = MANAGE_TABLES[tab] || MANAGE_TABLES['jutsus'];
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -1174,7 +1176,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
   // Hydrate the form whenever the row to edit changes.
   useEffect(() => {
     const next = {};
-    MANAGE_TABLES[tab].fields.forEach(field => {
+    schema.fields.forEach(field => {
       const raw = eRow[field.k];
       if (raw === undefined || raw === null || raw === '') {
         next[field.k] = field.t === 'slots'
@@ -1265,15 +1267,15 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
     }
   };
 
-  const visibleFields = MANAGE_TABLES[tab].fields.filter(field =>
+  const visibleFields = schema.fields.filter(field =>
     !field.hidden &&
     (!field.hideUnlessInc || toArray(fd[field.hideUnlessInc.f]).includes(field.hideUnlessInc.v)) &&
     (!field.hideIfInc     || !toArray(fd[field.hideIfInc.f]).includes(field.hideIfInc.v))
   );
 
   return (
-    {/* FIX: Removed overflow-y-auto from outer wrapper and adjusted padding */}
     <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+      {/* FIX: Removed overflow-y-auto from outer wrapper and adjusted padding */}
       
       {/* FIX: Set max-h-[90vh] and flex-col to bound the card size securely */}
       <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
@@ -1284,7 +1286,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
           <div className="flex justify-between items-center mb-8 border-b pb-4">
             <h3 className="text-xl font-bold flex items-center gap-3">
               <Icon n={eRow._id ? 'Edit' : 'PlusCir'} size={24} className="text-indigo-500" />
-              {eRow._id ? 'Edit Entry' : `Add ${MANAGE_TABLES[tab].label}`}
+              {eRow._id ? 'Edit Entry' : `Add ${schema.label}`}
             </h3>
             <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full">
               <Icon n="X" size={20}/>
@@ -1399,7 +1401,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
           <div className="flex justify-end gap-4 mt-10 pt-6 border-t">
             <button onClick={onClose} className="bg-white border-2 px-8 py-3 rounded-xl font-bold hover:bg-slate-50">Cancel</button>
             <button onClick={handleSave}
-                    disabled={submitting || MANAGE_TABLES[tab].fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
+                    disabled={submitting || schema.fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold flex gap-2 disabled:opacity-50 hover:bg-indigo-700 shadow-md">
               <Icon n="Save" size={18}/> {submitting ? 'Saving...' : (willGoToPending ? 'Submit for Approval' : 'Save')}
             </button>
@@ -2516,7 +2518,7 @@ export default function App() {
                                pTags={pTags} setPersonalTagsForJutsu={setPersonalTagsForJutsu}
                                handleCopy={handleCopy} cart={cart} copiedId={modals.copiedId}
                                isAdmin={isStaff}
-                               onEdit={() => setAdminForm({ r: j })}
+                               onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
                                onViewSlots={(jutsu) => setSlotsView(jutsu)} />
                   ))}
@@ -2575,16 +2577,19 @@ export default function App() {
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
       )}
-      {adminForm     && (
-        <AdminFormModal
-          tab={adminForm.tab || tab}
-          eRow={adminForm.r}
-          onClose={() => setAdminForm(null)}
-          db={db}
-          onSubmit={submitChange}
-          willGoToPending={(adminForm.tab || tab) === 'jutsus' && isStaff && !isAdmin}
-        />
-      )}
+      {adminForm     && (() => {
+        const formTab = adminForm.tab || (MANAGE_TABLES[tab] ? tab : 'jutsus');
+        return (
+          <AdminFormModal
+            tab={formTab}
+            eRow={adminForm.r}
+            onClose={() => setAdminForm(null)}
+            db={db}
+            onSubmit={submitChange}
+            willGoToPending={formTab === 'jutsus' && isStaff && !isAdmin}
+          />
+        );
+      })()}
       {modals.system && (
         <SystemToolsModal
           db={db} setDb={setDb}
