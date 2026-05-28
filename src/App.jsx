@@ -1163,6 +1163,15 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // FIX: Lock the document body scroll so iOS Safari doesn't crash on unmount
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
+
+  // Hydrate the form whenever the row to edit changes.
   useEffect(() => {
     const next = {};
     MANAGE_TABLES[tab].fields.forEach(field => {
@@ -1175,7 +1184,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
         next[field.k] = Array.isArray(raw) ? raw.join(', ') : raw;
       }
     });
-
+    // Sync derived fields
     if (tab === 'jutsus') {
       const conds = [];
       if (eRow.locked)  conds.push('Locked');
@@ -1183,10 +1192,10 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
       if (conds.length) next.conditions = conds.join(', ');
       next._cCost = !!(eRow._id && eRow.cost && !toArray(eRow.types).includes('Battlemode'));
     }
-
     setFd(next);
   }, [eRow, tab]);
 
+  // Bloodlines sorted alphabetically for the picker (admin form is always A-Z).
   const sortedBloodlinesForForm = useMemo(
     () => [...(db.bloodlines || [])].sort((a, b) => a.name.localeCompare(b.name)),
     [db.bloodlines]
@@ -1197,11 +1206,9 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
     const p = { ...fd };
     const isEdit = !!eRow._id;
     let entity = null;
-
     if (tab === 'jutsus') {
       const types = toArray(p.types);
       const isBm  = types.includes('Battlemode');
-
       let rank = [], bmTier = '';
       if (isBm) {
         p.cost = '';
@@ -1213,7 +1220,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
       } else {
         rank = toArray(p.rank);
       }
-
       const conds = toArray(p.conditions);
       entity = {
         _id:         eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `j-${Date.now()}`),
@@ -1245,7 +1251,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
         _createdAt:  eRow._createdAt || new Date().toISOString(),
       };
     }
-
     try {
       await onSubmit({
         tab,
@@ -1267,9 +1272,15 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
   );
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full my-auto animate-in zoom-in-95 duration-200">
-        <div className="p-6 md:p-8">
+    {/* FIX: Removed overflow-y-auto from outer wrapper and adjusted padding */}
+    <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+      
+      {/* FIX: Set max-h-[90vh] and flex-col to bound the card size securely */}
+      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+        
+        {/* FIX: Moved overflow-y-auto down into this content wrapper specifically */}
+        <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">
+          
           <div className="flex justify-between items-center mb-8 border-b pb-4">
             <h3 className="text-xl font-bold flex items-center gap-3">
               <Icon n={eRow._id ? 'Edit' : 'PlusCir'} size={24} className="text-indigo-500" />
@@ -1294,7 +1305,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
             {visibleFields.map(field => (
               <div key={field.k} className={field.col === 2 || field.t === 'slots' ? 'md:col-span-2' : ''}>
                 <label className="block text-xs font-bold text-slate-500 uppercase mb-2.5">{field.l}</label>
-
                 {field.t === 'chip' ? (
                   <div className="flex flex-wrap gap-2.5">
                     {field.opts.map(o => {
@@ -1314,7 +1324,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
                       );
                     })}
                   </div>
-
                 ) : field.t === 'spec-dd' ? (
                   <GenericDropdown
                     l="" placeholder="Select Specializations"
@@ -1323,7 +1332,6 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
                     onChange={v => setFd({ ...fd, [field.k]: v.join(', ') })}
                     isOpen={ddOpen === field.k}
                     onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
-
                 ) : field.t === 'bl-select' ? (
                   <BloodlineDropdown
                     l="" placeholder="Select Bloodline"
@@ -1333,10 +1341,8 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
                     isMulti={false}
                     isOpen={ddOpen === field.k}
                     onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
-
                 ) : field.t === 'slots' ? (
                   <SlotsEditor value={fd[field.k] || ''} onChange={v => setFd({ ...fd, [field.k]: v })} defCount={field.defCount} />
-
                 ) : (
                   <input type="text" value={fd[field.k] || ''}
                          onChange={(e) => setFd({ ...fd, [field.k]: e.target.value })}
@@ -1346,6 +1352,7 @@ function AdminFormModal({ tab, eRow, onClose, db, onSubmit, willGoToPending }) {
               </div>
             ))}
 
+            {/* Cost row, jutsus only and not Battlemode */}
             {tab === 'jutsus' && !toArray(fd.types).includes('Battlemode') && (
               <div className="md:col-span-2 pt-4 border-t">
                 <label className="text-xs font-bold text-slate-500 uppercase block mb-2.5">
