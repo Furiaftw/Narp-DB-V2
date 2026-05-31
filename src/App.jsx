@@ -7,11 +7,12 @@ import {
   upsertBloodline,
   deleteBloodline,
   setSpecializations as saveSpecializationsToSupabase,
-  signInWithGoogle,
+  signInWithDiscord,
   signOut,
   getCurrentSession,
   onAuthChange,
   fetchMyProfile,
+  updateMyUsername,
   fetchAllProfiles,
   setUserRole,
   fetchWhitelist,
@@ -145,6 +146,7 @@ const ICONS = {
   Download: <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></>,
   Lock:     <><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
   Settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+  User:     <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
 };
 
 const Icon = ({ n, size = 24, className = '' }) => (
@@ -153,6 +155,61 @@ const Icon = ({ n, size = 24, className = '' }) => (
     {ICONS[n]}
   </svg>
 );
+
+/* ---------------------------------------------------------------------------
+   UNIVERSAL RANK PROFILE LOGO
+   --------------------------------------------------------------------------- */
+function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
+  const cleanRole = ['owner', 'admin', 'staff', 'user'].includes(role) ? role : 'user';
+
+  const config = {
+    owner: {
+      gradient: "from-amber-400 to-amber-600 text-amber-50 shadow-amber-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Elegant Crown */}
+          <path d="M5 16h14a1 1 0 0 0 1-1V7.5a.5.5 0 0 0-.85-.35L15 11l-3-4.5L9 11 4.85 7.15a.5.5 0 0 0-.85.35V15a1 1 0 0 0 1 1zM12 4a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3zM4 6.5a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5zm16 0a1.25 1.25 0 1 0 0-2.5 1.25 1.25 0 0 0 0 2.5z" />
+        </svg>
+      )
+    },
+    admin: {
+      gradient: "from-indigo-400 to-indigo-600 text-indigo-50 shadow-indigo-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Sleek Shield */}
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          <path d="M12 4.2v15.3c5.5-3.1 6.5-7.3 6.5-8.5V6.3l-6.5-2.1z" opacity="0.15" />
+        </svg>
+      )
+    },
+    staff: {
+      gradient: "from-emerald-400 to-emerald-600 text-emerald-50 shadow-emerald-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Star Badge */}
+          <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+        </svg>
+      )
+    },
+    user: {
+      gradient: "from-slate-400 to-slate-600 text-slate-50 shadow-slate-500/10",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* User Silhouette */}
+          <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z" />
+        </svg>
+      )
+    }
+  };
+
+  const current = config[cleanRole];
+
+  return (
+    <div className={`bg-gradient-to-tr ${current.gradient} flex items-center justify-center shadow ${className} shrink-0`}>
+      {current.svg}
+    </div>
+  );
+}
 
 /* ---------------------------------------------------------------------------
    SEED DATA
@@ -1689,9 +1746,9 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
     return (
       <button onClick={onSignIn}
               type="button"
-              className="text-xs px-3 py-1.5 font-bold rounded-lg bg-white text-slate-800 hover:bg-slate-100 flex items-center gap-2 shrink-0">
-        <svg width="14" height="14" viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-        Sign in
+              className="text-xs px-3 py-1.5 font-bold rounded-lg bg-[#5865F2] text-white hover:bg-[#4752c4] flex items-center gap-2 shrink-0">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3.2a.074.074 0 0 0-.079.037c-.34.6-.717 1.385-.98 2.001a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.997-2.001.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C1.222 8.06.572 11.65.86 15.196a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127c-.598.349-1.22.645-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.056c.5-4.094-.838-7.654-3.549-10.799a.06.06 0 0 0-.031-.028ZM8.02 12.998c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418Zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418Z"/></svg>
+        Sign in with Discord
       </button>
     );
   }
@@ -1710,13 +1767,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
       <button onClick={() => setOpen(!open)}
               type="button"
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
-        {activeProfile.avatar_url ? (
-          <img src={activeProfile.avatar_url} alt="" className="w-6 h-6 rounded-md object-cover" referrerPolicy="no-referrer" />
-        ) : (
-          <div className="w-6 h-6 rounded-md bg-indigo-500 text-white text-xs font-bold flex items-center justify-center">
-            {(activeProfile.full_name || activeProfile.email || '?').charAt(0).toUpperCase()}
-          </div>
-        )}
+        <RankLogo role={activeProfile.role} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
           {activeProfile.role}
         </span>
@@ -1726,15 +1777,9 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
       {open && (
         <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center gap-3">
-            {activeProfile.avatar_url ? (
-              <img src={activeProfile.avatar_url} alt="" className="w-10 h-10 rounded-lg object-cover" referrerPolicy="no-referrer" />
-            ) : (
-              <div className="w-10 h-10 rounded-lg bg-indigo-500 text-white font-bold flex items-center justify-center">
-                {(activeProfile.full_name || activeProfile.email || '?').charAt(0).toUpperCase()}
-              </div>
-            )}
+            <RankLogo role={activeProfile.role} className="w-10 h-10 rounded-lg" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.full_name || 'No name'}</div>
+              <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || activeProfile.full_name || 'No name'}</div>
               <div className="text-xs text-slate-500 truncate">{activeProfile.email}</div>
             </div>
           </div>
@@ -1890,16 +1935,10 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
                     const isMe = p.id === currentUserId;
                     return (
                       <div key={p.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        {p.avatar_url ? (
-                          <img src={p.avatar_url} alt="" className="w-10 h-10 rounded-lg object-cover shrink-0" referrerPolicy="no-referrer" />
-                        ) : (
-                          <div className="w-10 h-10 rounded-lg bg-indigo-500 text-white font-bold flex items-center justify-center shrink-0">
-                            {(p.full_name || p.email || '?').charAt(0).toUpperCase()}
-                          </div>
-                        )}
+                        <RankLogo role={p.role} className="w-10 h-10 rounded-lg shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-2">
-                            {p.full_name || 'No name'} {isMe && <span className="text-[10px] font-bold text-slate-400 uppercase">(you)</span>}
+                            {p.username || p.full_name || 'No name'} {isMe && <span className="text-[10px] font-bold text-slate-400 uppercase">(you)</span>}
                           </div>
                           <div className="text-xs text-slate-500 truncate">{p.email}</div>
                         </div>
@@ -2231,7 +2270,25 @@ export default function App() {
         const session = await getCurrentSession();
         if (cancelled) return;
         if (!session) { setProfile(null); return; }
-        const p = await fetchMyProfile();
+        let p = await fetchMyProfile();
+        if (!p) {
+          if (!cancelled) setProfile(null);
+          return;
+        }
+
+        // Automatically assign unique Discord username if profile doesn't have one
+        if (!p.username) {
+          const meta = session.user?.user_metadata || {};
+          const discordUser = meta.preferred_username || meta.user_name || meta.name || meta.full_name || '';
+          if (discordUser) {
+            try {
+              p = await updateMyUsername(discordUser);
+            } catch (updateErr) {
+              console.warn('[NARP] failed to auto-update username:', updateErr);
+            }
+          }
+        }
+
         if (!cancelled) setProfile(p);
       } catch (e) {
         console.warn('[NARP] profile fetch failed:', e);
@@ -2244,7 +2301,7 @@ export default function App() {
     return () => { cancelled = true; unsub(); };
   }, [supabaseReady]);
 
-  const handleSignIn  = async () => { try { await signInWithGoogle(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
+  const handleSignIn  = async () => { try { await signInWithDiscord(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
   const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {

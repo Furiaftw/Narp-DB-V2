@@ -23,17 +23,19 @@ begin
     delete from public.whitelist where email = lower(new.email);
   end if;
 
-  insert into public.profiles (id, email, full_name, avatar_url, role)
+  insert into public.profiles (id, email, full_name, username, avatar_url, role)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name', ''),
+    coalesce(new.raw_user_meta_data ->> 'preferred_username', new.raw_user_meta_data ->> 'name', new.raw_user_meta_data ->> 'full_name', ''),
     coalesce(new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture', ''),
     _role
   )
   on conflict (id) do update set
     email      = excluded.email,
     full_name  = excluded.full_name,
+    username   = excluded.username,
     avatar_url = excluded.avatar_url;
 
   return new;
