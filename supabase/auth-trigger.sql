@@ -1,6 +1,9 @@
 -- Auto-create a profile row whenever a new user signs up via Supabase Auth.
 -- Run this in the Supabase SQL Editor (Dashboard > SQL Editor > New query).
 
+-- 0) Drop full_name column
+ALTER TABLE public.profiles DROP COLUMN IF EXISTS full_name;
+
 -- 1) Function: copies basic info from auth.users into public.profiles
 create or replace function public.handle_new_user()
 returns trigger
@@ -23,18 +26,16 @@ begin
     delete from public.whitelist where email = lower(new.email);
   end if;
 
-  insert into public.profiles (id, email, full_name, username, avatar_url, role)
+  insert into public.profiles (id, email, username, avatar_url, role)
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data ->> 'full_name', new.raw_user_meta_data ->> 'name', ''),
-    coalesce(new.raw_user_meta_data ->> 'preferred_username', new.raw_user_meta_data ->> 'name', new.raw_user_meta_data ->> 'full_name', ''),
+    coalesce(new.raw_user_meta_data->>'preferred_username', ''),
     coalesce(new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture', ''),
     _role
   )
   on conflict (id) do update set
     email      = excluded.email,
-    full_name  = excluded.full_name,
     username   = excluded.username,
     avatar_url = excluded.avatar_url;
 
