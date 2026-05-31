@@ -64,7 +64,7 @@ export const fetchMyProfile = async () => {
   if (!session?.user) return null;
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -92,7 +92,7 @@ export const updateMyUsername = async (username) => {
     .from('profiles')
     .update({ username: clean })
     .eq('id', session.user.id)
-    .select('id, email, full_name, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role')
     .single();
 
   if (error) {
@@ -106,7 +106,7 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, avatar_url, role, created_at')
+    .select('id, email, username, avatar_url, role, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -165,7 +165,7 @@ export const fetchPendingJutsus = async () => {
   const submitterIds = [...new Set(pending.map(p => p.submitted_by))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, full_name, email, avatar_url, role')
+    .select('id, username, email, avatar_url, role')
     .in('id', submitterIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));

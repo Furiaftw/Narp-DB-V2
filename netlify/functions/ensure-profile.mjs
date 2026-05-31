@@ -33,7 +33,7 @@ export default async (req) => {
 
   const { data: existing } = await supabase
     .from('profiles')
-    .select('id, email, full_name, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -59,9 +59,8 @@ export default async (req) => {
   const profile = {
     id: user.id,
     email: user.email,
-    full_name: meta.full_name || meta.name || '',
     avatar_url: meta.avatar_url || meta.picture || '',
-    username: meta.preferred_username || meta.user_name || meta.name || meta.full_name || '',
+    username: meta.preferred_username || meta.user_name || meta.name || '',
     role,
   };
 

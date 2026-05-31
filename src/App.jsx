@@ -1526,8 +1526,8 @@ function AuditLogModal({ onClose }) {
                 <div key={e.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
                   <div className="text-slate-400 font-mono shrink-0 w-32 truncate">{new Date(e.changed_at).toLocaleString()}</div>
                   <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-800 truncate">{e.target_email || '(unknown)'}</div>
-                    <div className="text-slate-500 truncate">by {e.changed_by_email || 'system'}</div>
+                    <div className="font-bold text-slate-800 truncate">{maskEmail(e.target_email) || '(unknown)'}</div>
+                    <div className="text-slate-500 truncate">by {maskEmail(e.changed_by_email) || 'system'}</div>
                   </div>
                   <div className="shrink-0">{arrow(e.old_role, e.new_role)}</div>
                 </div>
@@ -1713,6 +1713,27 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
 }
 
 /* ============================================================================
+   COMPONENT: ProfileAvatar
+   ============================================================================ */
+function ProfileAvatar({ profile, className = "w-10 h-10 rounded-lg shrink-0 object-cover" }) {
+  const isDiscordAvatar = profile?.avatar_url && (profile.avatar_url.includes('discord') || profile.avatar_url.includes('discordapp'));
+  if (isDiscordAvatar) {
+    return <img src={profile.avatar_url} alt={profile.username || 'Avatar'} className={className} />;
+  }
+  return <RankLogo role={profile?.role} className={className} />;
+}
+
+const maskEmail = (email) => {
+  if (!email) return '';
+  const parts = email.split('@');
+  if (parts.length !== 2) return '***';
+  const name = parts[0];
+  const domain = parts[1];
+  const maskedName = name.length > 2 ? name[0] + '***' + name[name.length - 1] : '***';
+  return `${maskedName}@${domain}`;
+};
+
+/* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
 function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseReady, devRole, onToggleDevRole }) {
@@ -1736,7 +1757,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
 
   const activeProfile = supabaseReady ? profile : {
     id: 'dev-user-id',
-    full_name: 'Dev Administrator',
+    username: 'Dev Administrator',
     email: 'dev@example.com',
     avatar_url: null,
     role: devRole,
@@ -1747,7 +1768,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
       <button onClick={onSignIn}
               type="button"
               className="text-xs px-3 py-1.5 font-bold rounded-lg bg-[#5865F2] text-white hover:bg-[#4752c4] flex items-center gap-2 shrink-0">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3.2a.074.074 0 0 0-.079.037c-.34.6-.717 1.385-.98 2.001a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.997-2.001.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C1.222 8.06.572 11.65.86 15.196a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127c-.598.349-1.22.645-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.056c.5-4.094-.838-7.654-3.549-10.799a.06.06 0 0 0-.031-.028ZM8.02 12.998c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418Zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418Z"/></svg>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.317 4.369A19.79 19.79 0 0 0 16.558 3.2a.074.074 0 0 0-.079.037c-.34.6-.717 1.385-.98 2.001a18.27 18.27 0 0 0-5.487 0 12.6 12.6 0 0 0-.997-2.001.077.077 0 0 0-.079-.037A19.74 19.74 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C1.222 8.06.572 11.65.86 15.196a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028c.462-.63.874-1.295 1.226-1.994a.076.076 0 0 0-.041-.106 13.1 13.1 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127c-.598.349-1.22.645-1.873.891a.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.029 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.056c.5-4.094-.838-7.654-3.549-10.799a.06.06 0 0 0-.031-.028ZM8.02 12.998c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.418-2.157 2.418ZM7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.418-2.157 2.418Z"/></svg>
         Sign in with Discord
       </button>
     );
@@ -1767,7 +1788,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
       <button onClick={() => setOpen(!open)}
               type="button"
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
-        <RankLogo role={activeProfile.role} className="w-6 h-6 rounded-md" />
+        <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
           {activeProfile.role}
         </span>
@@ -1777,10 +1798,9 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
       {open && (
         <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center gap-3">
-            <RankLogo role={activeProfile.role} className="w-10 h-10 rounded-lg" />
+            <ProfileAvatar profile={activeProfile} className="w-10 h-10 rounded-lg" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || activeProfile.full_name || 'No name'}</div>
-              <div className="text-xs text-slate-500 truncate">{activeProfile.email}</div>
+              <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
           {canManageUsers && (
@@ -1935,12 +1955,11 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
                     const isMe = p.id === currentUserId;
                     return (
                       <div key={p.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        <RankLogo role={p.role} className="w-10 h-10 rounded-lg shrink-0" />
+                        <ProfileAvatar profile={p} className="w-10 h-10 rounded-lg shrink-0" />
                         <div className="flex-1 min-w-0">
                           <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-2">
-                            {p.username || p.full_name || 'No name'} {isMe && <span className="text-[10px] font-bold text-slate-400 uppercase">(you)</span>}
+                            {p.username || 'No name'} {isMe && <span className="text-[10px] font-bold text-slate-400 uppercase">(you)</span>}
                           </div>
-                          <div className="text-xs text-slate-500 truncate">{p.email}</div>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
                           <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${
@@ -2035,7 +2054,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
   const isMine     = pending.submitted_by === currentUserId;
   const op         = pending.operation;
   const submitter  = pending.submitter;
-  const submitterName = submitter?.full_name || submitter?.email || 'Unknown';
+  const submitterName = submitter?.username || 'Unknown';
 
   const opColors = {
     insert: 'bg-emerald-100 text-emerald-800 border-emerald-300',
@@ -2279,7 +2298,7 @@ export default function App() {
         // Automatically assign unique Discord username if profile doesn't have one
         if (!p.username) {
           const meta = session.user?.user_metadata || {};
-          const discordUser = meta.preferred_username || meta.user_name || meta.name || meta.full_name || '';
+          const discordUser = meta.preferred_username || meta.user_name || meta.name || '';
           if (discordUser) {
             try {
               p = await updateMyUsername(discordUser);
