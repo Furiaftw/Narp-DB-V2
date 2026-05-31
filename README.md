@@ -2,7 +2,7 @@
 
 A jutsu reference database for a text-based Naruto roleplay Discord server. Players browse jutsus, filter them in detail, build a personal "session list" they can paste into Discord, and (for the right roles) edit the catalog directly from the browser. Bloodlines remain as filter values but live behind the admin panel; limited specs were moved to a separate site.
 
-Built on React + Vite, styled with Tailwind, backed by Supabase (Postgres + Google Auth + Row-Level Security), deployed on Netlify.
+Built on React + Vite, styled with Tailwind, backed by Supabase (Postgres + Discord Auth + Row-Level Security), deployed on Netlify.
 
 ---
 
@@ -11,8 +11,8 @@ Built on React + Vite, styled with Tailwind, backed by Supabase (Postgres + Goog
 1. [Permission model](#permission-model)
 2. [Step 1 — Local checkout](#step-1--local-checkout)
 3. [Step 2 — Create the Supabase project](#step-2--create-the-supabase-project)
-4. [Step 3 — Set up Google OAuth in Google Cloud](#step-3--set-up-google-oauth-in-google-cloud)
-5. [Step 4 — Connect Google to Supabase](#step-4--connect-google-to-supabase)
+4. [Step 3 — Set up Discord OAuth](#step-3--set-up-discord-oauth)
+5. [Step 4 — Connect Discord to Supabase](#step-4--connect-discord-to-supabase)
 6. [Step 5 — Push the repo to GitHub](#step-5--push-the-repo-to-github)
 7. [Step 6 — Deploy to Netlify](#step-6--deploy-to-netlify)
 8. [Step 7 — Connect Netlify to Supabase via the official extension](#step-7--connect-netlify-to-supabase-via-the-official-extension)
@@ -82,8 +82,9 @@ The dev server runs at `http://localhost:5173`. Without Supabase env vars yet, t
    **If your owner email isn't `grisales4000@gmail.com`**, find the `owner_email := 'grisales4000@gmail.com'` line in the `handle_new_user()` function (and the matching one in the `on conflict` clause), replace with your email, then run.
 
 4. Click **Run**.
+5. Open a new query, paste in `supabase/add-username.sql`, and **Run** it too. This adds the `username` column that every member is prompted to choose on their first sign-in.
 
-Quick sanity check: click **Table Editor** in the left nav. You should see seven tables — `jutsus`, `bloodlines`, `specializations`, `profiles`, `whitelist`, `pending_jutsus`, `role_change_log`.
+Quick sanity check: click **Table Editor** in the left nav. You should see seven tables — `jutsus`, `bloodlines`, `specializations`, `profiles`, `whitelist`, `pending_jutsus`, `role_change_log`. The `profiles` table should now have a `username` column.
 
 ### Grab your two credentials
 
@@ -95,49 +96,34 @@ Quick sanity check: click **Table Editor** in the left nav. You should see seven
 
 ---
 
-## Step 3 — Set up Google OAuth in Google Cloud
+## Step 3 — Set up Discord OAuth
 
-This is the gnarliest step but it's one-time.
+Discord OAuth is quick — one application, one secret.
 
-### 3a. Create a Google Cloud project
+### 3a. Create a Discord application
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com).
-2. Click the project dropdown at the top → **New Project**.
-3. Name it (`narp-db-auth` is fine), click **Create**.
-4. Make sure the new project is selected after it finishes provisioning.
+1. Go to [discord.com/developers/applications](https://discord.com/developers/applications).
+2. Click **New Application**, name it (`NARP Database` is fine), accept the terms, **Create**.
+3. In the left nav, open **OAuth2**.
+4. Copy the **Client ID** and, under **Client Secret**, click **Reset Secret** → **Copy**. Keep these handy for Step 4.
 
-### 3b. Configure the OAuth consent screen
+### 3b. Add the redirect URL
 
-1. **APIs & Services → OAuth consent screen**.
-2. **User type**: **External**, click **Create**.
-3. Fill in:
-   - **App name**: "NARP Database"
-   - **User support email** and **Developer contact email**: your email
-4. **Save and Continue** through Scopes (defaults are fine).
-5. **Test users**: add every email you plan to whitelist. Without this, those emails can't sign in until you publish the app. **Save and Continue** → **Back to Dashboard**.
+1. Still under **OAuth2**, find **Redirects** → **Add Redirect**.
+2. Paste your Supabase callback URL (`https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`). You'll get the exact value in Step 4 — come back and paste it here once you have it.
+3. **Save Changes**.
 
-> Testing mode is fine for a private Discord. To publish (remove the "unverified app" warning), you'd need a privacy policy and to go through Google's verification — only worth it if you're opening the site to public Google accounts.
-
-### 3c. Create the OAuth client
-
-1. **APIs & Services → Credentials → + Create Credentials → OAuth client ID**.
-2. **Application type**: **Web application**.
-3. **Name**: anything (`narp-db-web`).
-4. **Authorized JavaScript origins** — add:
-   - `http://localhost:5173`
-   - Your Netlify URL (you'll get it after Step 6; come back and add it then).
-5. Leave **Authorized redirect URIs** empty for now — it'll be filled in Step 8.
-6. **Create**. Copy the **Client ID** and **Client Secret**.
+> The `email` and `identify` scopes (which the app relies on) are requested automatically by Supabase — no extra configuration needed.
 
 ---
 
-## Step 4 — Connect Google to Supabase
+## Step 4 — Connect Discord to Supabase
 
 1. Supabase dashboard → **Authentication → Providers**.
-2. Find **Google**, click it.
-3. Toggle **Enable Sign in with Google** on.
-4. Paste your **Client ID** and **Client Secret** from Step 3c.
-5. **Copy the Callback URL** Supabase shows you (`https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`) — you'll paste this into Google in Step 8.
+2. Find **Discord**, click it.
+3. Toggle **Enable Sign in with Discord** on.
+4. Paste your **Client ID** and **Client Secret** from Step 3a.
+5. **Copy the Callback URL** Supabase shows you (`https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`) — paste it back into Discord's **Redirects** list (Step 3b).
 6. **Save**.
 
 ---
@@ -169,7 +155,7 @@ git push -u origin main
 4. Don't add env vars yet — the extension does it next.
 5. **Deploy site**.
 
-After the build, copy your site URL (`https://something-12345.netlify.app`). **Go back to Google Cloud → Credentials → your OAuth client and add this URL to "Authorized JavaScript origins."**
+After the build, copy your site URL (`https://something-12345.netlify.app`). You'll register it as a redirect target in Step 8.
 
 ---
 
@@ -192,11 +178,11 @@ Env-var changes don't auto-rebuild. **Deploys → Trigger deploy → Deploy site
 
 Two small fix-ups to make sign-in actually work.
 
-### 8a. Add Supabase's callback URL to Google
+### 8a. Confirm Supabase's callback URL is in Discord
 
-1. **Google Cloud Console → Credentials → your OAuth client**.
-2. Under **Authorized redirect URIs**, add the Supabase callback URL from Step 4 (`https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`).
-3. **Save**.
+1. **Discord Developer Portal → your application → OAuth2 → Redirects**.
+2. Make sure the Supabase callback URL from Step 4 (`https://YOUR-PROJECT-REF.supabase.co/auth/v1/callback`) is listed.
+3. **Save Changes**.
 
 ### 8b. Tell Supabase what URLs to redirect back to
 
@@ -214,8 +200,9 @@ Two small fix-ups to make sign-in actually work.
 ## Step 9 — First sign-in
 
 1. Open your deployed site.
-2. Click **Sign in** in the top-right.
-3. Pick your Google account.
+2. Click **Sign in with Discord** in the top-right.
+3. Authorize the app with your Discord account.
+4. On your very first sign-in you'll be asked to **choose a username** before you can use the site. Pick one (3–20 characters, letters/numbers/underscores) — it's how you'll appear to staff and other members.
 
 If your email matches the hardcoded one in `handle_new_user()`, you'll come back as the **owner** automatically — you should see your role badge say `owner`, plus a **System Tools** button in the header and a **Manage Users & Whitelist** option in your avatar dropdown.
 
@@ -230,11 +217,11 @@ This is your day-to-day workflow for granting access.
 1. Click your avatar → **Manage Users & Whitelist**.
 2. Click the **Whitelist** sub-tab.
 3. Type someone's Gmail address, pick **staff** or **admin**, click **Add**.
-4. Tell them to sign in to the site with Google. As soon as they do, they'll have the role you whitelisted them with. No manual approval, no waiting.
+4. Tell them to sign in to the site with Discord. As soon as they do, they'll have the role you whitelisted them with. No manual approval, no waiting.
 
 If they already signed in once as a `user` before being whitelisted, no problem — adding them to the whitelist also retroactively updates their role.
 
-To revoke: remove their whitelist entry, then in the **People** tab change their role to `user`. They keep their Google account but lose all privileges. (Their pending submissions auto-cancel on demotion.)
+To revoke: remove their whitelist entry, then in the **People** tab change their role to `user`. They keep their Discord account but lose all privileges. (Their pending submissions auto-cancel on demotion.)
 
 > **Admins see a filtered view.** Admins can only see User and Staff profiles, and Staff-level whitelist entries. Owner sees everything. Owner is the only one who can demote an Admin or remove an admin whitelist entry.
 
@@ -290,11 +277,11 @@ The `VITE_` prefix is mandatory — Vite only exposes prefixed vars to client co
 
 ## Troubleshooting
 
-**"Sign in" button opens Google then bounces back to a blank page.**
+**"Sign in with Discord" button opens Discord then bounces back to a blank page.**
 The redirect URL handshake (Step 8) is incomplete. Check:
-- Supabase's callback URL is in Google's "Authorized redirect URIs" (`<ref>.supabase.co/auth/v1/callback`)
+- Supabase's callback URL is in Discord's **OAuth2 → Redirects** list (`<ref>.supabase.co/auth/v1/callback`)
 - Your Netlify URL is in Supabase's "Redirect URLs" list with the `/**` wildcard variant
-- Your email is in the Google OAuth "Test users" list (testing mode only)
+- The **Discord** provider is enabled in Supabase (**Authentication → Providers**) with a valid Client ID and Secret
 
 **I signed in as the owner email but my role says `user`.**
 Either (a) you didn't update the email in `handle_new_user()` before running the schema, or (b) the trigger didn't fire because you ran the schema *after* signing in. Fix: in Supabase SQL Editor, run `UPDATE profiles SET role = 'owner' WHERE email = 'your@email.com';` — that's the one-time bootstrap.
@@ -334,7 +321,8 @@ narp-database/
 ├── .gitignore
 ├── App.claude-preview.jsx      ← single-file version for Claude artifact preview (not used by build)
 ├── supabase/
-│   └── schema.sql              ← run once in Supabase SQL Editor
+│   ├── schema.sql              ← run once in Supabase SQL Editor
+│   └── add-username.sql        ← run once to add the username column
 └── src/
     ├── main.jsx
     ├── index.css
@@ -351,7 +339,7 @@ This is a single-file copy of `src/App.jsx` with all Supabase imports replaced b
 
 **What you can test from the preview:** all jutsu UI flows, the view-slots eye-icon button on Limited jutsus, the catalog management modal for bloodlines, the dev role toggle (Dev: User / Dev: Admin), filters, sorting, session-list cart, personal tags.
 
-**What you can't test:** Google sign-in, the pending-approval workflow, the whitelist, the audit log. These need a real Supabase backend — deploy to Netlify to test those.
+**What you can't test:** Discord sign-in, the pending-approval workflow, the whitelist, the audit log. These need a real Supabase backend — deploy to Netlify to test those.
 
 **Keeping the two files in sync:** any structural change you make in `src/App.jsx` should be mirrored to `App.claude-preview.jsx`. The only intentional difference is the import block at the top.
 

@@ -29,10 +29,10 @@ export const isSupabaseConfigured = () => Boolean(supabase);
 
 /* --- Auth ------------------------------------------------------------------ */
 
-export const signInWithGoogle = async () => {
+export const signInWithDiscord = async () => {
   if (!supabase) throw new Error('Supabase is not configured');
   const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
+    provider: 'discord',
     options: { redirectTo: window.location.origin },
   });
   if (error) throw error;
@@ -64,7 +64,7 @@ export const fetchMyProfile = async () => {
   if (!session?.user) return null;
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, full_name, avatar_url, role')
+    .select('id, email, full_name, username, avatar_url, role')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -78,6 +78,28 @@ export const fetchMyProfile = async () => {
     if (res.ok) return await res.json();
   } catch {}
   return null;
+};
+
+/* Sets the current user's chosen username. Usernames are unique, so a
+   collision surfaces as a friendly error the caller can show inline. */
+export const updateMyUsername = async (username) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a username');
+
+  const clean = (username || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ username: clean })
+    .eq('id', session.user.id)
+    .select('id, email, full_name, username, avatar_url, role')
+    .single();
+
+  if (error) {
+    if (error.code === '23505') throw new Error('That username is already taken.');
+    throw error;
+  }
+  return data;
 };
 
 export const fetchAllProfiles = async () => {
