@@ -114,6 +114,82 @@ const getNatureColor = (n) => ({
 }[n] || 'bg-slate-200 text-slate-800 border-slate-300');
 
 /* ---------------------------------------------------------------------------
+   DISCORD WEBHOOK LOGGING
+   Routes an approval/denial event to the correct Discord Forum thread and
+   formats it to match the staff log embed design. Battlemode entries land in
+   their own thread; everything else goes to the general jutsu thread.
+
+   The submitter / reviewer pair encodes the workflow:
+     • staff queue (double-approver)  → submitter !== reviewer
+     • admin direct write (single)    → submitter === reviewer (same user id)
+   --------------------------------------------------------------------------- */
+async function sendDiscordLog(itemData, actionType, submitterProfile, reviewerProfile) {
+  const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
+  if (!baseUrl) return; // Logging not configured — skip silently.
+
+  // Route to the correct forum thread based on the jutsu's type.
+  const threadId = toArray(itemData?.types).includes('Battlemode')
+    ? import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID
+    : import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
+
+  const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
+
+  // Format a profile into a Discord mention, falling back to plain @text.
+  const ping = (profile) => {
+    if (!profile) return 'Unknown';
+    if (profile.discord_id) return `<@${profile.discord_id}>`;
+    return `@${profile.username || profile.email || 'unknown'}`;
+  };
+
+  // A direct admin approval is one where the same user submits and reviews.
+  const isDirectAdmin = Boolean(
+    submitterProfile?.id && reviewerProfile?.id &&
+    submitterProfile.id === reviewerProfile.id
+  );
+
+  const creatorPing  = ping(submitterProfile);
+  const reviewerPing = isDirectAdmin ? ping(reviewerProfile) : creatorPing;
+  const secondEyes   = isDirectAdmin ? 'N/A (Direct Admin Approval)' : ping(reviewerProfile);
+
+  // Decision + colour: green for approvals/creates, red for denials/deletes.
+  const isNegative = /den|reject|delet|cancel/i.test(actionType || '');
+  const decision   = isNegative ? 'Denied' : 'Approved';
+  const color      = isNegative ? 15158332 : 3066993;
+
+  const description = [
+    `**Name Entry Creator:** ${creatorPing}`,
+    `**Name Reviewer:** ${reviewerPing}`,
+    `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
+    '',
+    `**Decision:** ${decision}`,
+    '',
+    '**Link to sheet:**',
+    itemData?.link || 'N/A',
+    '',
+    '**Notes:** N/A',
+  ].join('\n');
+
+  const payload = {
+    embeds: [{
+      title: itemData?.name || 'Jutsu Entry',
+      description,
+      color,
+    }],
+  };
+
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    // Never let a logging failure block the underlying database action.
+    console.warn('[NARP] Discord log failed:', err);
+  }
+}
+
+/* ---------------------------------------------------------------------------
    ICONS
    --------------------------------------------------------------------------- */
 const ICONS = {
@@ -2372,7 +2448,13 @@ export default function App() {
             if (t === 'jutsus')          await deleteJutsu(targetId);
             else if (t === 'bloodlines') await deleteBloodline(targetId);
           } else {
-            if (t === 'jutsus')          await upsertJutsu(entity);
+            if (t === 'jutsus') {
+              // Direct admin write bypasses the staff queue, so log it as a
+              // single-approver action (current user as both submitter and
+              // reviewer) before persisting the change.
+              await sendDiscordLog(entity, 'Approved', profile, profile);
+              await upsertJutsu(entity);
+            }
             else if (t === 'bloodlines') await upsertBloodline(entity);
           }
         } catch (e) {
@@ -2384,7 +2466,7 @@ export default function App() {
     }
 
     throw new Error('Permission denied');
-  }, [isAdmin, isStaff, supabaseReady, refreshPending]); 
+  }, [isAdmin, isStaff, supabaseReady, refreshPending, profile]);
 
   const applyChangeLocally = (t, operation, targetId, entity) => {
     setDb(d => {
@@ -2399,6 +2481,12 @@ export default function App() {
 
   const handleApprovePending = async (id) => {
     try {
+      // Log the approval to Discord before committing it. The submitter is the
+      // staff member who queued the entry; the current user is the reviewer
+      // (the "2nd pair of eyes" in the double-approver workflow).
+      const item = pendingJutsus.find(p => p.id === id);
+      if (item) await sendDiscordLog(item.data, 'Approved', item.submitter, profile);
+
       await approvePendingJutsu(id);
       await refreshPending();
       await refreshDB();
@@ -2409,6 +2497,10 @@ export default function App() {
 
   const handleCancelPending = async (id) => {
     try {
+      // Log the denial to Discord before removing the pending entry.
+      const item = pendingJutsus.find(p => p.id === id);
+      if (item) await sendDiscordLog(item.data, 'Denied', item.submitter, profile);
+
       await cancelPendingJutsu(id);
       await refreshPending();
     } catch (e) {
