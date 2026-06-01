@@ -24,6 +24,7 @@ import {
   submitPendingJutsu,
   reviewPendingJutsu,
   updatePendingJutsuData,
+  subscribeToDatabaseChanges,
   approvePendingJutsu,
   cancelPendingJutsu,
   buildJutsuPayload,
@@ -2280,6 +2281,19 @@ export default function App() {
       setRefreshing(false);
     }
   }, [refreshPending]);
+
+  useEffect(() => {
+    if (!supabaseReady || !profile) return;
+    const channel = subscribeToDatabaseChanges(() => {
+      refreshDB();
+      refreshPending();
+    });
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [supabaseReady, profile, refreshDB, refreshPending]);
 
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity }) => {
     const isJutsus = t === 'jutsus';

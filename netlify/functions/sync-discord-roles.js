@@ -78,6 +78,23 @@ export default async (req) => {
       .eq('id', userId)
       .maybeSingle();
 
+    if (existingProfile && existingProfile.role === 'owner') {
+      return new Response(
+        JSON.stringify({
+          id: existingProfile.id,
+          email: existingProfile.email,
+          username: existingProfile.username,
+          avatar_url: existingProfile.avatar_url,
+          role: 'owner',
+          discord_id: existingProfile.discord_id,
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
     let profileToSave;
     if (existingProfile) {
       profileToSave = { ...existingProfile, role: appRole };
