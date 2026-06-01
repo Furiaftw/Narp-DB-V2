@@ -228,11 +228,37 @@ export const reviewPendingJutsu = async (id, reviewerId) => {
 
 export const updatePendingJutsuData = async (id, newData) => {
   if (!supabase) return;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from('pending_jutsus')
     .update({ data: newData })
-    .eq('id', id);
+    .eq('id', id)
+    .select();
   if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Edit blocked by database security or row not found.');
+};
+
+export const subscribeToDatabaseChanges = (onTableChange) => {
+  if (!supabase) return null;
+  const channel = supabase
+    .channel('schema-db-changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'jutsus' },
+      (payload) => onTableChange(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'bloodlines' },
+      (payload) => onTableChange(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'pending_jutsus' },
+      (payload) => onTableChange(payload)
+    )
+    .subscribe();
+
+  return channel;
 };
 
 export const approvePendingJutsu = async (id) => {
