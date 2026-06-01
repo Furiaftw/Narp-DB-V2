@@ -31,7 +31,6 @@ import {
   fetchRoleChangeLog,
 } from './lib/supabase';
 
-const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
 
 /* ============================================================================
    NARP DATABASE — Clean Unified Build
@@ -2394,6 +2393,7 @@ export default function App() {
   useEffect(() => {
     async function initDiscordActivity() {
       if (window.parent !== window) {
+        const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
         await discordSdk.ready();
         if (discordSdk.guildId !== import.meta.env.VITE_DISCORD_GUILD_ID) {
           throw new Error("Discord Activity guild restriction mismatch. Execution aborted.");
