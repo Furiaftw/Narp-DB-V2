@@ -1,5 +1,4 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { DiscordSDK } from '@discord/embedded-app-sdk';
 import {
   supabase,
   isSupabaseConfigured,
@@ -2390,42 +2389,6 @@ export default function App() {
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
 
-  useEffect(() => {
-    async function initializeDiscordActivity() {
-      if (window.parent !== window) {
-        const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
-        await discordSdk.ready();
-        if (discordSdk.guildId !== import.meta.env.VITE_DISCORD_GUILD_ID) {
-          throw new Error("Discord Activity guild restriction mismatch. Execution aborted.");
-        }
-        const auth = await discordSdk.commands.authorize({
-          client_id: import.meta.env.VITE_DISCORD_CLIENT_ID,
-          response_type: "code",
-          state: "",
-          prompt: "none",
-          scope: ["identify", "guilds", "email"],
-        });
-
-        const response = await fetch('/.netlify/functions/discord-login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: auth.code }),
-        });
-
-        const data = await response.json();
-        if (data.email && data.password && supabase) {
-          await supabase.auth.signInWithPassword({
-            email: data.email,
-            password: data.password,
-          });
-        }
-      }
-    }
-
-    initializeDiscordActivity().catch(err => {
-      console.error("Discord activity SDK login failed:", err);
-    });
-  }, []);
   useEffect(() => {
     let cancelled = false;
     loadDB().then(d => { if (!cancelled) { setDb(d); setLoading(false); } });
