@@ -64,7 +64,7 @@ export const fetchMyProfile = async () => {
   if (!session?.user) return null;
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role, discord_id')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -92,7 +92,7 @@ export const updateMyUsername = async (username) => {
     .from('profiles')
     .update({ username: clean })
     .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role, discord_id')
     .single();
 
   if (error) {
@@ -106,7 +106,7 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, created_at')
+    .select('id, email, username, avatar_url, role, discord_id, created_at')
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];
@@ -157,22 +157,26 @@ export const fetchPendingJutsus = async () => {
   // Manual join — simpler than configuring a foreign-key relationship.
   const { data: pending, error } = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id')
     .order('submitted_at', { ascending: false });
   if (error) throw error;
   if (!pending?.length) return [];
 
-  const submitterIds = [...new Set(pending.map(p => p.submitted_by))];
+  const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role')
-    .in('id', submitterIds);
+    .select('id, username, email, avatar_url, role, discord_id')
+    .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
-  return pending.map(p => ({ ...p, submitter: profileById.get(p.submitted_by) || null }));
+  return pending.map(p => ({
+    ...p,
+    submitter: profileById.get(p.submitted_by) || null,
+    first_reviewer: p.first_reviewer_id ? (profileById.get(p.first_reviewer_id) || null) : null,
+  }));
 };
 
-export const submitPendingJutsu = async (operation, targetId, data) => {
+export const submitPendingJutsu = async (operation, targetId, data, status = 'pending_approval') => {
   if (!supabase) return;
   if (!['insert', 'update', 'delete'].includes(operation)) throw new Error('Invalid operation');
   const session = await getCurrentSession();
@@ -183,7 +187,29 @@ export const submitPendingJutsu = async (operation, targetId, data) => {
     target_id: targetId || null,
     data: operation === 'delete' ? null : data,
     submitted_by: session.user.id,
+    status,
   });
+  if (error) throw error;
+};
+
+export const reviewPendingJutsu = async (id, reviewerId) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('pending_jutsus')
+    .update({
+      status: 'pending_approval',
+      first_reviewer_id: reviewerId,
+    })
+    .eq('id', id);
+  if (error) throw error;
+};
+
+export const updatePendingJutsuData = async (id, newData) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('pending_jutsus')
+    .update({ data: newData })
+    .eq('id', id);
   if (error) throw error;
 };
 
@@ -226,7 +252,7 @@ const stringifySlotsForDb = (s) => {
   try { return JSON.parse(s); } catch { return null; }
 };
 
-const fromRowJutsu = (row) => ({
+export const fromRowJutsu = (row) => ({
   _id:         row.id,
   _createdAt:  row.created_at,
   _createdBy:  row.created_by,

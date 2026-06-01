@@ -20,9 +20,12 @@ import {
   removeFromWhitelist,
   fetchPendingJutsus,
   submitPendingJutsu,
+  reviewPendingJutsu,
+  updatePendingJutsuData,
   approvePendingJutsu,
   cancelPendingJutsu,
   buildJutsuPayload,
+  fromRowJutsu,
   fetchRoleChangeLog,
 } from './lib/supabase';
 
@@ -123,7 +126,7 @@ const getNatureColor = (n) => ({
      • staff queue (double-approver)  → submitter !== reviewer
      • admin direct write (single)    → submitter === reviewer (same user id)
    --------------------------------------------------------------------------- */
-async function sendDiscordLog(itemData, actionType, submitterProfile, reviewerProfile) {
+async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile) {
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return; // Logging not configured — skip silently.
 
@@ -134,27 +137,33 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, reviewerPr
 
   const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
 
-  // Format a profile into a Discord mention, falling back to plain @text.
+  // Format a profile into a Discord mention, falling back to plain @username.
   const ping = (profile) => {
     if (!profile) return 'Unknown';
     if (profile.discord_id) return `<@${profile.discord_id}>`;
-    return `@${profile.username || profile.email || 'unknown'}`;
+    return `@${profile.username || 'unknown'}`;
   };
 
-  // A direct admin approval is one where the same user submits and reviews.
-  const isDirectAdmin = Boolean(
-    submitterProfile?.id && reviewerProfile?.id &&
-    submitterProfile.id === reviewerProfile.id
-  );
-
-  const creatorPing  = ping(submitterProfile);
-  const reviewerPing = isDirectAdmin ? ping(reviewerProfile) : creatorPing;
-  const secondEyes   = isDirectAdmin ? 'N/A (Direct Admin Approval)' : ping(reviewerProfile);
+  // Determine pings
+  const creatorPing = ping(submitterProfile);
+  const reviewerPing = (submitterProfile?.role === 'user') ? ping(firstReviewerProfile) : ping(submitterProfile);
+  const secondEyes = ping(finalApproverProfile);
 
   // Decision + colour: green for approvals/creates, red for denials/deletes.
   const isNegative = /den|reject|delet|cancel/i.test(actionType || '');
-  const decision   = isNegative ? 'Denied' : 'Approved';
-  const color      = isNegative ? 15158332 : 3066993;
+  const decision = isNegative ? 'Denied' : 'Approved';
+  const color = isNegative ? 15158332 : 3066993;
+
+  // Extract other field values
+  const natureVal = itemData?.nature || 'N/A';
+  const rankVal = Array.isArray(itemData?.rank) ? itemData.rank.join(', ') : (itemData?.rank || 'N/A');
+  const typeVal = Array.isArray(itemData?.types) ? itemData.types.join(', ') : (itemData?.types || 'N/A');
+  const specVal = Array.isArray(itemData?.spec) ? itemData.spec.join(', ') : (itemData?.spec || 'N/A');
+  const bloodlineVal = itemData?.bloodline || 'N/A';
+  const linkVal = itemData?.link || 'N/A';
+
+  const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
+  const approvalDate = new Date().toLocaleString();
 
   const description = [
     `**Name Entry Creator:** ${creatorPing}`,
@@ -163,10 +172,19 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, reviewerPr
     '',
     `**Decision:** ${decision}`,
     '',
-    '**Link to sheet:**',
-    itemData?.link || 'N/A',
+    '**Entry Details:**',
+    `Nature: ${natureVal}`,
+    `Rank: ${rankVal}`,
+    `Type: ${typeVal}`,
+    `Spec: ${specVal}`,
+    `Bloodline: ${bloodlineVal}`,
     '',
-    '**Notes:** N/A',
+    '**Link to sheet:**',
+    `${linkVal}`,
+    '',
+    '**Dates:**',
+    `Creation Date: ${creationDate}`,
+    `Approval Date: ${approvalDate}`
   ].join('\n');
 
   const payload = {
@@ -672,7 +690,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
     ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
-    j.limited &&  showAskStaff     && { l: 'Ask Staff',             c: 'bg-amber-100 text-amber-800 border-amber-300' },
+    j.limited &&  showAskStaff     && { l: 'Ask Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
     j.limited && !showAskStaff     && { l: 'Limited',  ic: 'Alert', c: 'bg-rose-100 text-rose-800 border-rose-200' },
     j.limited && j.slots           && { l: remaining > 0 ? `${remaining} open` : 'Full',
                                         c: remaining > 0 ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-red-100 text-red-800 border-red-200' },
@@ -708,7 +726,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
         </div>
         <div className="flex items-center shrink-0 pl-4">
           {j.limited && showAskStaff
-            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask Staff</span>
+            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask Reviewer</span>
             : (j.limited && <span className="text-[10px] font-bold uppercase text-red-500 bg-red-50 px-1.5 py-0.5 rounded hidden sm:inline mr-3">Limited</span>)}
           <Icon n="Down" size={18} className="text-slate-300"/>
         </div>
@@ -1032,7 +1050,7 @@ const TOGGLE_PAIRS = [
 ];
 const HIDE_ONLY = [
   { hideKey: 'hMP',  label: 'Multi-Post' },
-  { hideKey: 'hAsk', label: 'Ask Staff'  },
+  { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
 function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd }) {
@@ -1431,7 +1449,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
               <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0"/>
               <div>
                 <p className="font-bold mb-1">This submission needs a second approval.</p>
-                <p>Another staff member or admin will need to approve it before it goes live. You'll see it in the <strong>Pending</strong> tab until then.</p>
+                <p>Another Reviewer or admin will need to approve it before it goes live. You'll see it in the <strong>Pending</strong> tab until then.</p>
               </div>
             </div>
           )}
@@ -1572,9 +1590,9 @@ function AuditLogModal({ onClose }) {
     const colors = { user: 'text-slate-500', staff: 'text-emerald-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
     return (
       <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{from || '∅'}</span>
+        <span className={colors[from] || ''}>{from === 'staff' ? 'Reviewer' : (from || '∅')}</span>
         <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{to || '∅'}</span>
+        <span className={colors[to] || ''}>{to === 'staff' ? 'Reviewer' : (to || '∅')}</span>
       </span>
     );
   };
@@ -1866,7 +1884,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role}
+          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -1890,7 +1908,7 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
             <button onClick={onToggleDevRole}
                     type="button"
                     className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-t border-slate-100">
-              <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole})
+              <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole === 'staff' ? 'Reviewer' : devRole})
             </button>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
@@ -2017,8 +2035,8 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
             <>
               <p className="text-sm text-slate-600 mb-6">
                 {isOwner
-                  ? 'Promote signed-in players to staff or admin. Owner cannot be modified via UI — change via SQL.'
-                  : 'Promote signed-in players to staff. Admin-level changes require the owner.'}
+                  ? 'Promote signed-in players to Reviewer or admin. Owner cannot be modified via UI — change via SQL.'
+                  : 'Promote signed-in players to Reviewer. Admin-level changes require the owner.'}
               </p>
               {loading ? (
                 <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
@@ -2043,12 +2061,12 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
                             : p.role === 'admin' ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
                             : p.role === 'staff' ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
                             : 'bg-slate-100 border-slate-300 text-slate-700'
-                          }`}>{p.role}</span>
+                          }`}>{p.role === 'staff' ? 'Reviewer' : p.role}</span>
                           {allowedRoles ? (
                             <select value={p.role} disabled={savingId === p.id}
                                     onChange={e => changeRole(p.id, e.target.value)}
                                     className="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1 bg-white disabled:opacity-50">
-                              {allowedRoles.map(r => <option key={r} value={r}>{r}</option>)}
+                              {allowedRoles.map(r => <option key={r} value={r}>{r === 'staff' ? 'Reviewer' : r}</option>)}
                             </select>
                           ) : (
                             <span className="text-[10px] text-slate-400 italic">
@@ -2069,7 +2087,7 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
               <p className="text-sm text-slate-600 mb-4">
                 {isOwner
                   ? 'Pre-approve emails. When someone matching an entry signs in with Google, they get that role immediately. Existing users get updated on the spot.'
-                  : 'Pre-approve staff emails. Admin-level whitelist entries are managed by the owner only.'}
+                  : 'Pre-approve Reviewer emails. Admin-level whitelist entries are managed by the owner only.'}
               </p>
 
               <div className="flex gap-2 mb-5 flex-wrap">
@@ -2078,7 +2096,7 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
                        className="flex-1 min-w-[200px] border border-slate-300 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
                 <select value={newRole} onChange={e => setNewRole(e.target.value)}
                         className="border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
-                  <option value="staff">staff</option>
+                  <option value="staff">Reviewer</option>
                   {isOwner && <option value="admin">admin</option>}
                 </select>
                 <button onClick={handleAddWhitelist}
@@ -2100,7 +2118,7 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
                       <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${
                         w.role === 'admin' ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
                         : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                      }`}>{w.role}</span>
+                      }`}>{w.role === 'staff' ? 'Reviewer' : w.role}</span>
                       <button onClick={() => handleRemoveWhitelist(w.email, w.role)}
                               className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-md">
                         <Icon n="Trash" size={14}/>
@@ -2126,7 +2144,7 @@ function UserManagementModal({ currentUserId, isOwner, onClose }) {
 /* ============================================================================
    COMPONENT: PendingJutsuCard
    ============================================================================ */
-function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel }) {
+function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit }) {
   const isMine     = pending.submitted_by === currentUserId;
   const op         = pending.operation;
   const submitter  = pending.submitter;
@@ -2148,6 +2166,11 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${opColors[op] || ''}`}>
               {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Delete'}
+            </span>
+            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
+              pending.status === 'pending_review' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-blue-100 text-blue-800 border-blue-300'
+            }`}>
+              {pending.status === 'pending_review' ? 'Pending Review' : 'Pending Approval'}
             </span>
             {isMine && <span className="text-[10px] font-bold uppercase text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Yours</span>}
           </div>
@@ -2176,21 +2199,35 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
       )}
 
       <div className="flex gap-2 mt-1">
-        {!isMine && (
-          <button onClick={() => onApprove(pending.id)}
-                  className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-            <Icon n="Check" size={14}/> Approve
+        {pending.status === 'pending_review' ? (
+          <button onClick={() => onReview(pending.id)}
+                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+            <Icon n="Check" size={14}/> Review (Step 1)
+          </button>
+        ) : (
+          !isMine && (
+            <button onClick={() => onApprove(pending.id)}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+              <Icon n="Check" size={14}/> Approve
+            </button>
+          )
+        )}
+        {onEdit && (
+          <button onClick={() => onEdit(pending)}
+                  className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                  title="Edit pending payload">
+            <Icon n="Edit" size={14}/> Edit
           </button>
         )}
         {(isMine || isAdmin) && (
           <button onClick={() => onCancel(pending.id)}
-                  className={`${!isMine ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
+                  className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
             <Icon n="X" size={14}/> Cancel
           </button>
         )}
-        {isMine && !isAdmin && (
+        {isMine && !isAdmin && pending.status === 'pending_approval' && (
           <div className="text-[10px] text-slate-400 italic self-center">
-            Another staff member must approve
+            Another Reviewer must approve
           </div>
         )}
       </div>
@@ -2429,13 +2466,22 @@ export default function App() {
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity }) => {
     const isJutsus = t === 'jutsus';
 
-    if (!isAdmin && isStaff && isJutsus) {
+    if (adminForm?.isPendingEdit) {
+      if (!supabaseReady) return true;
+      const payload = entity ? buildJutsuPayload(entity, true) : null;
+      await updatePendingJutsuData(adminForm.pendingId, payload);
+      await refreshPending();
+      return false;
+    }
+
+    if ((role === 'user' || role === 'staff') && isJutsus) {
       if (!supabaseReady) {
         applyChangeLocally(t, operation, targetId, entity);
         return true;
       }
       const payload = entity ? buildJutsuPayload(entity, operation === 'update') : null;
-      await submitPendingJutsu(operation, targetId, payload);
+      const status = role === 'user' ? 'pending_review' : 'pending_approval';
+      await submitPendingJutsu(operation, targetId, payload, status);
       await refreshPending();
       return false;
     }
@@ -2452,7 +2498,7 @@ export default function App() {
               // Direct admin write bypasses the staff queue, so log it as a
               // single-approver action (current user as both submitter and
               // reviewer) before persisting the change.
-              await sendDiscordLog(entity, 'Approved', profile, profile);
+              await sendDiscordLog(entity, 'Approved', profile, profile, profile);
               await upsertJutsu(entity);
             }
             else if (t === 'bloodlines') await upsertBloodline(entity);
@@ -2466,7 +2512,7 @@ export default function App() {
     }
 
     throw new Error('Permission denied');
-  }, [isAdmin, isStaff, supabaseReady, refreshPending, profile]);
+  }, [isAdmin, isStaff, role, adminForm, supabaseReady, refreshPending, profile]);
 
   const applyChangeLocally = (t, operation, targetId, entity) => {
     setDb(d => {
@@ -2485,7 +2531,7 @@ export default function App() {
       // staff member who queued the entry; the current user is the reviewer
       // (the "2nd pair of eyes" in the double-approver workflow).
       const item = pendingJutsus.find(p => p.id === id);
-      if (item) await sendDiscordLog(item.data, 'Approved', item.submitter, profile);
+      if (item) await sendDiscordLog(item.data, 'Approved', item.submitter, item.first_reviewer, profile);
 
       await approvePendingJutsu(id);
       await refreshPending();
@@ -2499,13 +2545,32 @@ export default function App() {
     try {
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
-      if (item) await sendDiscordLog(item.data, 'Denied', item.submitter, profile);
+      if (item) await sendDiscordLog(item.data, 'Denied', item.submitter, item.first_reviewer, profile);
 
       await cancelPendingJutsu(id);
       await refreshPending();
     } catch (e) {
       alert('Cancel failed: ' + e.message);
     }
+  };
+
+  const handleReviewPending = async (id) => {
+    try {
+      if (!profile?.id) return;
+      await reviewPendingJutsu(id, profile.id);
+      await refreshPending();
+    } catch (e) {
+      alert('Review failed: ' + e.message);
+    }
+  };
+
+  const handleEditPending = (pendingItem) => {
+    setAdminForm({
+      r: fromRowJutsu(pendingItem.data),
+      tab: 'jutsus',
+      isPendingEdit: true,
+      pendingId: pendingItem.id
+    });
   };
 
   const setPersonalTagsForJutsu = useCallback((jid, list) => {
@@ -2648,7 +2713,7 @@ export default function App() {
         bloodlinesDb={sortedBloodlines}
         specOptions={sortedSpecs}
         clearF={clearF}
-        isAdmin={tab === 'jutsus' ? isStaff : isAdmin}
+        isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
         onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })} />
 
       {/* TAB BAR */}
@@ -2724,7 +2789,9 @@ export default function App() {
                         currentUserId={profile?.id}
                         isAdmin={isAdmin}
                         onApprove={handleApprovePending}
-                        onCancel={handleCancelPending} />
+                        onCancel={handleCancelPending}
+                        onReview={handleReviewPending}
+                        onEdit={handleEditPending} />
                     );
                   })}
                 </div>
@@ -2754,7 +2821,7 @@ export default function App() {
             onClose={() => setAdminForm(null)}
             db={db}
             onSubmit={submitChange}
-            willGoToPending={formTab === 'jutsus' && isStaff && !isAdmin}
+            willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'staff') && !isAdmin && !adminForm.isPendingEdit}
           />
         );
       })()}
