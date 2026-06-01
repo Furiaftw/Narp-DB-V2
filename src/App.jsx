@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { DiscordSDK } from '@discord/embedded-app-sdk';
 import {
   supabase,
   isSupabaseConfigured,
@@ -2388,6 +2389,48 @@ export default function App() {
 
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
+
+  useEffect(() => {
+    async function initializeDiscordActivity() {
+      if (window.parent !== window) {
+        const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
+        await discordSdk.ready();
+
+        const { code } = await discordSdk.commands.authorize({
+          client_id: import.meta.env.VITE_DISCORD_CLIENT_ID,
+          response_type: 'code',
+          state: '',
+          prompt: 'none',
+          scope: ["identify", "guilds", "email", "guilds.members.read"],
+        });
+
+        const response = await fetch('/.netlify/functions/discord-login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ code }),
+        });
+
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`Discord activity login backend call failed: ${errText}`);
+        }
+
+        const data = await response.json();
+        if (data.email && data.password && supabase) {
+          await supabase.auth.signInWithPassword({
+            email: data.email,
+            password: data.password,
+          });
+        }
+      }
+    }
+
+    initializeDiscordActivity().catch(err => {
+      console.error("Discord activity SDK login failed:", err);
+    });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
