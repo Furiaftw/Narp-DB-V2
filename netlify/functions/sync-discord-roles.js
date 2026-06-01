@@ -1,22 +1,22 @@
 import { createClient } from '@supabase/supabase-js';
 
+const json = (body, status) =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
 export default async (req) => {
   // Only allow POST requests
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
-      status: 405,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: 'Method not allowed' }, 405);
   }
 
   try {
     const { provider_token, userId } = await req.json();
 
     if (!provider_token || !userId) {
-      return new Response(JSON.stringify({ error: 'Missing provider_token or userId' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: 'Missing provider_token or userId' }, 400);
     }
 
     const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_DATABASE_URL || process.env.VITE_SUPABASE_DATABASE_URL;
@@ -24,43 +24,7 @@ export default async (req) => {
     const discordGuildId = process.env.VITE_DISCORD_GUILD_ID;
 
     if (!supabaseUrl || !supabaseServiceKey) {
-      return new Response(JSON.stringify({ error: 'Server configuration error: missing Supabase credentials' }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
-
-    let appRole = 'user';
-
-    if (discordGuildId) {
-      const memberResponse = await fetch(`https://discord.com/api/users/@me/guilds/${discordGuildId}/member`, {
-        headers: {
-          Authorization: `Bearer ${provider_token}`,
-        },
-      });
-
-      if (memberResponse.ok) {
-        const memberData = await memberResponse.json();
-        const discordUserId = memberData?.user?.id || '';
-        const memberRoles = memberData?.roles || [];
-
-        const ownerUserId = process.env.DISCORD_OWNER_USER_ID;
-        const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID;
-        const reviewerRoleId = process.env.DISCORD_REVIEWER_ROLE_ID;
-
-        if (ownerUserId && String(discordUserId) === String(ownerUserId)) {
-          appRole = 'owner';
-        } else if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
-          appRole = 'admin';
-        } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
-          appRole = 'staff';
-        }
-      } else {
-        const errText = await memberResponse.text();
-        console.warn(`Failed to fetch guild member details from Discord: ${errText}. Falling back to 'user' role.`);
-      }
-    } else {
-      console.warn('VITE_DISCORD_GUILD_ID is not configured. Falling back to \'user\' role.');
+      return json({ error: 'Server configuration error: missing Supabase credentials' }, 500);
     }
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
@@ -70,41 +34,114 @@ export default async (req) => {
       },
     });
 
-    // To be secure and preserve other fields, we check if profile exists.
-    // If not, we fetch the base user info from Supabase Auth to populate correctly.
-    const { data: existingProfile } = await supabaseAdmin
+    /* ------------------------------------------------------------------
+       STEP 1 — Read the current profile BEFORE making any change.
+       If we cannot read the profile we have no idea whether this user is
+       the owner, so we must abort rather than risk an unsafe write.
+       ------------------------------------------------------------------ */
+    const { data: existingProfile, error: fetchError } = await supabaseAdmin
       .from('profiles')
       .select('*')
       .eq('id', userId)
       .maybeSingle();
 
-    if (existingProfile && existingProfile.role === 'owner') {
-      return new Response(
-        JSON.stringify({
-          id: existingProfile.id,
-          email: existingProfile.email,
-          username: existingProfile.username,
-          avatar_url: existingProfile.avatar_url,
-          role: 'owner',
-          discord_id: existingProfile.discord_id,
-        }),
-        {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
+    if (fetchError) {
+      console.error('[sync-discord-roles] Could not read existing profile; aborting without changes.', fetchError);
+      return json({ error: 'Failed to read existing profile; no changes made' }, 500);
     }
 
+    /* ------------------------------------------------------------------
+       STEP 2 — CRITICAL owner safeguard.
+       The owner must NEVER be downgraded. If the database already records
+       this user as the owner, return immediately and leave the row alone.
+       ------------------------------------------------------------------ */
+    if (existingProfile && existingProfile.role === 'owner') {
+      return json({
+        id: existingProfile.id,
+        email: existingProfile.email,
+        username: existingProfile.username,
+        avatar_url: existingProfile.avatar_url,
+        role: 'owner',
+        discord_id: existingProfile.discord_id,
+      }, 200);
+    }
+
+    /* ------------------------------------------------------------------
+       STEP 3 — A role may only be derived from a definitive Discord
+       success. Without a configured guild we cannot obtain one, so we
+       abort instead of defaulting anyone to 'user'.
+       ------------------------------------------------------------------ */
+    if (!discordGuildId) {
+      console.error('[sync-discord-roles] VITE_DISCORD_GUILD_ID is not configured; aborting without changes.');
+      return json({ error: 'Discord guild is not configured; no changes made' }, 500);
+    }
+
+    /* ------------------------------------------------------------------
+       STEP 4 — Fetch the Discord guild membership.
+       The request is wrapped in try/catch for transport failures, and the
+       response status is checked explicitly. ONLY a definitive 200 OK is
+       allowed to drive a database write. Any error (401, 404, network
+       failure, unparseable body, ...) aborts the operation and leaves the
+       database completely untouched — we never fall back to 'user'.
+       ------------------------------------------------------------------ */
+    let memberResponse;
+    try {
+      memberResponse = await fetch(`https://discord.com/api/users/@me/guilds/${discordGuildId}/member`, {
+        headers: {
+          Authorization: `Bearer ${provider_token}`,
+        },
+      });
+    } catch (discordErr) {
+      console.error('[sync-discord-roles] Discord API request threw; aborting without changes.', discordErr);
+      return json({ error: 'Discord API request failed; no changes made' }, 502);
+    }
+
+    if (memberResponse.status !== 200) {
+      let errText = '';
+      try { errText = await memberResponse.text(); } catch { /* ignore */ }
+      console.error(`[sync-discord-roles] Discord API returned status ${memberResponse.status}; aborting without changes. ${errText}`);
+      return json({ error: `Discord API returned status ${memberResponse.status}; no changes made` }, 502);
+    }
+
+    let memberData;
+    try {
+      memberData = await memberResponse.json();
+    } catch (parseErr) {
+      console.error('[sync-discord-roles] Could not parse Discord response body; aborting without changes.', parseErr);
+      return json({ error: 'Invalid Discord API response; no changes made' }, 502);
+    }
+
+    /* ------------------------------------------------------------------
+       STEP 5 — Derive the application role from the verified Discord data.
+       ------------------------------------------------------------------ */
+    const discordUserId = memberData?.user?.id || '';
+    const memberRoles = memberData?.roles || [];
+
+    const ownerUserId = process.env.DISCORD_OWNER_USER_ID;
+    const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID;
+    const reviewerRoleId = process.env.DISCORD_REVIEWER_ROLE_ID;
+
+    let appRole = 'user';
+    if (ownerUserId && String(discordUserId) === String(ownerUserId)) {
+      appRole = 'owner';
+    } else if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
+      appRole = 'admin';
+    } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
+      appRole = 'staff';
+    }
+
+    /* ------------------------------------------------------------------
+       STEP 6 — Persist the verified role.
+       Preserve any existing profile fields; for a brand-new user, populate
+       the base details from Supabase Auth.
+       ------------------------------------------------------------------ */
     let profileToSave;
     if (existingProfile) {
       profileToSave = { ...existingProfile, role: appRole };
     } else {
       const { data: { user }, error: getUserError } = await supabaseAdmin.auth.admin.getUser(userId);
       if (getUserError || !user) {
-        return new Response(JSON.stringify({ error: `User not found in auth: ${getUserError?.message || ''}` }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json({ error: `User not found in auth: ${getUserError?.message || ''}` }, 404);
       }
       const meta = user.user_metadata || {};
       profileToSave = {
@@ -123,22 +160,13 @@ export default async (req) => {
       .single();
 
     if (updateError) {
-      return new Response(JSON.stringify({ error: `Failed to update user role in database: ${updateError.message}` }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return json({ error: `Failed to update user role in database: ${updateError.message}` }, 500);
     }
 
-    return new Response(JSON.stringify(updatedProfile), {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json(updatedProfile, 200);
 
   } catch (err) {
-    return new Response(JSON.stringify({ error: `Internal server error: ${err.message}` }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return json({ error: `Internal server error: ${err.message}` }, 500);
   }
 };
 
