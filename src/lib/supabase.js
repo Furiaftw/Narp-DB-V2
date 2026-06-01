@@ -66,7 +66,12 @@ export const fetchMyProfile = async () => {
   const session = await getCurrentSession();
   if (!session?.user) return null;
 
-  if (session.provider_token) {
+  // Only attempt a Discord role sync when we have an explicit provider token.
+  // Supabase only exposes `provider_token` immediately after an OAuth sign-in;
+  // on a standard page reload the restored session has it as undefined/null.
+  // Calling the sync without a valid token would recompute the role from a
+  // failed Discord lookup and could downgrade the user, so we skip it entirely.
+  if (typeof session.provider_token === 'string' && session.provider_token.length > 0) {
     try {
       const syncRes = await fetch('/.netlify/functions/sync-discord-roles', {
         method: 'POST',
