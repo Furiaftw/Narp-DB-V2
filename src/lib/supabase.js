@@ -33,7 +33,10 @@ export const signInWithDiscord = async () => {
   if (!supabase) throw new Error('Supabase is not configured');
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'discord',
-    options: { redirectTo: window.location.origin },
+    options: {
+      redirectTo: window.location.origin,
+      scopes: 'identify email guilds guilds.members.read'
+    },
   });
   if (error) throw error;
 };
@@ -62,6 +65,25 @@ export const fetchMyProfile = async () => {
   if (!supabase) return null;
   const session = await getCurrentSession();
   if (!session?.user) return null;
+
+  if (session.provider_token) {
+    try {
+      const syncRes = await fetch('/.netlify/functions/sync-discord-roles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_token: session.provider_token,
+          userId: session.user.id
+        })
+      });
+      if (syncRes.ok) {
+        return await syncRes.json();
+      }
+    } catch (err) {
+      console.warn('[NARP] Role sync failed, falling back to local profile fetch:', err);
+    }
+  }
+
   const { data, error } = await supabase
     .from('profiles')
     .select('id, email, username, avatar_url, role, discord_id')

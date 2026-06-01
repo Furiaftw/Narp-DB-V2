@@ -1833,7 +1833,7 @@ const maskEmail = (email) => {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseReady, devRole, onToggleDevRole }) {
+function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -1871,8 +1871,6 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
     );
   }
 
-  const canManageUsers = activeProfile.role === 'admin' || activeProfile.role === 'owner';
-
   const roleColors = {
     owner: 'bg-amber-500 text-amber-50 border-amber-600',
     admin: 'bg-indigo-500 text-indigo-50 border-indigo-600',
@@ -1900,13 +1898,6 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {canManageUsers && (
-            <button onClick={() => { setOpen(false); onOpenManagement(); }}
-                    type="button"
-                    className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5">
-              <Icon n="Shield" size={14} className="text-amber-500"/> Manage Users & Whitelist
-            </button>
-          )}
           {!supabaseReady && (
             <button onClick={onToggleDevRole}
                     type="button"
@@ -1921,225 +1912,6 @@ function UserMenu({ profile, onSignIn, onSignOut, onOpenManagement, supabaseRead
           </button>
         </div>
       )}
-    </div>
-  );
-}
-
-/* ============================================================================
-   MODAL: UserManagementModal
-   ============================================================================ */
-function UserManagementModal({ currentUserId, isOwner, onClose }) {
-  const [activeTab, setActiveTab] = useState('people'); // 'people' | 'whitelist'
-  const [profiles, setProfiles]   = useState([]);
-  const [whitelist, setWhitelist] = useState([]);
-  const [loading, setLoading]     = useState(true);
-  const [error, setError]         = useState('');
-  const [savingId, setSavingId]   = useState(null);
-  const [newEmail, setNewEmail]   = useState('');
-  const [newRole,  setNewRole]    = useState('staff');
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [p, w] = await Promise.all([
-        fetchAllProfiles(),
-        fetchWhitelist(),
-      ]);
-      setProfiles(p);
-      setWhitelist(w);
-      setError('');
-    } catch (e) {
-      setError(e.message || 'Failed to load.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { refresh(); }, [refresh]);
-
-  const visibleProfiles = isOwner
-    ? profiles
-    : profiles.filter(p => p.role === 'user' || p.role === 'staff' || p.id === currentUserId);
-  const visibleWhitelist = isOwner ? whitelist : whitelist.filter(w => w.role === 'staff');
-
-  const changeRole = async (userId, role) => {
-    setSavingId(userId);
-    try {
-      await setUserRole(userId, role);
-      setProfiles(prev => prev.map(p => p.id === userId ? { ...p, role } : p));
-      setError('');
-    } catch (e) {
-      setError(e.message || 'Update failed. (Owner-only action?)');
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const handleAddWhitelist = async () => {
-    const email = newEmail.trim().toLowerCase();
-    if (!email || !email.includes('@')) { setError('Enter a valid email.'); return; }
-    if (newRole === 'admin' && !isOwner) { setError('Only the owner can whitelist admins.'); return; }
-    try {
-      await addToWhitelist(email, newRole);
-      setNewEmail('');
-      setNewRole('staff');
-      await refresh();
-      setError('');
-    } catch (e) {
-      setError(e.message || 'Add failed.');
-    }
-  };
-
-  const handleRemoveWhitelist = async (email, role) => {
-    if (role === 'admin' && !isOwner) { setError('Only the owner can remove admin whitelist entries.'); return; }
-    try {
-      await removeFromWhitelist(email);
-      await refresh();
-      setError('');
-    } catch (e) {
-      setError(e.message || 'Remove failed.');
-    }
-  };
-
-  const allowedRolesFor = (target) => {
-    if (target.id === currentUserId) return null;
-    if (target.role === 'owner')     return null;
-    if (isOwner)                      return ['user', 'staff', 'admin'];
-    if (target.role === 'user' || target.role === 'staff') return ['user', 'staff'];
-    return null;
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-3xl w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon n="Shield" size={20} className="text-amber-400" />
-            <h3 className="font-bold text-lg">Manage Users & Whitelist</h3>
-          </div>
-          <button onClick={onClose}><Icon n="X" size={18} /></button>
-        </div>
-
-        <div className="border-b border-slate-200 px-6 pt-3 shrink-0 flex gap-1">
-          {['people', 'whitelist'].map(t => (
-            <button key={t} onClick={() => setActiveTab(t)}
-                    className={`px-4 py-2.5 text-sm font-bold border-b-2 -mb-px ${activeTab === t ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-              {t === 'people' ? 'People' : 'Whitelist'}
-            </button>
-          ))}
-        </div>
-
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {error && (
-            <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold">{error}</div>
-          )}
-
-          {activeTab === 'people' && (
-            <>
-              <p className="text-sm text-slate-600 mb-6">
-                {isOwner
-                  ? 'Promote signed-in players to Reviewer or admin. Owner cannot be modified via UI — change via SQL.'
-                  : 'Promote signed-in players to Reviewer. Admin-level changes require the owner.'}
-              </p>
-              {loading ? (
-                <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
-              ) : visibleProfiles.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-sm font-semibold">No users to display.</div>
-              ) : (
-                <div className="space-y-2">
-                  {visibleProfiles.map(p => {
-                    const allowedRoles = allowedRolesFor(p);
-                    const isMe = p.id === currentUserId;
-                    return (
-                      <div key={p.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                        <ProfileAvatar profile={p} className="w-10 h-10 rounded-lg shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-slate-800 truncate flex items-center gap-2">
-                            {p.username || 'No name'} {isMe && <span className="text-[10px] font-bold text-slate-400 uppercase">(you)</span>}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${
-                            p.role === 'owner' ? 'bg-amber-50 border-amber-300 text-amber-800'
-                            : p.role === 'admin' ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
-                            : p.role === 'staff' ? 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                            : 'bg-slate-100 border-slate-300 text-slate-700'
-                          }`}>{p.role === 'staff' ? 'Reviewer' : p.role}</span>
-                          {allowedRoles ? (
-                            <select value={p.role} disabled={savingId === p.id}
-                                    onChange={e => changeRole(p.id, e.target.value)}
-                                    className="text-xs font-bold border border-slate-300 rounded-lg px-2 py-1 bg-white disabled:opacity-50">
-                              {allowedRoles.map(r => <option key={r} value={r}>{r === 'staff' ? 'Reviewer' : r}</option>)}
-                            </select>
-                          ) : (
-                            <span className="text-[10px] text-slate-400 italic">
-                              {isMe ? 'cannot self-edit' : 'protected'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          )}
-
-          {activeTab === 'whitelist' && (
-            <>
-              <p className="text-sm text-slate-600 mb-4">
-                {isOwner
-                  ? 'Pre-approve emails. When someone matching an entry signs in with Google, they get that role immediately. Existing users get updated on the spot.'
-                  : 'Pre-approve Reviewer emails. Admin-level whitelist entries are managed by the owner only.'}
-              </p>
-
-              <div className="flex gap-2 mb-5 flex-wrap">
-                <input type="email" placeholder="someone@gmail.com"
-                       value={newEmail} onChange={e => setNewEmail(e.target.value)}
-                       className="flex-1 min-w-[200px] border border-slate-300 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
-                <select value={newRole} onChange={e => setNewRole(e.target.value)}
-                        className="border border-slate-300 rounded-xl px-3 py-2 text-sm font-bold bg-white">
-                  <option value="staff">Reviewer</option>
-                  {isOwner && <option value="admin">admin</option>}
-                </select>
-                <button onClick={handleAddWhitelist}
-                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-2 rounded-xl font-bold text-sm">
-                  Add
-                </button>
-              </div>
-
-              {loading ? (
-                <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
-              ) : visibleWhitelist.length === 0 ? (
-                <div className="text-center py-8 text-slate-400 text-sm font-semibold">No whitelist entries yet.</div>
-              ) : (
-                <div className="space-y-2">
-                  {visibleWhitelist.map(w => (
-                    <div key={w.email} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
-                      <Icon n="Tag" size={14} className="text-slate-400 shrink-0"/>
-                      <span className="text-sm font-semibold text-slate-800 flex-1 truncate">{w.email}</span>
-                      <span className={`text-[10px] font-bold uppercase px-2 py-1 rounded border ${
-                        w.role === 'admin' ? 'bg-indigo-50 border-indigo-300 text-indigo-800'
-                        : 'bg-emerald-50 border-emerald-300 text-emerald-800'
-                      }`}>{w.role === 'staff' ? 'Reviewer' : w.role}</span>
-                      <button onClick={() => handleRemoveWhitelist(w.email, w.role)}
-                              className="text-rose-500 hover:bg-rose-50 p-1.5 rounded-md">
-                        <Icon n="Trash" size={14}/>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
-          <div className="mt-6 flex justify-end">
-            <button onClick={refresh} className="text-xs font-bold text-indigo-600 hover:bg-indigo-50 px-3 py-2 rounded-lg flex items-center gap-1.5">
-              <Icon n="Refresh" size={12}/> Refresh
-            </button>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }
@@ -2382,7 +2154,7 @@ export default function App() {
     return next;
   }), []);
 
-  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, userMgmt: false, audit: false, manageBL: false });
+  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false });
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -2747,7 +2519,6 @@ export default function App() {
             onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
             onSignIn={handleSignIn}
             onSignOut={handleSignOut}
-            onOpenManagement={() => setModals(m => ({ ...m, userMgmt: true }))}
           />
         </div>
       </div>
@@ -2893,12 +2664,7 @@ export default function App() {
           onEdit={(item) => setAdminForm({ r: item, tab: 'bloodlines' })}
           onDelete={(item) => setConfirmDel({ id: item._id, name: item.name, tab: 'bloodlines' })} />
       )}
-      {modals.userMgmt && isAdmin && (
-        <UserManagementModal
-          currentUserId={profile?.id}
-          isOwner={isOwner}
-          onClose={() => setModals(m => ({ ...m, userMgmt: false }))} />
-      )}
+
 
       {confirmDel && (() => {
         const effectiveTab = confirmDel.tab || tab;
