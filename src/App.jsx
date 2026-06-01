@@ -2391,7 +2391,7 @@ export default function App() {
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
 
   useEffect(() => {
-    async function initDiscordActivity() {
+    async function initializeDiscordActivity() {
       if (window.parent !== window) {
         const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
         await discordSdk.ready();
@@ -2413,13 +2413,16 @@ export default function App() {
         });
 
         const data = await response.json();
-        if (data.session && supabase) {
-          await supabase.auth.setSession(data.session);
+        if (data.email && data.password && supabase) {
+          await supabase.auth.signInWithPassword({
+            email: data.email,
+            password: data.password,
+          });
         }
       }
     }
 
-    initDiscordActivity().catch(err => {
+    initializeDiscordActivity().catch(err => {
       console.error("Discord activity SDK login failed:", err);
     });
   }, []);
