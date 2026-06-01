@@ -433,20 +433,30 @@ const normalizeDB = (d) => ({
 });
 
 const loadDB = async () => {
-  if (isSupabaseConfigured()) {
-    try {
-      const remote = await fetchAllFromSupabase();
-      if (remote) {
-        const normalized = normalizeDB(remote);
-        LS.set(STORAGE.CACHE, { ...normalized, ts: Date.now() });
-        return normalized;
+  try {
+    if (isSupabaseConfigured()) {
+      try {
+        const remote = await fetchAllFromSupabase();
+        if (remote) {
+          const normalized = normalizeDB(remote);
+          LS.set(STORAGE.CACHE, { ...normalized, ts: Date.now() });
+          return normalized;
+        }
+      } catch (err) {
+        console.warn('[NARP] Supabase fetch failed; falling back to local cache.', err);
       }
-    } catch (err) {
-      console.warn('[NARP] Supabase fetch failed; falling back to local cache.', err);
     }
+    const cached = LS.get(STORAGE.CACHE, null);
+    if (cached?.jutsus && Array.isArray(cached.jutsus) && cached.jutsus.length) {
+      try {
+        return normalizeDB(cached);
+      } catch (cachedErr) {
+        console.warn('[NARP] Cached DB normalization failed; falling back to static seed.', cachedErr);
+      }
+    }
+  } catch (globalErr) {
+    console.warn('[NARP] Unexpected error in loadDB, falling back to static seed.', globalErr);
   }
-  const cached = LS.get(STORAGE.CACHE, null);
-  if (cached?.jutsus?.length) return normalizeDB(cached);
   LS.set(STORAGE.CACHE, { ...STATIC_SEED, ts: Date.now() });
   return normalizeDB(STATIC_SEED);
 };
@@ -2167,7 +2177,12 @@ export default function App() {
     async function initializeDiscordActivity() {
       if (window.parent !== window) {
         const discordSdk = new DiscordSDK(import.meta.env.VITE_DISCORD_CLIENT_ID);
-        await discordSdk.ready();
+        // Add a 3-second timeout safeguard to prevent hanging inside generic iframe previews/environments
+        const readyPromise = discordSdk.ready();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Discord activity SDK ready timeout')), 3000)
+        );
+        await Promise.race([readyPromise, timeoutPromise]);
 
         const { code } = await discordSdk.commands.authorize({
           client_id: import.meta.env.VITE_DISCORD_CLIENT_ID,
@@ -2207,7 +2222,19 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    loadDB().then(d => { if (!cancelled) { setDb(d); setLoading(false); } });
+    loadDB()
+      .then(d => {
+        if (!cancelled) {
+          setDb(d);
+          setLoading(false);
+        }
+      })
+      .catch(err => {
+        console.error('[NARP] loadDB failed with error:', err);
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => { if (!loading) LS.set(STORAGE.CACHE, { ...db, ts: Date.now() }); }, [db, loading]);
@@ -2284,13 +2311,22 @@ export default function App() {
 
   useEffect(() => {
     if (!supabaseReady || !profile) return;
-    const channel = subscribeToDatabaseChanges(() => {
-      refreshDB();
-      refreshPending();
-    });
+    let channel = null;
+    try {
+      channel = subscribeToDatabaseChanges(() => {
+        refreshDB();
+        refreshPending();
+      });
+    } catch (err) {
+      console.warn('[NARP] Failed to subscribe to database changes:', err);
+    }
     return () => {
       if (channel) {
-        supabase.removeChannel(channel);
+        try {
+          supabase.removeChannel(channel);
+        } catch (err) {
+          console.warn('[NARP] Failed to remove database subscription channel:', err);
+        }
       }
     };
   }, [supabaseReady, profile, refreshDB, refreshPending]);
