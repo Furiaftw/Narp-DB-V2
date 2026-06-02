@@ -248,7 +248,7 @@ export const fetchReviewChats = async (pendingId) => {
   try {
     const { data, error } = await supabase
       .from('pending_chats')
-      .select('*, profiles(username, role)')
+      .select('*, profiles(username, avatar_url, role)')
       .eq('pending_id', pendingId)
       .order('created_at', { ascending: true });
 

@@ -2016,6 +2016,62 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
   }, [isChatOpen, refreshTrigger, pending.id]);
 
   useEffect(() => {
+    if (!isChatOpen || !pending?.id || !supabase) return;
+
+    const channel = supabase
+      .channel(`pending-chats-${pending.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'pending_chats',
+          filter: `pending_id=eq.${pending.id}`
+        },
+        async (payload) => {
+          const newChat = payload.new;
+          if (!newChat) return;
+          try {
+            const { data: profile, error } = await supabase
+              .from('profiles')
+              .select('username, avatar_url, role')
+              .eq('id', newChat.sender_id)
+              .single();
+
+            const newMessage = {
+              ...newChat,
+              profiles: error ? null : profile
+            };
+
+            setChatMessages((prev) => {
+              if (prev.some((msg) => msg.id === newMessage.id)) {
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
+          } catch (err) {
+            console.error('[NARP] Realtime handler error joining profile:', err);
+            const newMessage = {
+              ...newChat,
+              profiles: null
+            };
+            setChatMessages((prev) => {
+              if (prev.some((msg) => msg.id === newMessage.id)) {
+                return prev;
+              }
+              return [...prev, newMessage];
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isChatOpen, pending?.id]);
+
+  useEffect(() => {
     if (isChatOpen) {
       scrollToBottom();
     }
@@ -2182,6 +2238,13 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                       }`}
                     >
                       <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                        {msg.profiles?.avatar_url && (
+                          <img
+                            src={msg.profiles.avatar_url}
+                            alt={senderName}
+                            className="w-8 h-8 rounded-full object-cover shrink-0"
+                          />
+                        )}
                         <span className={`font-serif font-bold text-xs ${isMe ? 'text-amber-100' : 'text-slate-900'}`}>
                           {senderName}
                         </span>
@@ -2193,7 +2256,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                                 ? 'bg-indigo-100 text-indigo-700'
                                 : 'bg-emerald-100 text-emerald-700'
                           }`}>
-                            {msg.profiles.role === 'staff' ? 'Reviewer' : msg.profiles.role}
+                            {msg.profiles.role === 'staff' ? 'Reviewer' : msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role}
                           </span>
                         )}
                         <span className={`text-[10px] ${isMe ? 'text-amber-200' : 'text-slate-400'}`}>
