@@ -147,11 +147,21 @@ export const updateMyWorkThreadId = async (threadId) => {
   return data;
 };
 
+export const setUserWorkThreadId = async (userId, threadId) => {
+  if (!supabase) return;
+  const clean = (threadId || '').trim();
+  const { error } = await supabase
+    .from('profiles')
+    .update({ work_thread_id: clean || null })
+    .eq('id', userId);
+  if (error) throw error;
+};
+
 export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id')
     .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];

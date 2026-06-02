@@ -15,7 +15,7 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
-  updateMyWorkThreadId,
+  setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
   fetchWhitelist,
@@ -1899,6 +1899,59 @@ const maskEmail = (email) => {
 };
 
 /* ============================================================================
+   COMPONENT: MemberWorkThreadInput
+   ============================================================================ */
+function MemberWorkThreadInput({ member, onSave }) {
+  const [threadInput, setThreadInput] = useState(member.work_thread_id || '');
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(''); // 'success', 'error', or ''
+
+  useEffect(() => {
+    setThreadInput(member.work_thread_id || '');
+  }, [member.work_thread_id]);
+
+  const handleSave = async () => {
+    try {
+      setSaving(true);
+      setStatus('');
+      await onSave(member.id, threadInput);
+      setStatus('success');
+      setTimeout(() => setStatus(''), 2000);
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const hasChanged = (threadInput || '').trim() !== (member.work_thread_id || '').trim();
+
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        type="text"
+        placeholder="Thread ID..."
+        value={threadInput}
+        onChange={(e) => setThreadInput(e.target.value)}
+        className="w-36 text-xs px-2 py-1 border border-slate-200 rounded-md bg-white text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+      />
+      <button
+        type="button"
+        onClick={handleSave}
+        disabled={saving || !hasChanged}
+        className="text-[10px] px-2 py-1 font-bold rounded-md bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-30 transition-colors shrink-0"
+      >
+        {saving ? '...' : 'Save'}
+      </button>
+      {status === 'success' && (
+        <span className="text-emerald-600 text-[10px] font-bold" title="Saved successfully">✓</span>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
 function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate }) {
@@ -1912,37 +1965,6 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
     avatar_url: null,
     role: devRole,
     work_thread_id: profile?.work_thread_id || '',
-  };
-
-  const [threadInput, setThreadInput] = useState(activeProfile?.work_thread_id || '');
-  const [savingThread, setSavingThread] = useState(false);
-  const [saveStatus, setSaveStatus] = useState('');
-
-  useEffect(() => {
-    setThreadInput(activeProfile?.work_thread_id || '');
-  }, [activeProfile?.work_thread_id]);
-
-  const handleSaveThread = async () => {
-    try {
-      setSavingThread(true);
-      setSaveStatus('');
-      if (!supabaseReady) {
-        onProfileUpdate?.({
-          ...profile,
-          work_thread_id: threadInput
-        });
-        setSaveStatus('Saved (Dev simulation)!');
-        return;
-      }
-      const updatedProfile = await updateMyWorkThreadId(threadInput);
-      onProfileUpdate?.(updatedProfile);
-      setSaveStatus('Saved successfully!');
-    } catch (err) {
-      console.error(err);
-      setSaveStatus('Save failed: ' + err.message);
-    } finally {
-      setSavingThread(false);
-    }
   };
 
   useEffect(() => {
@@ -2004,33 +2026,6 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
                     className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-t border-slate-100">
               <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole === 'staff' ? 'Reviewer' : devRole})
             </button>
-          )}
-          {activeProfile && ['staff', 'admin', 'owner'].includes(activeProfile.role) && (
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col gap-1.5">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase">Personal Work Thread ID</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="Thread ID..."
-                  value={threadInput}
-                  onChange={(e) => setThreadInput(e.target.value)}
-                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveThread}
-                  disabled={savingThread}
-                  className="text-xs px-3 py-1.5 font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors"
-                >
-                  {savingThread ? '...' : 'Save'}
-                </button>
-              </div>
-              {saveStatus && (
-                <div className={`text-[10px] font-semibold ${saveStatus.includes('failed') ? 'text-rose-500' : 'text-emerald-600'}`}>
-                  {saveStatus}
-                </div>
-              )}
-            </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
                   type="button"
@@ -2778,6 +2773,16 @@ export default function App() {
     } catch (err) {
       console.error('[NARP] Failed to update user role:', err);
       alert('Failed to update role: ' + (err.message || err));
+    }
+  };
+
+  const handleWorkThreadChange = async (userId, threadId) => {
+    try {
+      await setUserWorkThreadId(userId, threadId);
+      setProfilesList(prev => prev.map(p => p.id === userId ? { ...p, work_thread_id: threadId } : p));
+    } catch (err) {
+      console.error('[NARP] Failed to update user work thread:', err);
+      throw err;
     }
   };
 
@@ -3630,6 +3635,7 @@ export default function App() {
                           <th className="py-3 px-4">Member</th>
                           <th className="py-3 px-4">Discord User ID</th>
                           <th className="py-3 px-4">Joined At</th>
+                          <th className="py-3 px-4">Work Thread ID</th>
                           <th className="py-3 px-4 text-right">Role</th>
                         </tr>
                       </thead>
@@ -3667,6 +3673,9 @@ export default function App() {
                               </td>
                               <td className="py-3 px-4 text-slate-500 text-xs">
                                 {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                              </td>
+                              <td className="py-3 px-4">
+                                <MemberWorkThreadInput member={m} onSave={handleWorkThreadChange} />
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <select
