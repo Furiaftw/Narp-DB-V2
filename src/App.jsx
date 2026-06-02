@@ -33,7 +33,6 @@ import {
   fetchReviewChats,
   sendReviewChat,
   claimPendingSubmission,
-  bumpPendingSubmission,
 } from './lib/supabase';
 
 
@@ -2015,8 +2014,7 @@ function PendingJutsuCard({
   currentUserRole,
   refreshTrigger,
   onClaim,
-  isMySubmissionsView = false,
-  onBump
+  isMySubmissionsView = false
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -2059,7 +2057,7 @@ function PendingJutsuCard({
   );
 
   const elapsed = (() => {
-    const baseTimeStr = pending.last_status_change || pending.submitted_at;
+    const baseTimeStr = pending.submitted_at;
     if (!baseTimeStr) return { formatted: '', hours: 0 };
     const baseTime = new Date(baseTimeStr);
     const now = new Date();
@@ -2084,22 +2082,6 @@ function PendingJutsuCard({
     : elapsed.hours >= 24
       ? 'text-yellow-500'
       : 'text-green-500';
-
-  const [isBumping, setIsBumping] = useState(false);
-  const handleRequestUpdate = async () => {
-    if (isBumping) return;
-    setIsBumping(true);
-    try {
-      await bumpPendingSubmission(pending.id, name);
-      if (typeof onBump === 'function') {
-        await onBump();
-      }
-    } catch (err) {
-      alert('Failed to request update: ' + (err.message || err));
-    } finally {
-      setIsBumping(false);
-    }
-  };
 
   useEffect(() => {
     if (isChatOpen) {
@@ -2335,27 +2317,6 @@ function PendingJutsuCard({
             Review Chat
           </button>
         )}
-        {isMySubmissionsView && isMine && (
-          <button
-            onClick={handleRequestUpdate}
-            disabled={elapsed.hours < 24 || isBumping || pending.is_bumped}
-            className={`flex-1 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 transition-colors ${
-              (elapsed.hours < 24 || pending.is_bumped)
-                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
-                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
-            }`}
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={elapsed.hours >= 24 && !pending.is_bumped ? "animate-bounce" : ""}>
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-            </svg>
-            {pending.is_bumped
-              ? 'Update Requested'
-              : elapsed.hours < 24
-                ? `Update Available in ${24 - elapsed.hours} hours`
-                : 'Request Update'
-            }
-          </button>
-        )}
         {isStrictSubmitter && pending.status === 'pending_approval' && (
           <div className="text-[10px] text-slate-400 italic self-center">
             Another Reviewer must approve
@@ -2454,16 +2415,6 @@ function PendingJutsuCard({
                     </div>
                   ) : (
                     filteredMessages.map((msg) => {
-                      if (msg.is_system_message) {
-                        return (
-                          <div
-                            key={msg.id}
-                            className="text-gray-400 text-sm text-center italic my-1 w-full"
-                          >
-                            {msg.message}
-                          </div>
-                        );
-                      }
                       const isMe = msg.sender_id === currentUserId;
                       const senderName = msg.profiles?.username || 'Unknown User';
                       const isPrivate = msg.is_staff_only;
@@ -2910,8 +2861,8 @@ export default function App() {
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
-          // Priority 1: is_bumped === true OR status === 'pending_approval' ('Needs 2nd Approval')
-          if (p.is_bumped === true || p.status === 'pending_approval') {
+          // Priority 1: status === 'pending_approval' ('Needs 2nd Approval')
+          if (p.status === 'pending_approval') {
             return 1;
           }
           
@@ -2941,9 +2892,9 @@ export default function App() {
           return wA - wB;
         }
 
-        // Sub-sort by last_status_change ascending (oldest first). Fallback to submitted_at.
-        const timeA = new Date(a.last_status_change || a.submitted_at || 0).getTime();
-        const timeB = new Date(b.last_status_change || b.submitted_at || 0).getTime();
+        // Sub-sort by submitted_at ascending (oldest first).
+        const timeA = new Date(a.submitted_at || 0).getTime();
+        const timeB = new Date(b.submitted_at || 0).getTime();
         return timeA - timeB;
       });
 
@@ -3435,8 +3386,7 @@ export default function App() {
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
-                        isMySubmissionsView={false}
-                        onBump={refreshPending} />
+                        isMySubmissionsView={false} />
                     );
                   })}
                 </div>
@@ -3474,8 +3424,7 @@ export default function App() {
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
-                        isMySubmissionsView={true}
-                        onBump={refreshPending} />
+                        isMySubmissionsView={true} />
                     );
                   })}
                 </div>

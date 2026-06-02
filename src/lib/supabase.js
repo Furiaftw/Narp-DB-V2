@@ -183,20 +183,10 @@ export const removeFromWhitelist = async (email) => {
 export const fetchPendingJutsus = async () => {
   if (!supabase) return [];
   // Manual join for submitter/reviewer, and select/join assignee.
-  // We exclude 'has_user_unread' to completely remove the bell notification feature as requested.
-  // We first try with 'last_status_change, is_bumped'. If that fails (e.g. database reverted), we fallback to core columns.
-  let result = await supabase
+  const result = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
     .order('submitted_at', { ascending: false });
-
-  if (result.error) {
-    console.warn('[NARP] fetchPendingJutsus with full columns failed, falling back to core columns:', result.error);
-    result = await supabase
-      .from('pending_jutsus')
-      .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
-      .order('submitted_at', { ascending: false });
-  }
 
   if (result.error) throw result.error;
   const pending = result.data;
@@ -267,44 +257,6 @@ export const updatePendingJutsuData = async (id, newData) => {
   if (!data || data.length === 0) throw new Error('Edit blocked by database security or row not found.');
 };
 
-export const bumpPendingSubmission = async (id, itemName) => {
-  if (!supabase) throw new Error('Supabase is not initialized');
-  
-  // 1. Update the database row to set is_bumped = true and reset last_status_change = now()
-  const { data, error } = await supabase
-    .from('pending_jutsus')
-    .update({
-      is_bumped: true,
-      last_status_change: new Date().toISOString()
-    })
-    .eq('id', id)
-    .select();
-    
-  if (error) throw error;
-  
-  // 2. Trigger silent Discord webhook
-  const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
-  if (baseUrl) {
-    const threadId = import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
-    const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
-    
-    await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        content: `🔔 **Bump:** A user has requested an update on their pending submission: **${itemName}**.`,
-        flags: 4096 // Silent message / suppress notifications
-      })
-    }).catch(err => {
-      console.warn('[NARP] Discord bump webhook failed:', err);
-    });
-  }
-  
-  return data;
-};
-
 export const markSubmissionAsRead = async (pendingId) => {
   // Safe no-op since bell notifications/unread states have been removed
   return;
@@ -330,7 +282,7 @@ export const fetchReviewChats = async (pendingId) => {
   }
 };
 
-export const sendReviewChat = async (pendingId, message, isStaffOnly = false, isSystemMessage = false) => {
+export const sendReviewChat = async (pendingId, message, isStaffOnly = false) => {
   if (!supabase) throw new Error('Supabase is not initialized');
   try {
     const session = await getCurrentSession();
@@ -343,8 +295,7 @@ export const sendReviewChat = async (pendingId, message, isStaffOnly = false, is
         pending_id: pendingId,
         message: message,
         sender_id: session.user.id,
-        is_staff_only: isStaffOnly,
-        is_system_message: isSystemMessage
+        is_staff_only: isStaffOnly
       })
       .select();
 
