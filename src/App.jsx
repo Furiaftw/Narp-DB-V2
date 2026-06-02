@@ -269,7 +269,6 @@ const ICONS = {
   Lock:     <><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
   Settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
   User:     <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
-  Bell:     <><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></>,
 };
 
 const Icon = ({ n, size = 24, className = '' }) => (
@@ -2019,8 +2018,7 @@ function PendingJutsuCard({
   refreshTrigger,
   onClaim,
   isMySubmissionsView = false,
-  onBump,
-  onNudge
+  onBump
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -2321,13 +2319,6 @@ function PendingJutsuCard({
           <button onClick={() => onCancel(pending.id)}
                   className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
             <Icon n="X" size={14}/> Cancel
-          </button>
-        )}
-        {hasStaffPrivileges && onNudge && (
-          <button onClick={() => onNudge(pending.id)}
-                  className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Send Nudge to Submitter">
-            <Icon n="Bell" size={14}/> Send Nudge
           </button>
         )}
         {!isClaimed && hasStaffPrivileges && (
@@ -3123,42 +3114,6 @@ export default function App() {
       }
 
       await approvePendingJutsu(id);
-
-      // Fire off send-user-dm right after database update succeeds
-      if (item) {
-        let discordId = item.submitter?.discord_id;
-        if (!discordId && item.submitted_by) {
-          try {
-            const { data: prof } = await supabase
-              .from('profiles')
-              .select('discord_id')
-              .eq('id', item.submitted_by)
-              .maybeSingle();
-            discordId = prof?.discord_id;
-          } catch (profErr) {
-            console.warn('Failed to fetch profile for discord_id:', profErr);
-          }
-        }
-
-        if (discordId) {
-          const isDelete = item.operation === 'delete';
-          const displayData = isDelete
-            ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
-            : item.data;
-          const itemName = displayData?.name || 'Unknown';
-
-          fetch('/.netlify/functions/send-user-dm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              discordId,
-              actionType: 'approve',
-              itemName
-            })
-          }).catch(err => console.warn('[DM Failsafe] Approve DM call failed:', err));
-        }
-      }
-
       await refreshPending();
       await refreshDB();
     } catch (e) {
@@ -3224,35 +3179,6 @@ export default function App() {
         console.warn('Failed to send reviewer second approval ping:', pingErr);
       });
 
-      // Fire off send-user-dm right after database update succeeds
-      if (item) {
-        let discordId = item.submitter?.discord_id;
-        if (!discordId && item.submitted_by) {
-          try {
-            const { data: prof } = await supabase
-              .from('profiles')
-              .select('discord_id')
-              .eq('id', item.submitted_by)
-              .maybeSingle();
-            discordId = prof?.discord_id;
-          } catch (profErr) {
-            console.warn('Failed to fetch profile for discord_id:', profErr);
-          }
-        }
-
-        if (discordId) {
-          fetch('/.netlify/functions/send-user-dm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              discordId,
-              actionType: 'handoff',
-              itemName
-            })
-          }).catch(err => console.warn('[DM Failsafe] Handoff DM call failed:', err));
-        }
-      }
-
       await refreshPending();
     } catch (e) {
       alert('Review failed: ' + e.message);
@@ -3263,93 +3189,9 @@ export default function App() {
     try {
       if (!profile?.id) return;
       await claimPendingSubmission(id, profile.id);
-
-      // Fire off send-user-dm right after database update succeeds
-      const item = pendingJutsus.find(p => p.id === id);
-      if (item) {
-        let discordId = item.submitter?.discord_id;
-        if (!discordId && item.submitted_by) {
-          try {
-            const { data: prof } = await supabase
-              .from('profiles')
-              .select('discord_id')
-              .eq('id', item.submitted_by)
-              .maybeSingle();
-            discordId = prof?.discord_id;
-          } catch (profErr) {
-            console.warn('Failed to fetch profile for discord_id:', profErr);
-          }
-        }
-
-        if (discordId) {
-          const isDelete = item.operation === 'delete';
-          const display = isDelete ? ((db.jutsus || []).find(j => j._id === item.target_id) || {}) : (item.data || {});
-          const itemName = display.name || 'Unknown Jutsu';
-
-          fetch('/.netlify/functions/send-user-dm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              discordId,
-              actionType: 'claim',
-              itemName
-            })
-          }).catch(err => console.warn('[DM Failsafe] Claim DM call failed:', err));
-        }
-      }
-
       await refreshPending();
     } catch (e) {
       alert('Claim failed: ' + e.message);
-    }
-  };
-
-  const handleNudgePending = async (id) => {
-    try {
-      const item = pendingJutsus.find(p => p.id === id);
-      if (item) {
-        let discordId = item.submitter?.discord_id;
-        if (!discordId && item.submitted_by) {
-          try {
-            const { data: prof } = await supabase
-              .from('profiles')
-              .select('discord_id')
-              .eq('id', item.submitted_by)
-              .maybeSingle();
-            discordId = prof?.discord_id;
-          } catch (profErr) {
-            console.warn('Failed to fetch profile for discord_id:', profErr);
-          }
-        }
-
-        if (discordId) {
-          const isDelete = item.operation === 'delete';
-          const display = isDelete ? ((db.jutsus || []).find(j => j._id === item.target_id) || {}) : (item.data || {});
-          const itemName = display.name || 'Unknown Jutsu';
-
-          fetch('/.netlify/functions/send-user-dm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              discordId,
-              actionType: 'nudge',
-              itemName
-            })
-          }).catch(err => console.warn('[DM Failsafe] Nudge DM call failed:', err));
-
-          try {
-            await sendReviewChat(id, `🔔 **Nudge:** Staff sent a direct message reminder to the submitter about this entry.`, true, true);
-          } catch (chatErr) {
-            console.warn('Failed to send nudge system chat:', chatErr);
-          }
-
-          alert('Nudge sent successfully!');
-        } else {
-          alert('Could not nudge: Submitter has no connected Discord ID.');
-        }
-      }
-    } catch (e) {
-      alert('Nudge failed: ' + e.message);
     }
   };
 
@@ -3603,8 +3445,7 @@ export default function App() {
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
                         isMySubmissionsView={false}
-                        onBump={refreshPending}
-                        onNudge={handleNudgePending} />
+                        onBump={refreshPending} />
                     );
                   })}
                 </div>
@@ -3643,8 +3484,7 @@ export default function App() {
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
                         isMySubmissionsView={true}
-                        onBump={refreshPending}
-                        onNudge={handleNudgePending} />
+                        onBump={refreshPending} />
                     );
                   })}
                 </div>
