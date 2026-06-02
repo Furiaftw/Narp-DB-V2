@@ -17,9 +17,13 @@ export default async (req: Request, context: Context) => {
   const script = `<script>window.__SUPABASE_CONFIG__=${JSON.stringify({ url, key })}</script>`;
   const injected = html.replace("</head>", `${script}</head>`);
 
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+
   return new Response(injected, {
     status: response.status,
-    headers: response.headers,
+    headers,
   });
 };
 

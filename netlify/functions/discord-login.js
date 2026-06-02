@@ -26,7 +26,7 @@ export default async (req) => {
     const adminRoleId = Netlify.env.get('DISCORD_ADMIN_ROLE_ID') || process.env.DISCORD_ADMIN_ROLE_ID;
     const reviewerRoleId = Netlify.env.get('DISCORD_REVIEWER_ROLE_ID') || process.env.DISCORD_REVIEWER_ROLE_ID;
 
-    const supabaseUrl = Netlify.env.get('VITE_SUPABASE_URL') || process.env.VITE_SUPABASE_URL;
+    const supabaseUrl = Netlify.env.get('VITE_SUPABASE_URL') || process.env.VITE_SUPABASE_URL || Netlify.env.get('SUPABASE_DATABASE_URL') || process.env.SUPABASE_DATABASE_URL || Netlify.env.get('VITE_SUPABASE_DATABASE_URL') || process.env.VITE_SUPABASE_DATABASE_URL;
     const supabaseServiceKey = Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY') || process.env.SUPABASE_SERVICE_ROLE_KEY;
 
     if (!discordClientId || !discordClientSecret || !supabaseUrl || !supabaseServiceKey) {
