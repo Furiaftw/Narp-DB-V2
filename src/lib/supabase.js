@@ -185,7 +185,7 @@ export const fetchPendingJutsus = async () => {
   // Manual join for submitter/reviewer, and select/join assignee
   const { data: pending, error } = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped')
     .order('submitted_at', { ascending: false });
   if (error) throw error;
   if (!pending?.length) return [];
@@ -255,6 +255,44 @@ export const updatePendingJutsuData = async (id, newData) => {
   if (!data || data.length === 0) throw new Error('Edit blocked by database security or row not found.');
 };
 
+export const bumpPendingSubmission = async (id, itemName) => {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  
+  // 1. Update the database row to set is_bumped = true and reset last_status_change = now()
+  const { data, error } = await supabase
+    .from('pending_jutsus')
+    .update({
+      is_bumped: true,
+      last_status_change: new Date().toISOString()
+    })
+    .eq('id', id)
+    .select();
+    
+  if (error) throw error;
+  
+  // 2. Trigger silent Discord webhook
+  const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
+  if (baseUrl) {
+    const threadId = import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
+    const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
+    
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: `🔔 **Bump:** A user has requested an update on their pending submission: **${itemName}**.`,
+        flags: 4096 // Silent message / suppress notifications
+      })
+    }).catch(err => {
+      console.warn('[NARP] Discord bump webhook failed:', err);
+    });
+  }
+  
+  return data;
+};
+
 export const fetchReviewChats = async (pendingId) => {
   if (!supabase) return null;
   try {
@@ -275,7 +313,7 @@ export const fetchReviewChats = async (pendingId) => {
   }
 };
 
-export const sendReviewChat = async (pendingId, message, isStaffOnly = false) => {
+export const sendReviewChat = async (pendingId, message, isStaffOnly = false, isSystemMessage = false) => {
   if (!supabase) throw new Error('Supabase is not initialized');
   try {
     const session = await getCurrentSession();
@@ -288,7 +326,8 @@ export const sendReviewChat = async (pendingId, message, isStaffOnly = false) =>
         pending_id: pendingId,
         message: message,
         sender_id: session.user.id,
-        is_staff_only: isStaffOnly
+        is_staff_only: isStaffOnly,
+        is_system_message: isSystemMessage
       })
       .select();
 
