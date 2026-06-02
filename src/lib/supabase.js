@@ -182,15 +182,15 @@ export const removeFromWhitelist = async (email) => {
 
 export const fetchPendingJutsus = async () => {
   if (!supabase) return [];
-  // Manual join — simpler than configuring a foreign-key relationship.
+  // Manual join for submitter/reviewer, and select/join assignee
   const { data: pending, error } = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
     .order('submitted_at', { ascending: false });
   if (error) throw error;
   if (!pending?.length) return [];
 
-  const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id]).filter(Boolean))];
+  const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
     .select('id, username, email, avatar_url, role, discord_id')
@@ -201,6 +201,7 @@ export const fetchPendingJutsus = async () => {
     ...p,
     submitter: profileById.get(p.submitted_by) || null,
     first_reviewer: p.first_reviewer_id ? (profileById.get(p.first_reviewer_id) || null) : null,
+    assignee: p.assignee || (p.assigned_to ? profileById.get(p.assigned_to) : null) || null,
   }));
 };
 
@@ -230,6 +231,17 @@ export const reviewPendingJutsu = async (id, reviewerId) => {
     })
     .eq('id', id);
   if (error) throw error;
+};
+
+export const claimPendingSubmission = async (pendingId, userId) => {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  const { data, error } = await supabase
+    .from('pending_jutsus')
+    .update({ assigned_to: userId })
+    .eq('id', pendingId)
+    .select();
+  if (error) throw error;
+  return data;
 };
 
 export const updatePendingJutsuData = async (id, newData) => {
@@ -263,7 +275,7 @@ export const fetchReviewChats = async (pendingId) => {
   }
 };
 
-export const sendReviewChat = async (pendingId, message) => {
+export const sendReviewChat = async (pendingId, message, isStaffOnly = false) => {
   if (!supabase) throw new Error('Supabase is not initialized');
   try {
     const session = await getCurrentSession();
@@ -275,7 +287,8 @@ export const sendReviewChat = async (pendingId, message) => {
       .insert({
         pending_id: pendingId,
         message: message,
-        sender_id: session.user.id
+        sender_id: session.user.id,
+        is_staff_only: isStaffOnly
       })
       .select();
 
