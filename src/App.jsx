@@ -150,7 +150,7 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
 
   // Determine pings
   const creatorPing = ping(submitterProfile);
-  const reviewerPing = (submitterProfile?.role === 'user') ? ping(firstReviewerProfile) : ping(submitterProfile);
+  const reviewerPing = firstReviewerProfile ? ping(firstReviewerProfile) : ping(submitterProfile);
   const secondEyes = ping(finalApproverProfile);
 
   // Decision + colour: green for approvals/creates, red for denials/deletes.
@@ -1986,12 +1986,18 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 
       <div className="flex gap-2 mt-1">
         {pending.status === 'pending_review' ? (
-          <button onClick={() => onReview(pending.id)}
-                  className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-            <Icon n="Check" size={14}/> Review (Step 1)
-          </button>
+          !isMine ? (
+            <button onClick={() => onReview(pending.id)}
+                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+              <Icon n="Check" size={14}/> Review (Step 1)
+            </button>
+          ) : (
+            <div className="text-[10px] text-slate-400 italic self-center">
+              Another Reviewer must perform Review (Step 1)
+            </div>
+          )
         ) : (
-          !isMine && (
+          (!isMine && pending.first_reviewer_id !== currentUserId) && (
             <button onClick={() => onApprove(pending.id)}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
               <Icon n="Check" size={14}/> Approve
@@ -2014,6 +2020,11 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
         {isMine && !isAdmin && pending.status === 'pending_approval' && (
           <div className="text-[10px] text-slate-400 italic self-center">
             Another Reviewer must approve
+          </div>
+        )}
+        {!isMine && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && !isAdmin && (
+          <div className="text-[10px] text-slate-400 italic self-center">
+            You reviewed this. Another Reviewer must approve.
           </div>
         )}
       </div>
@@ -2135,6 +2146,10 @@ const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'];
 const BOOL_FILTER_KEYS  = ['lck', 'lim', 'mul', 'hLck', 'hLim', 'hMul', 'hMP', 'hAsk'];
 
 export default function App() {
+  const headerRef = useRef(null);
+  const [headerHeight, setHeaderHeight] = useState(72);
+  const [visibleCount, setVisibleCount] = useState(200);
+
   const [db, setDb]           = useState({ jutsus: [], bloodlines: [], specializations: [] });
   const [loading, setLoading] = useState(true);
 
@@ -2164,6 +2179,21 @@ export default function App() {
     next.q = '';
     return next;
   }), []);
+
+  useEffect(() => {
+    setVisibleCount(200);
+  }, [f, tab]);
+
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const updateHeight = () => {
+      setHeaderHeight(headerRef.current.offsetHeight);
+    };
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(headerRef.current);
+    return () => observer.disconnect();
+  }, []);
 
   const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false });
   const [adminForm, setAdminForm]   = useState(null);
@@ -2348,8 +2378,26 @@ export default function App() {
         return true;
       }
       const payload = entity ? buildJutsuPayload(entity, operation === 'update') : null;
-      const status = role === 'user' ? 'pending_review' : 'pending_approval';
+      const status = 'pending_review';
       await submitPendingJutsu(operation, targetId, payload, status);
+
+      try {
+        const tab = t;
+        await fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            triggerType: 'creation',
+            itemName: entity?.name || 'Unknown',
+            itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
+          }),
+        });
+      } catch (err) {
+        console.warn('[NARP] Reviewer ping creation alert failed:', err);
+      }
+
       await refreshPending();
       return false;
     }
@@ -2425,7 +2473,29 @@ export default function App() {
   const handleReviewPending = async (id) => {
     try {
       if (!profile?.id) return;
+
+      const item = pendingJutsus.find(p => p.id === id);
+      const op = item?.operation;
+      const display = op === 'delete' ? ((db.jutsus || []).find(j => j._id === item?.target_id) || {}) : (item?.data || {});
+      const itemName = display.name || 'Unknown Jutsu';
+      const itemType = 'Jutsu';
+
       await reviewPendingJutsu(id, profile.id);
+
+      try {
+        await fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            triggerType: 'second_approval',
+            itemName,
+            itemType
+          })
+        });
+      } catch (pingErr) {
+        console.warn('Failed to send reviewer second approval ping:', pingErr);
+      }
+
       await refreshPending();
     } catch (e) {
       alert('Review failed: ' + e.message);
@@ -2540,52 +2610,55 @@ export default function App() {
   return (
     <div className="w-full min-h-screen bg-slate-200 flex flex-col font-sans text-slate-900">
 
-      {/* HEADER */}
-      <div className="bg-slate-900 text-white p-4 sticky top-0 z-40 flex flex-col sm:flex-row justify-between items-center shadow-lg gap-3">
-        <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-          <Icon n="Book" size={18} className="text-indigo-400" />
-          <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
-        </h1>
-        <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
-          <div className="flex items-center gap-2">
-            {isAdmin && (
-              <button onClick={() => setModals(m => ({ ...m, system: true }))}
-                      className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
-                <Icon n="Settings" size={14}/>
-                <span className="hidden sm:inline">System Tools</span>
-              </button>
-            )}
-            {tab === 'jutsus' && (
-              <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
-                <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
-                <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
-              </div>
-            )}
+      {/* HEADER AND FILTER BAR STICKY WRAPPER */}
+      <div ref={headerRef} className="sticky top-0 z-40 shrink-0 flex flex-col shadow-lg">
+        {/* HEADER */}
+        <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+          <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
+            <Icon n="Book" size={18} className="text-indigo-400" />
+            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
+          </h1>
+          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
+            <div className="flex items-center gap-2">
+              {isAdmin && (
+                <button onClick={() => setModals(m => ({ ...m, system: true }))}
+                        className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
+                  <Icon n="Settings" size={14}/>
+                  <span className="hidden sm:inline">System Tools</span>
+                </button>
+              )}
+              {tab === 'jutsus' && (
+                <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
+                  <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
+                  <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
+                </div>
+              )}
+            </div>
+            <UserMenu
+              profile={profile}
+              supabaseReady={supabaseReady}
+              devRole={devRole}
+              onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
+              onSignIn={handleSignIn}
+              onSignOut={handleSignOut}
+            />
           </div>
-          <UserMenu
-            profile={profile}
-            supabaseReady={supabaseReady}
-            devRole={devRole}
-            onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
-            onSignIn={handleSignIn}
-            onSignOut={handleSignOut}
-          />
         </div>
-      </div>
 
-      {/* FILTER BAR */}
-      <FilterBar
-        tab={tab} f={f} setF={setF}
-        activeFilterCount={fCount}
-        bloodlinesDb={sortedBloodlines}
-        specOptions={sortedSpecs}
-        clearF={clearF}
-        isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
-        onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })} />
+        {/* FILTER BAR */}
+        <FilterBar
+          tab={tab} f={f} setF={setF}
+          activeFilterCount={fCount}
+          bloodlinesDb={sortedBloodlines}
+          specOptions={sortedSpecs}
+          clearF={clearF}
+          isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
+          onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })} />
+      </div>
 
       {/* TAB BAR */}
       {isStaff && (
-        <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky top-[138px] sm:top-[72px] z-10">
+        <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky z-20" style={{ top: `${headerHeight}px` }}>
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
             {TABS.map(t => (
               <button key={t.id} onClick={() => switchTab(t.id)}
@@ -2612,7 +2685,7 @@ export default function App() {
               <>
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{filtJ.length} Results</div>
                 <div className={viewMode === 'card' ? 'grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 items-stretch' : 'flex flex-col gap-2'}>
-                  {filtJ.slice(0, 200).map(j => (
+                  {filtJ.slice(0, visibleCount).map(j => (
                     <JutsuCard key={j._id} j={j}
                                viewMode={viewMode} expRow={expRow} setExpRow={setExpRow}
                                pTags={pTags} setPersonalTagsForJutsu={setPersonalTagsForJutsu}
@@ -2623,9 +2696,17 @@ export default function App() {
                                onViewSlots={(jutsu) => setSlotsView(jutsu)} />
                   ))}
                 </div>
-                {filtJ.length > 200 && (
-                  <div className="mt-8 text-center text-sm font-semibold text-slate-500 bg-slate-200 py-3 rounded-xl">
-                    Showing the first 200 results. Try adding filters or a search term to find what you're looking for.
+                {filtJ.length > visibleCount && (
+                  <div className="mt-8 flex flex-col items-center gap-3">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                      Showing {visibleCount} of {filtJ.length} jutsus
+                    </p>
+                    <button
+                      onClick={() => setVisibleCount(prev => prev + 200)}
+                      className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl font-bold text-sm shadow-md transition-all flex items-center gap-2"
+                    >
+                      <Icon n="Plus" size={16} /> Load More
+                    </button>
                   </div>
                 )}
               </>
