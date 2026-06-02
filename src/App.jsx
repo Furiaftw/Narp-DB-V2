@@ -133,7 +133,7 @@ const getNatureColor = (n) => ({
      • staff queue (double-approver)  → submitter !== reviewer
      • admin direct write (single)    → submitter === reviewer (same user id)
    --------------------------------------------------------------------------- */
-async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile) {
+async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null) {
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return; // Logging not configured — skip silently.
 
@@ -202,10 +202,30 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     }],
   };
 
+  let body;
+  const headers = {};
+
+  if (chatTranscript) {
+    const nameSlug = (itemData?.name || 'entry')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/(^-|-$)/g, '');
+    const fileName = `transcript-${nameSlug || 'entry'}.txt`;
+
+    const blob = new Blob([chatTranscript], { type: 'text/plain' });
+    const formData = new FormData();
+    formData.append('file', blob, fileName);
+    formData.append('payload_json', JSON.stringify(payload));
+    body = formData;
+  } else {
+    headers['Content-Type'] = 'application/json';
+    body = JSON.stringify(payload);
+  }
+
   fetch(webhookUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    headers,
+    body,
   }).catch((err) => {
     // Never let a logging failure block the underlying database action.
     console.warn('[NARP] Discord log failed:', err);
@@ -2932,7 +2952,22 @@ export default function App() {
         const displayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
-        await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile);
+
+        try {
+          const chats = await fetchReviewChats(id);
+          let chatTranscript = null;
+          if (chats && chats.length > 0) {
+            chatTranscript = chats.map(c => {
+              const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
+              const name = c.profiles?.username || 'Unknown';
+              const msgText = c.message || '';
+              return `[${time}] ${name}:\n${msgText}`;
+            }).join('\n\n') + '\n\n';
+          }
+          await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile, chatTranscript);
+        } catch (discordErr) {
+          console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        }
       }
 
       await approvePendingJutsu(id);
@@ -2952,7 +2987,22 @@ export default function App() {
         const displayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
-        await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile);
+
+        try {
+          const chats = await fetchReviewChats(id);
+          let chatTranscript = null;
+          if (chats && chats.length > 0) {
+            chatTranscript = chats.map(c => {
+              const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
+              const name = c.profiles?.username || 'Unknown';
+              const msgText = c.message || '';
+              return `[${time}] ${name}:\n${msgText}`;
+            }).join('\n\n') + '\n\n';
+          }
+          await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript);
+        } catch (discordErr) {
+          console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        }
       }
 
       await cancelPendingJutsu(id);
