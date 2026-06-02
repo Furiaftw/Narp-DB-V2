@@ -434,7 +434,12 @@ const loadDB = async () => {
   try {
     if (isSupabaseConfigured()) {
       try {
-        const remote = await fetchAllFromSupabase();
+        // Add a 3-second timeout safeguard to prevent hanging on slow database networks
+        const fetchPromise = fetchAllFromSupabase();
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Supabase fetch timeout')), 3000)
+        );
+        const remote = await Promise.race([fetchPromise, timeoutPromise]);
         if (remote) {
           const normalized = normalizeDB(remote);
           LS.set(STORAGE.CACHE, { ...normalized, ts: Date.now() });
@@ -2191,7 +2196,7 @@ export default function App() {
     const observer = new ResizeObserver(updateHeight);
     observer.observe(headerRef.current);
     return () => observer.disconnect();
-  }, []);
+  }, [loading]);
 
   const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false });
   const [adminForm, setAdminForm]   = useState(null);
