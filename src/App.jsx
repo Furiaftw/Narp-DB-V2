@@ -2239,7 +2239,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             Claim Review
           </button>
         )}
-        {(isStrictSubmitter || hasStaffPrivileges) && (
+        {(isReviewerOrAdmin || isMine) && (
           <button
             onClick={() => setIsChatOpen(true)}
             className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
@@ -3086,6 +3086,11 @@ export default function App() {
     ).sort(sortByJutsu);
   }, [db.jutsus, f, sortByJutsu]);
 
+  const myPending = useMemo(() => {
+    if (!profile?.id) return [];
+    return pendingJutsus.filter(p => p.submitted_by === profile.id);
+  }, [pendingJutsus, profile?.id]);
+
   if (loading) {
     return (
       <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
@@ -3097,7 +3102,8 @@ export default function App() {
 
   const TABS = [
     { id: 'jutsus', label: 'Jutsus', count: (db.jutsus || []).length },
-    ...((isStaff || pendingJutsus.length > 0) ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
+    ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
+    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
@@ -3158,7 +3164,7 @@ export default function App() {
       </div>
 
       {/* TAB BAR */}
-      {isStaff && (
+      {(isStaff || !!profile) && (
         <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky z-20" style={{ top: `${headerHeight}px` }}>
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
             {TABS.map(t => (
@@ -3215,7 +3221,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'pending' && (isStaff || pendingJutsus.length > 0) && (
+        {tab === 'pending' && isStaff && (
           <div className="max-w-6xl mx-auto">
             {!pendingLoaded ? (
               <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading pending submissions...</div>
@@ -3229,6 +3235,43 @@ export default function App() {
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{pendingJutsus.length} Pending</div>
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
                   {pendingJutsus.map(p => {
+                    const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
+                    return (
+                      <PendingJutsuCard
+                        key={p.id}
+                        pending={p}
+                        originalJutsu={original}
+                        currentUserId={profile?.id}
+                        isAdmin={isAdmin}
+                        onApprove={handleApprovePending}
+                        onCancel={handleCancelPending}
+                        onReview={handleReviewPending}
+                        onEdit={handleEditPending}
+                        currentUserRole={role}
+                        refreshTrigger={refreshTrigger}
+                        onClaim={handleClaimPending} />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {tab === 'my_submissions' && profile && (
+          <div className="max-w-6xl mx-auto">
+            {!pendingLoaded ? (
+              <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading your submissions...</div>
+            ) : myPending.length === 0 ? (
+              <div className="text-center py-16">
+                <Icon n="CheckCir" size={40} className="text-emerald-300 mx-auto mb-3" />
+                <p className="text-slate-500 font-semibold">You have no pending submissions</p>
+              </div>
+            ) : (
+              <>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myPending.length} Submissions</div>
+                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
+                  {myPending.map(p => {
                     const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
                     return (
                       <PendingJutsuCard
