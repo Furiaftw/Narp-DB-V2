@@ -2215,7 +2215,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             Claim Review
           </button>
         )}
-        {(isMine || isReviewerOrAdmin) && (
+        {(isReviewerOrAdmin || currentUserId === pending.submitted_by) && (
           <button
             onClick={() => setIsChatOpen(true)}
             className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
@@ -2224,7 +2224,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
-            Chat
+            Review Chat
           </button>
         )}
         {isMine && !isAdmin && pending.status === 'pending_approval' && (
@@ -2348,19 +2348,22 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                             <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
                               {senderName}
                             </span>
-                            {msg.profiles?.role && (
-                              <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
-                                isMe 
-                                  ? isPrivate ? 'bg-amber-500/30 text-amber-50' : 'bg-indigo-500/30 text-indigo-50'
-                                  : msg.profiles.role === 'admin' || msg.profiles.role === 'owner'
-                                    ? 'bg-indigo-100 text-indigo-700'
-                                    : msg.profiles.role === 'staff'
-                                      ? 'bg-emerald-100 text-emerald-700'
-                                      : 'bg-slate-100 text-slate-600'
-                              }`}>
-                                {msg.profiles.role === 'staff' ? 'Reviewer' : msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role}
-                              </span>
-                            )}
+                            {msg.profiles?.role && (() => {
+                              const senderRole = msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role;
+                              return (
+                                <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
+                                  isMe 
+                                    ? isPrivate ? 'bg-amber-500/30 text-amber-50' : 'bg-indigo-500/30 text-indigo-50'
+                                    : senderRole === 'admin'
+                                      ? 'bg-indigo-100 text-indigo-700'
+                                      : senderRole === 'staff'
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {senderRole === 'staff' ? 'Reviewer' : senderRole}
+                                </span>
+                              );
+                            })()}
                             {isPrivate && (
                               <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-200 text-amber-800 border border-amber-300">
                                 Private
@@ -2754,16 +2757,17 @@ export default function App() {
   const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
-    if (!supabaseReady || !isStaff) { setPendingJutsus([]); setPendingLoaded(false); return; }
+    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
-      setPendingJutsus(list);
+      const filtered = isStaff ? list : list.filter(p => p.submitted_by === profile?.id);
+      setPendingJutsus(filtered);
       setPendingLoaded(true);
       setRefreshTrigger(prev => prev + 1);
     } catch (e) {
       console.warn('[NARP] fetchPendingJutsus failed:', e);
     }
-  }, [supabaseReady, isStaff]);
+  }, [supabaseReady, isStaff, profile?.id]);
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
@@ -3062,7 +3066,7 @@ export default function App() {
 
   const TABS = [
     { id: 'jutsus', label: 'Jutsus', count: (db.jutsus || []).length },
-    ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
+    ...((isStaff || pendingJutsus.length > 0) ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
@@ -3180,7 +3184,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'pending' && isStaff && (
+        {tab === 'pending' && (isStaff || pendingJutsus.length > 0) && (
           <div className="max-w-6xl mx-auto">
             {!pendingLoaded ? (
               <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading pending submissions...</div>
@@ -3291,7 +3295,7 @@ export default function App() {
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <select
-                                  value={m.role || 'user'}
+                                  value={m.role === 'owner' ? 'admin' : (m.role || 'user')}
                                   disabled={isCurrentUser || m.role === 'owner'}
                                   onChange={(e) => handleRoleChange(m.id, e.target.value)}
                                   className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer transition-all"
@@ -3299,7 +3303,6 @@ export default function App() {
                                   <option value="user">User</option>
                                   <option value="staff">Reviewer (staff)</option>
                                   <option value="admin">Admin</option>
-                                  {m.role === 'owner' && <option value="owner">Owner</option>}
                                 </select>
                               </td>
                             </tr>
