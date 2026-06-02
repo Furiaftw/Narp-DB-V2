@@ -1326,12 +1326,13 @@ function SlotsViewModal({ jutsu, onClose }) {
 /* ============================================================================
    MODAL: AdminFormModal
    ============================================================================ */
-function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPending }) {
+function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPending, isAdmin = false, isPendingEdit = false }) {
   const tab = MANAGE_TABLES[rawTab] ? rawTab : 'jutsus';
   const schema = MANAGE_TABLES[tab] || MANAGE_TABLES['jutsus'];
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [askSecondApproval, setAskSecondApproval] = useState(false);
 
   // FIX: Lock the document body scroll so iOS Safari doesn't crash on unmount
   useEffect(() => {
@@ -1427,6 +1428,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         operation: isEdit ? 'update' : 'insert',
         targetId:  isEdit ? eRow._id : null,
         entity,
+        askSecondApproval: isAdmin && askSecondApproval,
       });
       onClose();
     } catch (e) {
@@ -1461,7 +1463,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
             </button>
           </div>
 
-          {willGoToPending && (
+          {(willGoToPending || askSecondApproval) && (
             <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-sm flex items-start gap-3">
               <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0"/>
               <div>
@@ -1566,12 +1568,31 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
             )}
           </div>
 
+          {/* Ask Second Approval Toggle (Admins/Owners only) */}
+          {isAdmin && tab === 'jutsus' && !isPendingEdit && (
+            <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold text-slate-800">Request Second Approval</p>
+                <p className="text-xs text-slate-500">Submit this change to the pending queue to require another staff member or admin's review.</p>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                <input
+                  type="checkbox"
+                  checked={askSecondApproval}
+                  onChange={(e) => setAskSecondApproval(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+              </label>
+            </div>
+          )}
+
           <div className="flex justify-end gap-4 mt-10 pt-6 border-t">
             <button onClick={onClose} className="bg-white border-2 px-8 py-3 rounded-xl font-bold hover:bg-slate-50">Cancel</button>
             <button onClick={handleSave}
                     disabled={submitting || schema.fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold flex gap-2 disabled:opacity-50 hover:bg-indigo-700 shadow-md">
-              <Icon n="Save" size={18}/> {submitting ? 'Saving...' : (willGoToPending ? 'Submit for Approval' : 'Save')}
+              <Icon n="Save" size={18}/> {submitting ? 'Saving...' : ((willGoToPending || askSecondApproval) ? 'Submit for Approval' : 'Save')}
             </button>
           </div>
         </div>
@@ -1990,17 +2011,25 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
       <div className="flex gap-2 mt-1">
         {pending.status === 'pending_review' ? (
           !isMine ? (
-            <button onClick={() => onReview(pending.id)}
-                    className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-              <Icon n="Check" size={14}/> Review (Step 1)
-            </button>
+            <>
+              <button onClick={() => onReview(pending.id)}
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                <Icon n="Check" size={14}/> Review (Step 1)
+              </button>
+              {isAdmin && (
+                <button onClick={() => onApprove(pending.id)}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                  <Icon n="Check" size={14}/> Approve Direct
+                </button>
+              )}
+            </>
           ) : (
             <div className="text-[10px] text-slate-400 italic self-center">
               Another Reviewer must perform Review (Step 1)
             </div>
           )
         ) : (
-          (!isMine && pending.first_reviewer_id !== currentUserId) && (
+          (!isMine && (pending.first_reviewer_id !== currentUserId || isAdmin)) && (
             <button onClick={() => onApprove(pending.id)}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
               <Icon n="Check" size={14}/> Approve
@@ -2202,7 +2231,7 @@ export default function App() {
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
-
+  const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
 
@@ -2364,7 +2393,7 @@ export default function App() {
     };
   }, [supabaseReady, profile, refreshDB, refreshPending]);
 
-  const submitChange = useCallback(async ({ tab: t, operation, targetId, entity }) => {
+  const submitChange = useCallback(async ({ tab: t, operation, targetId, entity, askSecondApproval }) => {
     const isJutsus = t === 'jutsus';
 
     if (adminForm?.isPendingEdit) {
@@ -2375,7 +2404,12 @@ export default function App() {
       return false;
     }
 
-    if ((role === 'user' || role === 'staff') && isJutsus) {
+    const shouldGoToPending = isJutsus && (
+      ((role === 'user' || role === 'staff') && !isAdmin) ||
+      (isAdmin && askSecondApproval)
+    );
+
+    if (shouldGoToPending) {
       if (!supabaseReady) {
         applyChangeLocally(t, operation, targetId, entity);
         return true;
@@ -2448,7 +2482,13 @@ export default function App() {
       // staff member who queued the entry; the current user is the reviewer
       // (the "2nd pair of eyes" in the double-approver workflow).
       const item = pendingJutsus.find(p => p.id === id);
-      if (item) await sendDiscordLog(item.data, 'Approved', item.submitter, item.first_reviewer, profile);
+      if (item) {
+        const isDelete = item.operation === 'delete';
+        const displayData = isDelete
+          ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
+          : item.data;
+        await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile);
+      }
 
       await approvePendingJutsu(id);
       await refreshPending();
@@ -2462,7 +2502,13 @@ export default function App() {
     try {
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
-      if (item) await sendDiscordLog(item.data, 'Denied', item.submitter, item.first_reviewer, profile);
+      if (item) {
+        const isDelete = item.operation === 'delete';
+        const displayData = isDelete
+          ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
+          : item.data;
+        await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile);
+      }
 
       await cancelPendingJutsu(id);
       await refreshPending();
@@ -2769,6 +2815,8 @@ export default function App() {
             db={db}
             onSubmit={submitChange}
             willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'staff') && !isAdmin && !adminForm.isPendingEdit}
+            isAdmin={isAdmin}
+            isPendingEdit={adminForm.isPendingEdit}
           />
         );
       })()}
@@ -2798,9 +2846,11 @@ export default function App() {
 
       {confirmDel && (() => {
         const effectiveTab = confirmDel.tab || tab;
-        const isPendingDelete = effectiveTab === 'jutsus' && isStaff && !isAdmin;
+        const isPendingDelete = effectiveTab === 'jutsus' && (
+          (isStaff && !isAdmin) || (isAdmin && askSecondApprovalDelete)
+        );
         return (
-          <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={() => setConfirmDel(null)}>
+          <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={() => { setConfirmDel(null); setAskSecondApprovalDelete(false); }}>
             <div className="bg-white p-6 rounded-3xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
               <h3 className="font-bold text-xl mb-2 text-slate-900">
                 {isPendingDelete ? 'Submit deletion for approval?' : 'Confirm Deletion'}
@@ -2810,15 +2860,41 @@ export default function App() {
                   ? `Your request to delete '${confirmDel.name || 'this entry'}' will need a second approval before it's removed.`
                   : `Are you sure you want to delete '${confirmDel.name || 'this entry'}'? This action cannot be undone.`}
               </p>
+
+              {isAdmin && effectiveTab === 'jutsus' && (
+                <div className="flex items-center justify-between mb-6 bg-slate-50 p-3 rounded-xl border">
+                  <div>
+                    <p className="text-xs font-bold text-slate-800">Ask second approval</p>
+                    <p className="text-[10px] text-slate-500">Require review before deletion</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={askSecondApprovalDelete}
+                      onChange={(e) => setAskSecondApprovalDelete(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600"></div>
+                  </label>
+                </div>
+              )}
+
               <div className="flex gap-3">
-                <button onClick={() => setConfirmDel(null)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Cancel</button>
+                <button onClick={() => { setConfirmDel(null); setAskSecondApprovalDelete(false); }} className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Cancel</button>
                 <button onClick={async () => {
                           try {
-                            await submitChange({ tab: effectiveTab, operation: 'delete', targetId: confirmDel.id, entity: null });
+                            await submitChange({
+                              tab: effectiveTab,
+                              operation: 'delete',
+                              targetId: confirmDel.id,
+                              entity: { name: confirmDel.name },
+                              askSecondApproval: askSecondApprovalDelete
+                            });
                           } catch (e) {
                             alert('Delete failed: ' + e.message);
                           }
                           setConfirmDel(null);
+                          setAskSecondApprovalDelete(false);
                         }}
                         className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-md">
                   {isPendingDelete ? 'Submit' : 'Delete'}
