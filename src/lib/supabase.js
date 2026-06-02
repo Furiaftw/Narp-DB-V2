@@ -182,12 +182,24 @@ export const removeFromWhitelist = async (email) => {
 
 export const fetchPendingJutsus = async () => {
   if (!supabase) return [];
-  // Manual join for submitter/reviewer, and select/join assignee
-  const { data: pending, error } = await supabase
+  // Manual join for submitter/reviewer, and select/join assignee.
+  // We exclude 'has_user_unread' to completely remove the bell notification feature as requested.
+  // We first try with 'last_status_change, is_bumped'. If that fails (e.g. database reverted), we fallback to core columns.
+  let result = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped, has_user_unread')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped')
     .order('submitted_at', { ascending: false });
-  if (error) throw error;
+
+  if (result.error) {
+    console.warn('[NARP] fetchPendingJutsus with full columns failed, falling back to core columns:', result.error);
+    result = await supabase
+      .from('pending_jutsus')
+      .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
+      .order('submitted_at', { ascending: false });
+  }
+
+  if (result.error) throw result.error;
+  const pending = result.data;
   if (!pending?.length) return [];
 
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
@@ -294,12 +306,8 @@ export const bumpPendingSubmission = async (id, itemName) => {
 };
 
 export const markSubmissionAsRead = async (pendingId) => {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from('pending_jutsus')
-    .update({ has_user_unread: false })
-    .eq('id', pendingId);
-  if (error) throw error;
+  // Safe no-op since bell notifications/unread states have been removed
+  return;
 };
 
 export const fetchReviewChats = async (pendingId) => {
