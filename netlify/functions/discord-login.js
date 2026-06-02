@@ -187,15 +187,30 @@ export default async (req) => {
     }
 
     // Crucial Last Step: Because our Postgres trigger creates the profile row asynchronously, wait 1000ms,
-    // then use the Supabase Admin client to directly update the user's role in the public schema
+    // then check if the user already has a role in profiles. If they exist and have a role, do NOT overwrite it!
     await new Promise((resolve) => setTimeout(resolve, 1000));
-    const { error: dbError } = await supabaseAdmin
-      .from('profiles')
-      .update({ role: appRole })
-      .eq('email', email);
 
-    if (dbError) {
-      console.warn(`Failed to update user profile role in database: ${dbError.message}`);
+    const { data: existingProfile, error: fetchError } = await supabaseAdmin
+      .from('profiles')
+      .select('role')
+      .eq('email', email)
+      .maybeSingle();
+
+    if (fetchError) {
+      console.warn(`[discord-login] Failed to fetch existing profile for ${email}: ${fetchError.message}`);
+    }
+
+    if (existingProfile && existingProfile.role) {
+      console.log(`[discord-login] User already exists in database with role '${existingProfile.role}'. Retaining database role.`);
+    } else {
+      const { error: dbError } = await supabaseAdmin
+        .from('profiles')
+        .update({ role: appRole })
+        .eq('email', email);
+
+      if (dbError) {
+        console.warn(`Failed to update user profile role in database: ${dbError.message}`);
+      }
     }
 
     // Return { email, password } to the frontend
