@@ -199,16 +199,14 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     }],
   };
 
-  try {
-    await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  } catch (err) {
+  fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  }).catch((err) => {
     // Never let a logging failure block the underlying database action.
     console.warn('[NARP] Discord log failed:', err);
-  }
+  });
 }
 
 /* ---------------------------------------------------------------------------
@@ -2381,22 +2379,20 @@ export default function App() {
       const status = 'pending_review';
       await submitPendingJutsu(operation, targetId, payload, status);
 
-      try {
-        const tab = t;
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: entity?.name || 'Unknown',
-            itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
-          }),
-        });
-      } catch (err) {
+      const tab = t;
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: entity?.name || 'Unknown',
+          itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
+        }),
+      }).catch((err) => {
         console.warn('[NARP] Reviewer ping creation alert failed:', err);
-      }
+      });
 
       await refreshPending();
       return false;
@@ -2482,19 +2478,17 @@ export default function App() {
 
       await reviewPendingJutsu(id, profile.id);
 
-      try {
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            triggerType: 'second_approval',
-            itemName,
-            itemType
-          })
-        });
-      } catch (pingErr) {
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggerType: 'second_approval',
+          itemName,
+          itemType
+        })
+      }).catch((pingErr) => {
         console.warn('Failed to send reviewer second approval ping:', pingErr);
-      }
+      });
 
       await refreshPending();
     } catch (e) {
