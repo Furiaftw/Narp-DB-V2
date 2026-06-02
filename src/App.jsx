@@ -2008,11 +2008,20 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 
   const showStaffSync = currentUserRole === 'owner' || (['staff', 'admin'].includes(currentUserRole) && currentUserId !== pending.submitted_by);
 
+  const isAssigned = !!(
+    pending.assigned_to &&
+    (typeof pending.assigned_to === 'object' ? pending.assigned_to.id : pending.assigned_to)
+  );
+
   useEffect(() => {
-    if (isChatOpen && !showStaffSync) {
-      setActiveTab('submitter');
+    if (isChatOpen) {
+      if (currentUserId === pending.submitted_by) {
+        setActiveTab('submitter');
+      } else if (!showStaffSync) {
+        setActiveTab('submitter');
+      }
     }
-  }, [isChatOpen, showStaffSync]);
+  }, [isChatOpen, currentUserId, pending.submitted_by, showStaffSync]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2112,7 +2121,8 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
     if (activeTab === 'staff') {
       return msg.is_staff_only === true;
     } else {
-      return msg.is_staff_only === false || !msg.is_staff_only;
+      // activeTab === 'submitter'
+      return msg.is_staff_only === false || msg.is_staff_only === null || msg.is_staff_only === undefined;
     }
   });
 
@@ -2240,8 +2250,12 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
       </div>
 
       {isChatOpen && (
-        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={() => setIsChatOpen(false)}>
-          <div className="bg-white rounded-3xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col shadow-2xl" onClick={e => e.stopPropagation()}>
+        <>
+          {/* Backdrop overlay */}
+          <div className="fixed inset-0 z-40 bg-black/60 animate-in fade-in" onClick={() => setIsChatOpen(false)} />
+
+          {/* Drawer */}
+          <div className="fixed inset-y-0 right-0 z-50 w-full md:w-[500px] bg-white flex flex-col shadow-2xl animate-in slide-in-from-right duration-200" onClick={e => e.stopPropagation()}>
             {/* Header */}
             <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-2">
@@ -2255,8 +2269,8 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               </button>
             </div>
 
-            {currentUserRole === 'user' && !pending.assigned_to ? (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-12 bg-slate-50 min-h-[40vh]">
+            {currentUserRole === 'user' && !isAssigned ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-12 bg-slate-50">
                 <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-4 text-amber-500 animate-pulse">
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -2306,7 +2320,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                 )}
 
                 {/* Chat Body */}
-                <div className="flex-1 overflow-y-auto p-6 bg-slate-50 h-[60vh] custom-scrollbar flex flex-col gap-3">
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3">
                   {filteredMessages.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-12">
                       <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
@@ -2384,11 +2398,14 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                 </div>
 
                 {/* Input Footer */}
-                <div className={`p-4 border-t shrink-0 transition-colors ${
-                  activeTab === 'staff'
-                    ? 'bg-amber-50/80 border-amber-100'
-                    : 'bg-indigo-50/80 border-indigo-100'
-                }`}>
+                <div 
+                  className={`p-4 border-t shrink-0 transition-colors ${
+                    activeTab === 'staff'
+                      ? 'bg-amber-50/80 border-amber-100'
+                      : 'bg-indigo-50/80 border-indigo-100'
+                  }`}
+                  style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom, 0px))' }}
+                >
                   <form onSubmit={handleSend} className="flex gap-2 items-center">
                     <span className={`text-[10px] font-bold px-2 py-1.5 rounded-lg shrink-0 select-none uppercase border ${
                       activeTab === 'staff'
@@ -2433,7 +2450,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               </>
             )}
           </div>
-        </div>
+        </>
       )}
     </div>
   );
