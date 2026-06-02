@@ -92,7 +92,7 @@ export const fetchMyProfile = async () => {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id')
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
     .eq('id', session.user.id)
     .maybeSingle();
   if (error) throw error;
@@ -127,6 +127,23 @@ export const updateMyUsername = async (username) => {
     if (error.code === '23505') throw new Error('That username is already taken.');
     throw error;
   }
+  return data;
+};
+
+export const updateMyWorkThreadId = async (threadId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
+
+  const clean = (threadId || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ work_thread_id: clean || null })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
+    .single();
+
+  if (error) throw error;
   return data;
 };
 
