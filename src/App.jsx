@@ -1983,6 +1983,13 @@ function renderMessageWithLinks(text) {
    COMPONENT: PendingJutsuCard
    ============================================================================ */
 function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit, currentUserRole, refreshTrigger, onClaim }) {
+  const currentUser = { id: currentUserId, role: currentUserRole };
+  const pendingItem = pending;
+
+  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by && !['admin', 'owner'].includes(currentUser.role);
+
+  const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
+
   const isMine     = pending.submitted_by === currentUserId;
   const op         = pending.operation;
   const submitter  = pending.submitter;
@@ -2008,20 +2015,25 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 
   const showStaffSync = currentUserRole === 'owner' || (['staff', 'admin'].includes(currentUserRole) && currentUserId !== pending.submitted_by);
 
-  const isAssigned = !!(
-    pending.assigned_to &&
-    (typeof pending.assigned_to === 'object' ? pending.assigned_to.id : pending.assigned_to)
+  const isClaimed = !!(
+    pendingItem.assigned_to !== null &&
+    pendingItem.assigned_to !== undefined &&
+    (typeof pendingItem.assigned_to === 'object'
+      ? (pendingItem.assigned_to.id !== null && pendingItem.assigned_to.id !== undefined)
+      : (typeof pendingItem.assigned_to === 'string' && pendingItem.assigned_to.trim() !== ''))
   );
 
   useEffect(() => {
     if (isChatOpen) {
-      if (currentUserId === pending.submitted_by) {
+      if (isStrictSubmitter) {
+        setActiveTab('submitter');
+      } else if (currentUserId === pending.submitted_by) {
         setActiveTab('submitter');
       } else if (!showStaffSync) {
         setActiveTab('submitter');
       }
     }
-  }, [isChatOpen, currentUserId, pending.submitted_by, showStaffSync]);
+  }, [isChatOpen, currentUserId, pending.submitted_by, showStaffSync, isStrictSubmitter]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -2176,13 +2188,13 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 
       <div className="flex gap-2 mt-1 flex-wrap">
         {pending.status === 'pending_review' ? (
-          !isMine ? (
+          hasStaffPrivileges ? (
             <>
               <button onClick={() => onReview(pending.id)}
                       className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
                 <Icon n="Check" size={14}/> Review (Step 1)
               </button>
-              {isAdmin && (
+              {['admin', 'owner'].includes(currentUser.role) && (
                 <button onClick={() => onApprove(pending.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
                   <Icon n="Check" size={14}/> Approve Direct
@@ -2190,12 +2202,14 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               )}
             </>
           ) : (
-            <div className="text-[10px] text-slate-400 italic self-center">
-              Another Reviewer must perform Review (Step 1)
-            </div>
+            isStrictSubmitter && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                Another Reviewer must perform Review (Step 1)
+              </div>
+            )
           )
         ) : (
-          (!isMine && (pending.first_reviewer_id !== currentUserId || isAdmin)) && (
+          hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
             <button onClick={() => onApprove(pending.id)}
                     className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
               <Icon n="Check" size={14}/> Approve
@@ -2209,13 +2223,13 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             <Icon n="Edit" size={14}/> Edit
           </button>
         )}
-        {(isMine || isAdmin) && (
+        {hasStaffPrivileges && (
           <button onClick={() => onCancel(pending.id)}
                   className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
             <Icon n="X" size={14}/> Cancel
           </button>
         )}
-        {(!pending.assignee && isReviewerOrAdmin) && (
+        {!isClaimed && hasStaffPrivileges && (
           <button onClick={() => onClaim(pending.id)}
                   className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
                   title="Claim Review">
@@ -2225,7 +2239,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             Claim Review
           </button>
         )}
-        {(isReviewerOrAdmin || currentUserId === pending.submitted_by) && (
+        {(isStrictSubmitter || hasStaffPrivileges) && (
           <button
             onClick={() => setIsChatOpen(true)}
             className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
@@ -2237,12 +2251,12 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             Review Chat
           </button>
         )}
-        {isMine && !isAdmin && pending.status === 'pending_approval' && (
+        {isStrictSubmitter && pending.status === 'pending_approval' && (
           <div className="text-[10px] text-slate-400 italic self-center">
             Another Reviewer must approve
           </div>
         )}
-        {!isMine && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && !isAdmin && (
+        {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
           <div className="text-[10px] text-slate-400 italic self-center">
             You reviewed this. Another Reviewer must approve.
           </div>
@@ -2269,20 +2283,20 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               </button>
             </div>
 
-            {currentUserRole === 'user' && !isAssigned ? (
+            {(isStrictSubmitter && !isClaimed) ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-12 bg-slate-50">
                 <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-4 text-amber-500 animate-pulse">
                   <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                   <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                 </svg>
                 <p className="text-sm font-semibold text-center text-slate-700 max-w-md leading-relaxed">
-                  Chat will become available once a reviewer claims this submission.
+                  Your submission has been received. The chat will open automatically once a reviewer claims this entry.
                 </p>
               </div>
             ) : (
               <>
                 {/* Tabs (Staff only) */}
-                {isStaff && (
+                {isStaff && !isStrictSubmitter && (
                   <div className="flex border-b border-slate-200 bg-slate-100 shrink-0">
                     <button
                       onClick={() => setActiveTab('submitter')}
@@ -2307,14 +2321,14 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                           activeTab === 'staff'
                             ? 'border-amber-600 text-amber-600 bg-white font-black'
                             : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                        }`}
-                      >
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                        </svg>
-                        Staff Sync (Private)
-                      </button>
+                      }`}
+                    >
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                      </svg>
+                      Staff Sync (Private)
+                    </button>
                     )}
                   </div>
                 )}
