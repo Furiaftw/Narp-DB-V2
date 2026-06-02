@@ -30,6 +30,8 @@ import {
   buildJutsuPayload,
   fromRowJutsu,
   fetchRoleChangeLog,
+  fetchReviewChats,
+  sendReviewChat,
 } from './lib/supabase';
 
 
@@ -1954,7 +1956,7 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
 /* ============================================================================
    COMPONENT: PendingJutsuCard
    ============================================================================ */
-function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit }) {
+function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit, currentUserRole, refreshTrigger }) {
   const isMine     = pending.submitted_by === currentUserId;
   const op         = pending.operation;
   const submitter  = pending.submitter;
@@ -1968,6 +1970,41 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
 
   const display = op === 'delete' ? (originalJutsu || {}) : (pending.data || {});
   const name = display.name || originalJutsu?.name || '(no name)';
+
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState('');
+
+  useEffect(() => {
+    if (isChatOpen) {
+      fetchReviewChats(pending.id).then(msgs => {
+        if (msgs) {
+          setChatMessages(msgs);
+        }
+      });
+    }
+  }, [isChatOpen, refreshTrigger, pending.id]);
+
+  const handleSend = async (e) => {
+    if (e) e.preventDefault();
+    const messageText = chatInput.trim();
+    if (!messageText) return;
+
+    try {
+      const success = await sendReviewChat(pending.id, messageText);
+      if (success) {
+        setChatInput('');
+        const freshMsgs = await fetchReviewChats(pending.id);
+        if (freshMsgs) {
+          setChatMessages(freshMsgs);
+        }
+      } else {
+        alert('Failed to send message.');
+      }
+    } catch (err) {
+      alert('Error sending message: ' + err.message);
+    }
+  };
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3">
@@ -2005,6 +2042,67 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
           {originalJutsu
             ? <>This will permanently delete <strong>{originalJutsu.name}</strong> from the database.</>
             : <>Target jutsu no longer exists. Cancel this pending entry.</>}
+        </div>
+      )}
+
+      {isChatOpen && (
+        <div className="border border-amber-100 rounded-xl p-3 bg-slate-50 flex flex-col gap-2 mt-1">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-amber-800 uppercase tracking-wider">Staff Chat</span>
+            <button
+              type="button"
+              onClick={async () => {
+                const freshMsgs = await fetchReviewChats(pending.id);
+                if (freshMsgs) setChatMessages(freshMsgs);
+              }}
+              title="Refresh Chat"
+              className="text-slate-400 hover:text-amber-700 p-1 rounded transition-colors"
+            >
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67" />
+              </svg>
+            </button>
+          </div>
+          <div className="max-h-48 overflow-y-auto bg-gray-50 p-2 rounded space-y-2 border border-slate-200">
+            {chatMessages.length === 0 ? (
+              <p className="text-[11px] text-slate-400 italic text-center py-4">No staff messages yet.</p>
+            ) : (
+              chatMessages.map((msg) => {
+                const isMe = msg.sender_id === currentUserId;
+                const senderName = msg.profiles?.name || 'Unknown';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`p-2 rounded text-xs leading-relaxed ${
+                      isMe
+                        ? 'bg-amber-100 border-l-4 border-amber-500 text-slate-800'
+                        : 'bg-white border border-slate-200/60 border-l-4 border-indigo-500 text-slate-800 shadow-2xs'
+                    }`}
+                  >
+                    <span className="font-serif font-bold text-slate-900 block sm:inline mr-1">
+                      {senderName}:
+                    </span>
+                    <span>{msg.message}</span>
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <form onSubmit={handleSend} className="flex gap-2 mt-1">
+            <input
+              type="text"
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              placeholder="Type staff message..."
+              className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-hidden focus:ring-1 focus:ring-amber-500 focus:border-amber-500 text-slate-800"
+            />
+            <button
+              type="submit"
+              className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1 shrink-0 transition-colors"
+            >
+              Send
+            </button>
+          </form>
         </div>
       )}
 
@@ -2047,6 +2145,18 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
           <button onClick={() => onCancel(pending.id)}
                   className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
             <Icon n="X" size={14}/> Cancel
+          </button>
+        )}
+        {(currentUserRole === 'staff' || currentUserRole === 'admin' || currentUserRole === 'owner') && (
+          <button
+            onClick={() => setIsChatOpen(prev => !prev)}
+            className={`bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 ${isChatOpen ? 'bg-amber-50 text-amber-700 border border-amber-200' : ''}`}
+            title="Toggle Staff Chat"
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            Toggle Staff Chat
           </button>
         )}
         {isMine && !isAdmin && pending.status === 'pending_approval' && (
@@ -2196,6 +2306,7 @@ export default function App() {
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const [tab, setTab]           = useState('jutsus');
   const [viewMode, setViewMode] = useState(() => LS.get(STORAGE.VIEW_MODE, 'card'));
@@ -2350,6 +2461,7 @@ export default function App() {
       const list = await fetchPendingJutsus();
       setPendingJutsus(list);
       setPendingLoaded(true);
+      setRefreshTrigger(prev => prev + 1);
     } catch (e) {
       console.warn('[NARP] fetchPendingJutsus failed:', e);
     }
@@ -2784,7 +2896,9 @@ export default function App() {
                         onApprove={handleApprovePending}
                         onCancel={handleCancelPending}
                         onReview={handleReviewPending}
-                        onEdit={handleEditPending} />
+                        onEdit={handleEditPending}
+                        currentUserRole={role}
+                        refreshTrigger={refreshTrigger} />
                     );
                   })}
                 </div>
