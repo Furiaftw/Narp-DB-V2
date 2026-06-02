@@ -264,6 +264,10 @@ export const markSubmissionAsRead = async (pendingId) => {
 
 export const fetchReviewChats = async (pendingId) => {
   if (!supabase) return null;
+  if (!pendingId || typeof pendingId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pendingId)) {
+    console.warn('[NARP] fetchReviewChats called with invalid pendingId (not a valid UUID):', pendingId);
+    return [];
+  }
   try {
     const { data, error } = await supabase
       .from('pending_chats')
@@ -284,23 +288,30 @@ export const fetchReviewChats = async (pendingId) => {
 
 export const sendReviewChat = async (pendingId, message, isStaffOnly = false) => {
   if (!supabase) throw new Error('Supabase is not initialized');
+  if (!pendingId || typeof pendingId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pendingId)) {
+    const errorMsg = `Invalid submission ID format. Expected a valid UUID, but received: "${pendingId}"`;
+    console.error('[NARP] Validation Error:', errorMsg);
+    throw new Error(errorMsg);
+  }
   try {
     const session = await getCurrentSession();
     if (!session?.user?.id) {
       throw new Error('No authenticated user session found');
     }
+    const payload = {
+      pending_id: pendingId,
+      message: message,
+      sender_id: session.user.id,
+      is_staff_only: isStaffOnly
+    };
     const { data, error } = await supabase
       .from('pending_chats')
-      .insert({
-        pending_id: pendingId,
-        message: message,
-        sender_id: session.user.id,
-        is_staff_only: isStaffOnly
-      })
+      .insert(payload)
       .select();
 
     if (error) {
-      console.error('[NARP] Error sending review chat:', error);
+      console.error('[NARP] Error sending review chat. Payload:', payload);
+      console.error('[NARP] Supabase Error Detail:', error);
       throw error;
     }
     return data;
