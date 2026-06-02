@@ -243,6 +243,54 @@ export const updatePendingJutsuData = async (id, newData) => {
   if (!data || data.length === 0) throw new Error('Edit blocked by database security or row not found.');
 };
 
+export const fetchReviewChats = async (pendingId) => {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('pending_chats')
+      .select('*, profiles(name, role)')
+      .eq('pending_id', pendingId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      console.error('[NARP] Error fetching review chats:', error);
+      return null;
+    }
+    return data;
+  } catch (error) {
+    console.error('[NARP] Error in fetchReviewChats:', error);
+    return null;
+  }
+};
+
+export const sendReviewChat = async (pendingId, message) => {
+  if (!supabase) return false;
+  try {
+    const session = await getCurrentSession();
+    if (!session?.user?.id) {
+      console.error('[NARP] No authenticated user session found');
+      return false;
+    }
+    const { data, error } = await supabase
+      .from('pending_chats')
+      .insert({
+        pending_id: pendingId,
+        message: message,
+        sender_id: session.user.id
+      })
+      .select();
+
+    if (error) {
+      console.error('[NARP] Error sending review chat:', error);
+      return false;
+    }
+    return data || true;
+  } catch (error) {
+    console.error('[NARP] Error in sendReviewChat:', error);
+    return false;
+  }
+};
+
 export const subscribeToDatabaseChanges = (onTableChange) => {
   if (!supabase) return null;
   const channel = supabase
@@ -260,6 +308,11 @@ export const subscribeToDatabaseChanges = (onTableChange) => {
     .on(
       'postgres_changes',
       { event: '*', schema: 'public', table: 'pending_jutsus' },
+      (payload) => onTableChange(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'pending_chats' },
       (payload) => onTableChange(payload)
     )
     .subscribe();
