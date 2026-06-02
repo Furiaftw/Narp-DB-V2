@@ -84,31 +84,32 @@ export default async (req) => {
        failure, unparseable body, ...) aborts the operation and leaves the
        database completely untouched — we never fall back to 'user'.
        ------------------------------------------------------------------ */
-    let memberResponse;
+    let discordResponse;
     try {
-      memberResponse = await fetch(`https://discord.com/api/users/@me/guilds/${discordGuildId}/member`, {
+      discordResponse = await fetch(`https://discord.com/api/users/@me/guilds/${discordGuildId}/member`, {
         headers: {
           Authorization: `Bearer ${provider_token}`,
         },
       });
     } catch (discordErr) {
       console.error('[sync-discord-roles] Discord API request threw; aborting without changes.', discordErr);
-      return json({ error: 'Discord API request failed; no changes made' }, 502);
+      return json({ error: "Failed to sync roles", details: discordErr.message }, 502);
     }
 
-    if (memberResponse.status !== 200) {
+    if (!discordResponse.ok) {
       let errText = '';
-      try { errText = await memberResponse.text(); } catch { /* ignore */ }
-      console.error(`[sync-discord-roles] Discord API returned status ${memberResponse.status}; aborting without changes. ${errText}`);
-      return json({ error: `Discord API returned status ${memberResponse.status}; no changes made` }, 502);
+      try { errText = await discordResponse.text(); } catch { /* ignore */ }
+      console.error(`[sync-discord-roles] Discord API returned status ${discordResponse.status}; aborting without changes. ${errText}`);
+      const status = discordResponse.status === 429 ? 429 : 500;
+      return json({ error: "Failed to sync roles", details: `Discord API returned status ${discordResponse.status}: ${errText}` }, status);
     }
 
     let memberData;
     try {
-      memberData = await memberResponse.json();
+      memberData = await discordResponse.json();
     } catch (parseErr) {
       console.error('[sync-discord-roles] Could not parse Discord response body; aborting without changes.', parseErr);
-      return json({ error: 'Invalid Discord API response; no changes made' }, 502);
+      return json({ error: "Failed to sync roles", details: parseErr.message }, 502);
     }
 
     /* ------------------------------------------------------------------
