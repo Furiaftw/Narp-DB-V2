@@ -38,7 +38,7 @@ export default async (req) => {
 
     let messageString = '';
     if (triggerType === 'creation') {
-      messageString = `<@&${roleId}> A new ${itemType} entry was created: **${itemName}**. Review needed!`;
+      messageString = `A new ${itemType} entry was created: **${itemName}**.`;
     } else if (triggerType === 'second_approval') {
       messageString = `<@&${roleId}> Pending approval request for the ${itemType} entry: **${itemName}**. Second pair of eyes needed!`;
     } else {
