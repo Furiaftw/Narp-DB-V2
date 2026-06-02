@@ -1,113 +1,124 @@
 import type { Context, Config } from "@netlify/edge-functions";
-import TurndownService from "turndown";
 
 /**
  * Netlify Edge Function: Serve Markdown for AI Agents
  * 
- * --- TESTING & CONFIGURATION ---
- * 
- * 1. How to test the Markdown response with curl:
- *    curl -H "Accept: text/markdown" http://localhost:8889/
- *    (Replace with production URL for live testing: curl -H "Accept: text/markdown" https://your-site.netlify.app/)
- * 
- * 2. How to test locally with netlify dev:
- *    Run the Netlify CLI development server:
- *    netlify dev --port 8889
- *    Then send requests with the Accept header to http://localhost:8889/
- * 
- * 3. How to add or remove paths from the edge function scope:
- *    - To modify paths programmatically in code, update the `config.path` array or `config.excludedPath` array below.
- *    - Or edit the [[edge_functions]] configuration block in `netlify.toml` in the project root.
+ * Since this is a Single Page Application (SPA), server-side HTML responses are empty skeletons.
+ * This edge function dynamically fetches the data directly from Supabase's REST API and formats
+ * it into a rich, detailed Markdown catalog designed specifically for AI agents, search crawlers,
+ * and automated tools.
  */
 
 export default async (req: Request, context: Context) => {
   const acceptHeader = req.headers.get("accept") || "";
 
   // 1. Check for "Accept: text/markdown" in the request headers.
-  // If not present, pass through to the origin unchanged by returning undefined.
+  // If not present, pass through to standard request/response handling.
   if (!acceptHeader.includes("text/markdown")) {
     return;
   }
 
   try {
-    // 2. Fetch the HTML response from the origin.
-    const response = await context.next();
-    const contentType = response.headers.get("content-type") || "";
+    const url = Netlify.env.get("SUPABASE_DATABASE_URL") || "";
+    const anonKey = Netlify.env.get("SUPABASE_ANON_KEY") || "";
 
-    // If the origin response is not successful or not HTML, return the response unchanged.
-    if (!response.ok || !contentType.includes("text/html")) {
-      return response;
+    if (!url || !anonKey) {
+      console.warn("[Serve-Markdown] Supabase credentials not found in env.");
+      // Fallback to origin response
+      return;
     }
 
-    let htmlText = "";
-    try {
-      htmlText = await response.text();
-    } catch (err) {
-      console.error("[Serve-Markdown] Failed to read response text:", err);
-      return response;
+    // 2. Fetch Jutsus and Bloodlines from Supabase REST endpoints
+    const [jutsusRes, bloodlinesRes] = await Promise.all([
+      fetch(`${url}/rest/v1/jutsus?select=*&order=name.asc`, {
+        headers: { "apikey": anonKey, "Authorization": `Bearer ${anonKey}` }
+      }),
+      fetch(`${url}/rest/v1/bloodlines?select=*&order=name.asc`, {
+        headers: { "apikey": anonKey, "Authorization": `Bearer ${anonKey}` }
+      })
+    ]);
+
+    if (!jutsusRes.ok || !bloodlinesRes.ok) {
+      throw new Error(`Supabase REST fetch failed. Jutsus status: ${jutsusRes.status}, Bloodlines status: ${bloodlinesRes.status}`);
     }
 
-    try {
-      // 3. Strip non-content elements (scripts, styles, nav, footer, header, sidebars, and head).
-      const cleanedHtml = cleanHtml(htmlText);
+    const jutsus = await jutsusRes.json();
+    const bloodlines = await bloodlinesRes.json();
 
-      // 4. Convert the remaining HTML to Markdown using Turndown.
-      const turndownService = new TurndownService();
-      const markdown = turndownService.turndown(cleanedHtml);
+    // 3. Build Markdown content dynamically
+    let markdown = `# NARP Jutsu & Bloodline Database\n\n`;
+    markdown += `Welcome to the official database for the text-based Naruto Roleplay (NARP) Discord community. `;
+    markdown += `Below is a comprehensive and structured catalog of all available jutsus and bloodlines.\n\n`;
 
-      // Calculate estimated token count: string length / 4.
-      const estimatedTokens = Math.ceil(markdown.length / 4);
-
-      // 5. Return the Markdown response with the required headers.
-      return new Response(markdown, {
-        status: response.status,
-        headers: {
-          "Content-Type": "text/markdown; charset=utf-8",
-          "X-Markdown-Tokens": String(estimatedTokens),
-          "Content-Signal": "ai-train=yes, search=yes, ai-input=yes",
-        },
-      });
-    } catch (err) {
-      console.error("[Serve-Markdown] Error processing HTML to Markdown:", err);
-      // Fallback to original HTML response on processing error.
-      const fallbackHeaders = new Headers(response.headers);
-      return new Response(htmlText, {
-        status: response.status,
-        headers: fallbackHeaders,
-      });
+    // --- Bloodlines Section ---
+    markdown += `## Bloodlines Catalog\n\n`;
+    if (!bloodlines || bloodlines.length === 0) {
+      markdown += `*No bloodlines currently registered in the database.*\n\n`;
+    } else {
+      markdown += `| Name | Category | Subcategory | Custom Tags | Document |\n`;
+      markdown += `| :--- | :--- | :--- | :--- | :--- |\n`;
+      for (const b of bloodlines) {
+        const name = b.name || "Unnamed Bloodline";
+        const cat = b.category || "Custom";
+        const subcat = b.subcategory || "Other";
+        const tags = Array.isArray(b.custom_tags) ? b.custom_tags.join(", ") : (b.custom_tags || "");
+        const docLink = b.link ? `[Link](${b.link})` : "N/A";
+        
+        markdown += `| **${name}** | ${cat} | ${subcat} | ${tags || "None"} | ${docLink} |\n`;
+      }
+      markdown += `\n`;
     }
+
+    // --- Jutsus Section ---
+    markdown += `## Jutsus Catalog\n\n`;
+    if (!jutsus || jutsus.length === 0) {
+      markdown += `*No jutsus currently registered in the database.*\n\n`;
+    } else {
+      markdown += `| Name | Nature | Rank | Types | Spec | Origin | Bloodline | Limited / Locked | Document |\n`;
+      markdown += `| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n`;
+      for (const j of jutsus) {
+        const name = j.name || "Unnamed Jutsu";
+        const nature = j.nature || "N/A";
+        const rank = Array.isArray(j.rank) ? j.rank.join(", ") : (j.rank || "N/A");
+        const types = Array.isArray(j.types) ? j.types.join(", ") : (j.types || "N/A");
+        const spec = Array.isArray(j.spec) ? j.spec.join(", ") : (j.spec || "N/A");
+        const origin = j.origin || "Custom";
+        const bloodline = j.bloodline || "None";
+        
+        const flags = [];
+        if (j.limited) flags.push("Limited");
+        if (j.locked) flags.push("Locked (IC)");
+        if (j.multi_rank) flags.push("Multi-Rank");
+        if (j.bm_tier) flags.push(`Battlemode (${j.bm_tier})`);
+        const statusStr = flags.join(", ") || "Standard";
+
+        const docLink = j.link ? `[Link](${j.link})` : "N/A";
+
+        markdown += `| **${name}** | ${nature} | ${rank} | ${types} | ${spec} | ${origin} | ${bloodline} | ${statusStr} | ${docLink} |\n`;
+      }
+      markdown += `\n`;
+    }
+
+    markdown += `---\n*Generated dynamically by Netlify Edge Functions. Data is synced in real-time with the database.*\n`;
+
+    // 4. Calculate estimated token count: string length / 4.
+    const estimatedTokens = Math.ceil(markdown.length / 4);
+
+    // 5. Return the Markdown response with the required headers.
+    return new Response(markdown, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/markdown; charset=utf-8",
+        "X-Markdown-Tokens": String(estimatedTokens),
+        "Content-Signal": "ai-train=yes, search=yes, ai-input=yes",
+      },
+    });
   } catch (err) {
-    console.error("[Serve-Markdown] Edge function main error:", err);
+    console.error("[Serve-Markdown] Edge function error:", err);
     // Silent fallback to standard request/response handling.
     return;
   }
 };
-
-/**
- * Strips non-content and layout-specific elements from the HTML string.
- */
-function cleanHtml(html: string): string {
-  let cleaned = html;
-
-  // List of tags and regular expressions to strip out.
-  // This covers styles, scripts, head metadata, header, footer, navigation, and sidebars.
-  const tagsToStrip = [
-    /<!--[\s\S]*?-->/gi,                       // HTML Comments
-    /<script[^>]*>([\s\S]*?)<\/script>/gi,     // Scripts
-    /<style[^>]*>([\s\S]*?)<\/style>/gi,       // Styles
-    /<head[^>]*>([\s\S]*?)<\/head>/gi,         // Head metadata
-    /<header[^>]*>([\s\S]*?)<\/header>/gi,     // Header elements
-    /<footer[^>]*>([\s\S]*?)<\/footer>/gi,     // Footer elements
-    /<nav[^>]*>([\s\S]*?)<\/nav>/gi,           // Navigation elements
-    /<aside[^>]*>([\s\S]*?)<\/aside>/gi,       // Sidebars / Asides
-  ];
-
-  for (const regex of tagsToStrip) {
-    cleaned = cleaned.replace(regex, "");
-  }
-
-  return cleaned;
-}
 
 // In-code configuration as a fallback. Precise control is registered in netlify.toml.
 export const config: Config = {

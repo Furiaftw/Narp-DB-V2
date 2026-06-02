@@ -266,11 +266,16 @@ export const fetchReviewChats = async (pendingId) => {
 export const sendReviewChat = async (pendingId, message) => {
   if (!supabase) throw new Error('Supabase is not initialized');
   try {
+    const session = await getCurrentSession();
+    if (!session?.user?.id) {
+      throw new Error('No authenticated user session found');
+    }
     const { data, error } = await supabase
       .from('pending_chats')
       .insert({
         pending_id: pendingId,
         message: message,
+        sender_id: session.user.id
       })
       .select();
 
