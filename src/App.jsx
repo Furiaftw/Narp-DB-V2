@@ -1954,6 +1954,31 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
 }
 
 /* ============================================================================
+   HELPERS
+   ============================================================================ */
+function renderMessageWithLinks(text) {
+  if (!text) return '';
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, index) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-500 hover:text-blue-400 hover:underline"
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
+/* ============================================================================
    COMPONENT: PendingJutsuCard
    ============================================================================ */
 function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit, currentUserRole, refreshTrigger }) {
@@ -2176,7 +2201,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                         </span>
                       </div>
                       <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                        {msg.message}
+                        {renderMessageWithLinks(msg.message)}
                       </p>
                     </div>
                   );

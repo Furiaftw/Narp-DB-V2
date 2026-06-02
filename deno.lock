@@ -21,6 +21,7 @@
         "npm:react@^18.3.1",
         "npm:tailwindcss-animate@^1.0.7",
         "npm:tailwindcss@^3.4.6",
+        "npm:turndown@^7.2.4",
         "npm:vite@^5.3.4"
       ]
     }

@@ -3,6 +3,23 @@
   publish = "dist"
   functions = "netlify/functions"
 
+[[edge_functions]]
+  function = "serve-markdown"
+  path = "/*"
+  excludedPath = [
+    "/assets/*",
+    "/_netlify/*",
+    "/.netlify/*",
+    "/*.js",
+    "/*.css",
+    "/*.png",
+    "/*.jpg",
+    "/*.jpeg",
+    "/*.gif",
+    "/*.svg",
+    "/*.ico"
+  ]
+
 # Vite outputs an SPA — every unknown path should fall through to index.html
 # so React handles the routing instead of returning a 404.
 [[redirects]]
