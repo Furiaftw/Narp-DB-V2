@@ -33,6 +33,7 @@ import {
   fetchReviewChats,
   sendReviewChat,
   claimPendingSubmission,
+  bumpPendingSubmission,
 } from './lib/supabase';
 
 
@@ -2002,7 +2003,21 @@ function renderMessageWithLinks(text) {
 /* ============================================================================
    COMPONENT: PendingJutsuCard
    ============================================================================ */
-function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onApprove, onCancel, onReview, onEdit, currentUserRole, refreshTrigger, onClaim }) {
+function PendingJutsuCard({
+  pending,
+  originalJutsu,
+  currentUserId,
+  isAdmin,
+  onApprove,
+  onCancel,
+  onReview,
+  onEdit,
+  currentUserRole,
+  refreshTrigger,
+  onClaim,
+  isMySubmissionsView = false,
+  onBump
+}) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
 
@@ -2042,6 +2057,49 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
       ? (pendingItem.assigned_to.id !== null && pendingItem.assigned_to.id !== undefined)
       : (typeof pendingItem.assigned_to === 'string' && pendingItem.assigned_to.trim() !== ''))
   );
+
+  const elapsed = (() => {
+    const baseTimeStr = pending.last_status_change || pending.submitted_at;
+    if (!baseTimeStr) return { formatted: '', hours: 0 };
+    const baseTime = new Date(baseTimeStr);
+    const now = new Date();
+    const diffMs = now - baseTime;
+    const hours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
+    
+    if (hours < 48) {
+      return { formatted: `${hours}h`, hours };
+    } else {
+      const days = Math.floor(hours / 24);
+      const remainingHours = hours % 24;
+      let formatted = `${days}d`;
+      if (remainingHours > 0) {
+        formatted += ` ${remainingHours}h`;
+      }
+      return { formatted, hours };
+    }
+  })();
+
+  const timerColorClass = elapsed.hours >= 48
+    ? 'text-red-500 animate-pulse font-bold'
+    : elapsed.hours >= 24
+      ? 'text-yellow-500'
+      : 'text-green-500';
+
+  const [isBumping, setIsBumping] = useState(false);
+  const handleRequestUpdate = async () => {
+    if (isBumping) return;
+    setIsBumping(true);
+    try {
+      await bumpPendingSubmission(pending.id, name);
+      if (typeof onBump === 'function') {
+        await onBump();
+      }
+    } catch (err) {
+      alert('Failed to request update: ' + (err.message || err));
+    } finally {
+      setIsBumping(false);
+    }
+  };
 
   useEffect(() => {
     if (isChatOpen) {
@@ -2187,6 +2245,12 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
             Submitted by <strong>{submitterName}</strong> · {new Date(pending.submitted_at).toLocaleString()}
           </p>
         </div>
+        {elapsed.formatted && (
+          <div className={`text-xs flex items-center gap-1 whitespace-nowrap shrink-0 select-none ${timerColorClass}`} title="Time since last activity">
+            <span>⏳</span>
+            <span>{elapsed.formatted}</span>
+          </div>
+        )}
       </div>
 
       {op !== 'delete' && (
@@ -2269,6 +2333,27 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
             </svg>
             Review Chat
+          </button>
+        )}
+        {isMySubmissionsView && isMine && (
+          <button
+            onClick={handleRequestUpdate}
+            disabled={elapsed.hours < 24 || isBumping || pending.is_bumped}
+            className={`flex-1 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 transition-colors ${
+              (elapsed.hours < 24 || pending.is_bumped)
+                ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed'
+                : 'bg-amber-500 hover:bg-amber-600 text-white shadow-sm'
+            }`}
+          >
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={elapsed.hours >= 24 && !pending.is_bumped ? "animate-bounce" : ""}>
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+            </svg>
+            {pending.is_bumped
+              ? 'Update Requested'
+              : elapsed.hours < 24
+                ? `Update Available in ${24 - elapsed.hours} hours`
+                : 'Request Update'
+            }
           </button>
         )}
         {isStrictSubmitter && pending.status === 'pending_approval' && (
@@ -2369,6 +2454,16 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
                     </div>
                   ) : (
                     filteredMessages.map((msg) => {
+                      if (msg.is_system_message) {
+                        return (
+                          <div
+                            key={msg.id}
+                            className="text-gray-400 text-sm text-center italic my-1 w-full"
+                          >
+                            {msg.message}
+                          </div>
+                        );
+                      }
                       const isMe = msg.sender_id === currentUserId;
                       const senderName = msg.profiles?.username || 'Unknown User';
                       const isPrivate = msg.is_staff_only;
@@ -2812,7 +2907,47 @@ export default function App() {
     try {
       const list = await fetchPendingJutsus();
       const filtered = isStaff ? list : list.filter(p => p.submitted_by === profile?.id);
-      setPendingJutsus(filtered);
+      
+      const sorted = [...filtered].sort((a, b) => {
+        const getPriorityWeight = (p) => {
+          // Priority 1: is_bumped === true OR status === 'pending_approval' ('Needs 2nd Approval')
+          if (p.is_bumped === true || p.status === 'pending_approval') {
+            return 1;
+          }
+          
+          const isClaimed = p.assigned_to !== null && p.assigned_to !== undefined && 
+            (typeof p.assigned_to === 'object' ? p.assigned_to.id !== null : p.assigned_to !== '');
+            
+          // Priority 2: Unclaimed (status === 'pending_review' ('Awaiting Reviewer'))
+          if (p.status === 'pending_review' && !isClaimed) {
+            return 2;
+          }
+          
+          const assignedId = typeof p.assigned_to === 'object' ? p.assigned_to?.id : p.assigned_to;
+          
+          // Priority 3: Claimed by the current reviewer
+          if (assignedId === profile?.id) {
+            return 3;
+          }
+          
+          // Priority 4: Claimed by other reviewers or other states
+          return 4;
+        };
+
+        const wA = getPriorityWeight(a);
+        const wB = getPriorityWeight(b);
+        
+        if (wA !== wB) {
+          return wA - wB;
+        }
+
+        // Sub-sort by last_status_change ascending (oldest first). Fallback to submitted_at.
+        const timeA = new Date(a.last_status_change || a.submitted_at || 0).getTime();
+        const timeB = new Date(b.last_status_change || b.submitted_at || 0).getTime();
+        return timeA - timeB;
+      });
+
+      setPendingJutsus(sorted);
       setPendingLoaded(true);
       setRefreshTrigger(prev => prev + 1);
     } catch (e) {
@@ -3299,7 +3434,9 @@ export default function App() {
                         onEdit={handleEditPending}
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
-                        onClaim={handleClaimPending} />
+                        onClaim={handleClaimPending}
+                        isMySubmissionsView={false}
+                        onBump={refreshPending} />
                     );
                   })}
                 </div>
@@ -3336,7 +3473,9 @@ export default function App() {
                         onEdit={handleEditPending}
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
-                        onClaim={handleClaimPending} />
+                        onClaim={handleClaimPending}
+                        isMySubmissionsView={true}
+                        onBump={refreshPending} />
                     );
                   })}
                 </div>
