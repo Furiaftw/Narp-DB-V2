@@ -264,30 +264,24 @@ export const fetchReviewChats = async (pendingId) => {
 };
 
 export const sendReviewChat = async (pendingId, message) => {
-  if (!supabase) return false;
+  if (!supabase) throw new Error('Supabase is not initialized');
   try {
-    const session = await getCurrentSession();
-    if (!session?.user?.id) {
-      console.error('[NARP] No authenticated user session found');
-      return false;
-    }
     const { data, error } = await supabase
       .from('pending_chats')
       .insert({
         pending_id: pendingId,
         message: message,
-        sender_id: session.user.id
       })
       .select();
 
     if (error) {
       console.error('[NARP] Error sending review chat:', error);
-      return false;
+      throw error;
     }
-    return data || true;
+    return data;
   } catch (error) {
     console.error('[NARP] Error in sendReviewChat:', error);
-    return false;
+    throw error;
   }
 };
 
