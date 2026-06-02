@@ -2146,7 +2146,7 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               ) : (
                 chatMessages.map((msg) => {
                   const isMe = msg.sender_id === currentUserId;
-                  const senderName = msg.profiles?.name || 'Unknown';
+                  const senderName = msg.profiles?.username || 'Unknown Reviewer';
                   return (
                     <div
                       key={msg.id}
