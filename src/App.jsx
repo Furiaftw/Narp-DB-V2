@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
+import NotificationBell from './components/NotificationBell';
 import {
   supabase,
   isSupabaseConfigured,
@@ -34,6 +35,7 @@ import {
   sendReviewChat,
   claimPendingSubmission,
   bumpPendingSubmission,
+  markSubmissionAsRead,
 } from './lib/supabase';
 
 
@@ -2126,8 +2128,14 @@ function PendingJutsuCard({
           setChatMessages(msgs);
         }
       });
+
+      if (currentUserId === pending.submitted_by && pending.has_user_unread) {
+        markSubmissionAsRead(pending.id).catch(err => {
+          console.error('[NARP] Failed to mark submission as read:', err);
+        });
+      }
     }
-  }, [isChatOpen, refreshTrigger, pending.id]);
+  }, [isChatOpen, refreshTrigger, pending.id, pending.has_user_unread, currentUserId, pending.submitted_by]);
 
   useEffect(() => {
     if (!isChatOpen || !pending?.id || !supabase) return;
@@ -3484,6 +3492,7 @@ export default function App() {
                 </div>
               )}
             </div>
+            {profile && <NotificationBell userId={profile.id} />}
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}

@@ -1,11 +1,12 @@
 -- Adds columns and triggers to support a state-based timer, priority sorting,
--- and user 'Request Update' bump feature for the pending submission queue.
+-- user 'Request Update' bump feature, and real-time user notification unread state.
 -- Run this once in the Supabase SQL Editor (Dashboard > SQL Editor > New query).
 
 -- 1. Add columns to pending_jutsus (or equivalent tables)
 ALTER TABLE public.pending_jutsus
   ADD COLUMN IF NOT EXISTS last_status_change TIMESTAMP WITH TIME ZONE DEFAULT now(),
-  ADD COLUMN IF NOT EXISTS is_bumped BOOLEAN DEFAULT false;
+  ADD COLUMN IF NOT EXISTS is_bumped BOOLEAN DEFAULT false,
+  ADD COLUMN IF NOT EXISTS has_user_unread BOOLEAN DEFAULT false;
 
 -- 2. Add column to pending_chats
 ALTER TABLE public.pending_chats
@@ -33,16 +34,32 @@ CREATE TRIGGER tr_pending_jutsus_status_change
   FOR EACH ROW
   EXECUTE FUNCTION public.update_last_status_change();
 
--- 5. Create trigger function to update last_status_change on new chats (replies)
+-- 5. Create trigger function to update last_status_change and has_user_unread on new chats (replies)
 CREATE OR REPLACE FUNCTION public.update_last_status_change_on_chat()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+  v_role TEXT;
 BEGIN
+  -- 1. Update last_status_change
   UPDATE public.pending_jutsus
      SET last_status_change = now()
    WHERE id = NEW.pending_id;
+
+  -- 2. Check the sender's role in profiles
+  SELECT role INTO v_role
+    FROM public.profiles
+   WHERE id = NEW.sender_id;
+
+  -- 3. If role is staff, admin, or owner, set has_user_unread = true
+  IF v_role IN ('staff', 'admin', 'owner') THEN
+    UPDATE public.pending_jutsus
+       SET has_user_unread = true
+     WHERE id = NEW.pending_id;
+  END IF;
+
   RETURN NEW;
 END;
 $$;

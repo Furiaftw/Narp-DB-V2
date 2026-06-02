@@ -185,7 +185,7 @@ export const fetchPendingJutsus = async () => {
   // Manual join for submitter/reviewer, and select/join assignee
   const { data: pending, error } = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url), last_status_change, is_bumped, has_user_unread')
     .order('submitted_at', { ascending: false });
   if (error) throw error;
   if (!pending?.length) return [];
@@ -291,6 +291,15 @@ export const bumpPendingSubmission = async (id, itemName) => {
   }
   
   return data;
+};
+
+export const markSubmissionAsRead = async (pendingId) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('pending_jutsus')
+    .update({ has_user_unread: false })
+    .eq('id', pendingId);
+  if (error) throw error;
 };
 
 export const fetchReviewChats = async (pendingId) => {
