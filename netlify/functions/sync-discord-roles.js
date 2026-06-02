@@ -51,6 +51,23 @@ export default async (req) => {
     }
 
     /* ------------------------------------------------------------------
+       STEP 1.5 — If they already exist and have a role assigned,
+       abort the role update and retain their database role.
+       Only assign a role via Discord sync on their very first login.
+       ------------------------------------------------------------------ */
+    if (existingProfile && existingProfile.role) {
+      console.log(`[sync-discord-roles] User ${userId} already has role '${existingProfile.role}' assigned. Aborting Discord sync.`);
+      return json({
+        id: existingProfile.id,
+        email: existingProfile.email,
+        username: existingProfile.username,
+        avatar_url: existingProfile.avatar_url,
+        role: existingProfile.role,
+        discord_id: existingProfile.discord_id,
+      }, 200);
+    }
+
+    /* ------------------------------------------------------------------
        STEP 2 — CRITICAL owner safeguard.
        The owner must NEVER be downgraded. If the database already records
        this user as the owner, return immediately and leave the row alone.

@@ -2006,6 +2006,14 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
   const [activeTab, setActiveTab] = useState('submitter'); // 'submitter' or 'staff'
   const messagesEndRef = useRef(null);
 
+  const showStaffSync = currentUserRole === 'owner' || (['staff', 'admin'].includes(currentUserRole) && currentUserId !== pending.submitted_by);
+
+  useEffect(() => {
+    if (isChatOpen && !showStaffSync) {
+      setActiveTab('submitter');
+    }
+  }, [isChatOpen, showStaffSync]);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -2247,164 +2255,180 @@ function PendingJutsuCard({ pending, originalJutsu, currentUserId, isAdmin, onAp
               </button>
             </div>
 
-            {/* Tabs (Staff only) */}
-            {isStaff && (
-              <div className="flex border-b border-slate-200 bg-slate-100 shrink-0">
-                <button
-                  onClick={() => setActiveTab('submitter')}
-                  className={`flex-1 py-3 text-center text-sm font-bold transition-all border-b-2 flex items-center justify-center gap-2 ${
-                    activeTab === 'submitter'
-                      ? 'border-indigo-600 text-indigo-600 bg-white font-black'
-                      : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                  }`}
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
-                  Submitter Chat (Public)
-                </button>
-                <button
-                  onClick={() => setActiveTab('staff')}
-                  className={`flex-1 py-3 text-center text-sm font-bold transition-all border-b-2 flex items-center justify-center gap-2 ${
-                    activeTab === 'staff'
-                      ? 'border-amber-600 text-amber-600 bg-white font-black'
-                      : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
-                  }`}
-                >
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                  </svg>
-                  Staff Sync (Private)
-                </button>
+            {currentUserRole === 'user' && !pending.assigned_to ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 p-12 bg-slate-50 min-h-[40vh]">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-4 text-amber-500 animate-pulse">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+                <p className="text-sm font-semibold text-center text-slate-700 max-w-md leading-relaxed">
+                  Chat will become available once a reviewer claims this submission.
+                </p>
               </div>
-            )}
-
-            {/* Chat Body */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 h-[60vh] custom-scrollbar flex flex-col gap-3">
-              {filteredMessages.length === 0 ? (
-                <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-12">
-                  <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                  <p className="text-sm font-semibold">
-                    {activeTab === 'staff' ? 'No private staff messages yet.' : 'No messages here yet.'}
-                  </p>
-                  <p className="text-xs text-slate-400 mt-1">
-                    {activeTab === 'staff' ? 'Sync with other reviewers privately.' : 'Discuss the submission with the player.'}
-                  </p>
-                </div>
-              ) : (
-                filteredMessages.map((msg) => {
-                  const isMe = msg.sender_id === currentUserId;
-                  const senderName = msg.profiles?.username || 'Unknown User';
-                  const isPrivate = msg.is_staff_only;
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
-                        isMe
-                          ? isPrivate
-                            ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
-                            : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
-                          : isPrivate
-                            ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
-                            : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+            ) : (
+              <>
+                {/* Tabs (Staff only) */}
+                {isStaff && (
+                  <div className="flex border-b border-slate-200 bg-slate-100 shrink-0">
+                    <button
+                      onClick={() => setActiveTab('submitter')}
+                      className={`flex-1 py-3 text-center text-sm font-bold transition-all border-b-2 flex items-center justify-center gap-2 ${
+                        activeTab === 'submitter'
+                          ? 'border-indigo-600 text-indigo-600 bg-white font-black'
+                          : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
                       }`}
                     >
-                      <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                        {msg.profiles?.avatar_url && (
-                          <img
-                            src={msg.profiles.avatar_url}
-                            alt={senderName}
-                            className="w-5 h-5 rounded-full object-cover shrink-0"
-                          />
-                        )}
-                        <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
-                          {senderName}
-                        </span>
-                        {msg.profiles?.role && (
-                          <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
-                            isMe 
-                              ? isPrivate ? 'bg-amber-500/30 text-amber-50' : 'bg-indigo-500/30 text-indigo-50'
-                              : msg.profiles.role === 'admin' || msg.profiles.role === 'owner'
-                                ? 'bg-indigo-100 text-indigo-700'
-                                : msg.profiles.role === 'staff'
-                                  ? 'bg-emerald-100 text-emerald-700'
-                                  : 'bg-slate-100 text-slate-600'
-                          }`}>
-                            {msg.profiles.role === 'staff' ? 'Reviewer' : msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role}
-                          </span>
-                        )}
-                        {isPrivate && (
-                          <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-200 text-amber-800 border border-amber-300">
-                            Private
-                          </span>
-                        )}
-                        <span className={`text-[10px] ${isMe ? (isPrivate ? 'text-amber-200' : 'text-indigo-200') : 'text-slate-400'}`}>
-                          · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                      <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                        {renderMessageWithLinks(msg.message)}
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                        <circle cx="9" cy="7" r="4" />
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                      </svg>
+                      Submitter Chat (Public)
+                    </button>
+                    {showStaffSync && (
+                      <button
+                        onClick={() => setActiveTab('staff')}
+                        className={`flex-1 py-3 text-center text-sm font-bold transition-all border-b-2 flex items-center justify-center gap-2 ${
+                          activeTab === 'staff'
+                            ? 'border-amber-600 text-amber-600 bg-white font-black'
+                            : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+                        }`}
+                      >
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                        </svg>
+                        Staff Sync (Private)
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Chat Body */}
+                <div className="flex-1 overflow-y-auto p-6 bg-slate-50 h-[60vh] custom-scrollbar flex flex-col gap-3">
+                  {filteredMessages.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-12">
+                      <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                      </svg>
+                      <p className="text-sm font-semibold">
+                        {activeTab === 'staff' ? 'No private staff messages yet.' : 'No messages here yet.'}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-1">
+                        {activeTab === 'staff' ? 'Sync with other reviewers privately.' : 'Discuss the submission with the player.'}
                       </p>
                     </div>
-                  );
-                })
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                  ) : (
+                    filteredMessages.map((msg) => {
+                      const isMe = msg.sender_id === currentUserId;
+                      const senderName = msg.profiles?.username || 'Unknown User';
+                      const isPrivate = msg.is_staff_only;
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
+                            isMe
+                              ? isPrivate
+                                ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
+                                : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
+                              : isPrivate
+                                ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
+                                : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 mb-1 flex-wrap">
+                            {msg.profiles?.avatar_url && (
+                              <img
+                                src={msg.profiles.avatar_url}
+                                alt={senderName}
+                                className="w-5 h-5 rounded-full object-cover shrink-0"
+                              />
+                            )}
+                            <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
+                              {senderName}
+                            </span>
+                            {msg.profiles?.role && (
+                              <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
+                                isMe 
+                                  ? isPrivate ? 'bg-amber-500/30 text-amber-50' : 'bg-indigo-500/30 text-indigo-50'
+                                  : msg.profiles.role === 'admin' || msg.profiles.role === 'owner'
+                                    ? 'bg-indigo-100 text-indigo-700'
+                                    : msg.profiles.role === 'staff'
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-slate-100 text-slate-600'
+                              }`}>
+                                {msg.profiles.role === 'staff' ? 'Reviewer' : msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role}
+                              </span>
+                            )}
+                            {isPrivate && (
+                              <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-200 text-amber-800 border border-amber-300">
+                                Private
+                              </span>
+                            )}
+                            <span className={`text-[10px] ${isMe ? (isPrivate ? 'text-amber-200' : 'text-indigo-200') : 'text-slate-400'}`}>
+                              · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          </div>
+                          <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
+                            {renderMessageWithLinks(msg.message)}
+                          </p>
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
 
-            {/* Input Footer */}
-            <div className={`p-4 border-t shrink-0 transition-colors ${
-              activeTab === 'staff'
-                ? 'bg-amber-50/80 border-amber-100'
-                : 'bg-indigo-50/80 border-indigo-100'
-            }`}>
-              <form onSubmit={handleSend} className="flex gap-2 items-center">
-                <span className={`text-[10px] font-bold px-2 py-1.5 rounded-lg shrink-0 select-none uppercase border ${
+                {/* Input Footer */}
+                <div className={`p-4 border-t shrink-0 transition-colors ${
                   activeTab === 'staff'
-                    ? 'text-amber-800 bg-amber-100 border-amber-200'
-                    : 'text-indigo-800 bg-indigo-100 border-indigo-200'
+                    ? 'bg-amber-50/80 border-amber-100'
+                    : 'bg-indigo-50/80 border-indigo-100'
                 }`}>
-                  {activeTab === 'staff' ? 'Private' : 'Public'}
-                </span>
-                <input
-                  type="text"
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  placeholder={
-                    activeTab === 'staff'
-                      ? "Type a staff-only message..."
-                      : isStaff
-                        ? "Type a message to the player..."
-                        : "Type a message to the team..."
-                  }
-                  className={`flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 ${
-                    activeTab === 'staff'
-                      ? 'bg-white border-amber-200 focus:ring-amber-500 focus:border-amber-500'
-                      : 'bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500'
-                  }`}
-                />
-                <button
-                  type="submit"
-                  className={`text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md ${
-                    activeTab === 'staff'
-                      ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800'
-                      : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800'
-                  }`}
-                >
-                  Send
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13" />
-                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                  </svg>
-                </button>
-              </form>
-            </div>
+                  <form onSubmit={handleSend} className="flex gap-2 items-center">
+                    <span className={`text-[10px] font-bold px-2 py-1.5 rounded-lg shrink-0 select-none uppercase border ${
+                      activeTab === 'staff'
+                        ? 'text-amber-800 bg-amber-100 border-amber-200'
+                        : 'text-indigo-800 bg-indigo-100 border-indigo-200'
+                    }`}>
+                      {activeTab === 'staff' ? 'Private' : 'Public'}
+                    </span>
+                    <input
+                      type="text"
+                      value={chatInput}
+                      onChange={(e) => setChatInput(e.target.value)}
+                      placeholder={
+                        activeTab === 'staff'
+                          ? "Type a staff-only message..."
+                          : isStaff
+                            ? "Type a message to the player..."
+                            : "Type a message to the team..."
+                      }
+                      className={`flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 ${
+                        activeTab === 'staff'
+                          ? 'bg-white border-amber-200 focus:ring-amber-500 focus:border-amber-500'
+                          : 'bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500'
+                      }`}
+                    />
+                    <button
+                      type="submit"
+                      className={`text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md ${
+                        activeTab === 'staff'
+                          ? 'bg-amber-600 hover:bg-amber-700 active:bg-amber-800'
+                          : 'bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800'
+                      }`}
+                    >
+                      Send
+                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <line x1="22" y1="2" x2="11" y2="13" />
+                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                      </svg>
+                    </button>
+                  </form>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -2546,7 +2570,43 @@ export default function App() {
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
+  const [profilesList, setProfilesList] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
   const [tab, setTab]           = useState('jutsus');
+
+  const loadProfiles = useCallback(async () => {
+    if (!supabaseReady || !isAdmin) return;
+    setProfilesLoading(true);
+    try {
+      const list = await fetchAllProfiles();
+      setProfilesList(list);
+    } catch (err) {
+      console.error('[NARP] Failed to fetch profiles:', err);
+      alert('Error loading members: ' + (err.message || err));
+    } finally {
+      setProfilesLoading(false);
+    }
+  }, [supabaseReady, isAdmin]);
+
+  const handleRoleChange = async (userId, newRole) => {
+    if (!window.confirm(`Are you sure you want to change this member's role to ${newRole}?`)) {
+      return;
+    }
+    try {
+      await setUserRole(userId, newRole);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to update user role:', err);
+      alert('Failed to update role: ' + (err.message || err));
+    }
+  };
+
+  useEffect(() => {
+    if (tab === 'members') {
+      loadProfiles();
+    }
+  }, [tab, loadProfiles, refreshTrigger]);
+
   const [viewMode, setViewMode] = useState(() => LS.get(STORAGE.VIEW_MODE, 'card'));
   const [expRow, setExpRow]     = useState(null);
   const [cart, setCart]         = useState([]);
@@ -3003,6 +3063,7 @@ export default function App() {
   const TABS = [
     { id: 'jutsus', label: 'Jutsus', count: (db.jutsus || []).length },
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
+    ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -3153,6 +3214,103 @@ export default function App() {
                 </div>
               </>
             )}
+          </div>
+        )}
+
+        {tab === 'members' && isAdmin && (
+          <div className="max-w-6xl mx-auto">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
+              <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-2">
+                  <Icon n="User" size={20} className="text-indigo-400" />
+                  <h3 className="font-bold text-lg font-serif">Member Board</h3>
+                  <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">
+                    {profilesList.length} Total
+                  </span>
+                </div>
+                <button
+                  onClick={loadProfiles}
+                  disabled={profilesLoading}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Icon n="Refresh" size={12} className={profilesLoading ? "animate-spin" : ""} />
+                  Refresh
+                </button>
+              </div>
+
+              <div className="p-6">
+                {profilesLoading && profilesList.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading members...</div>
+                ) : profilesList.length === 0 ? (
+                  <div className="text-center py-16 text-slate-400 text-sm font-semibold">No members found.</div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-slate-200 text-xs font-bold text-slate-400 uppercase tracking-wider">
+                          <th className="py-3 px-4">Member</th>
+                          <th className="py-3 px-4">Discord User ID</th>
+                          <th className="py-3 px-4">Joined At</th>
+                          <th className="py-3 px-4 text-right">Role</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {profilesList.map((m) => {
+                          const isCurrentUser = m.id === profile?.id;
+                          return (
+                            <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-3 px-4 flex items-center gap-3">
+                                {m.avatar_url ? (
+                                  <img
+                                    src={m.avatar_url}
+                                    alt={m.username}
+                                    className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                                  />
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-xs font-bold text-slate-500">
+                                    {m.username ? m.username.slice(0, 2).toUpperCase() : '??'}
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                                    {m.username || 'Unknown'}
+                                    {isCurrentUser && (
+                                      <span className="text-[10px] font-extrabold uppercase bg-indigo-50 text-indigo-600 border border-indigo-200 px-1.5 py-0.5 rounded-sm">
+                                        You
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-slate-400 font-mono truncate max-w-[200px]">{m.email}</div>
+                                </div>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-xs">
+                                {m.discord_id || '—'}
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 text-xs">
+                                {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                <select
+                                  value={m.role || 'user'}
+                                  disabled={isCurrentUser || m.role === 'owner'}
+                                  onChange={(e) => handleRoleChange(m.id, e.target.value)}
+                                  className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer transition-all"
+                                >
+                                  <option value="user">User</option>
+                                  <option value="staff">Reviewer (staff)</option>
+                                  <option value="admin">Admin</option>
+                                  {m.role === 'owner' && <option value="owner">Owner</option>}
+                                </select>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>
