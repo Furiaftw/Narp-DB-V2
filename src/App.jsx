@@ -2019,7 +2019,7 @@ function PendingJutsuCard({
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
 
-  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by && !['admin', 'owner'].includes(currentUser.role);
+  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by && !['staff', 'admin', 'owner'].includes(currentUser.role);
 
   const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
 
@@ -2191,9 +2191,12 @@ function PendingJutsuCard({
 
   const filteredMessages = chatMessages.filter(msg => {
     if (activeTab === 'staff') {
-      return msg.is_staff_only === true;
+      // Overhaul: Show both public player messages and private staff sync comments in the Staff Sync tab
+      // This gives reviewers full context of the discussion without constantly switching tabs!
+      return true;
     } else {
-      // activeTab === 'submitter'
+      // activeTab === 'submitter' (Public Submitter Chat)
+      // Standard players/users should only see public messages
       return msg.is_staff_only === false || msg.is_staff_only === null || msg.is_staff_only === undefined;
     }
   });
@@ -2407,10 +2410,10 @@ function PendingJutsuCard({
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                       </svg>
                       <p className="text-sm font-semibold">
-                        {activeTab === 'staff' ? 'No private staff messages yet.' : 'No messages here yet.'}
+                        {activeTab === 'staff' ? 'No messages in this submission yet.' : 'No messages here yet.'}
                       </p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {activeTab === 'staff' ? 'Sync with other reviewers privately.' : 'Discuss the submission with the player.'}
+                        {activeTab === 'staff' ? 'Both public player discussion and private staff sync notes will appear here.' : 'Discuss the submission with the player.'}
                       </p>
                     </div>
                   ) : (
@@ -2458,10 +2461,18 @@ function PendingJutsuCard({
                                 </span>
                               );
                             })()}
-                            {isPrivate && (
+                            {isPrivate ? (
                               <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-200 text-amber-800 border border-amber-300">
                                 Private
                               </span>
+                            ) : (
+                              activeTab === 'staff' && (
+                                <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
+                                  isMe ? 'bg-indigo-500/30 text-indigo-50 border border-indigo-500/20' : 'bg-slate-100 text-slate-600 border border-slate-200'
+                                }`}>
+                                  Public Message
+                                </span>
+                              )
                             )}
                             <span className={`text-[10px] ${isMe ? (isPrivate ? 'text-amber-200' : 'text-indigo-200') : 'text-slate-400'}`}>
                               · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
