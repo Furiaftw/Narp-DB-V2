@@ -81,9 +81,10 @@ export const fetchMyProfile = async () => {
           userId: session.user.id
         })
       });
-      if (syncRes.ok) {
-        return await syncRes.json();
+      if (!syncRes.ok) {
+        throw new Error('Server responded with ' + syncRes.status);
       }
+      return await syncRes.json();
     } catch (err) {
       console.warn('[NARP] Role sync failed, falling back to local profile fetch:', err);
     }
