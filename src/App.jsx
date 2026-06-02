@@ -15,6 +15,7 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
+  updateMyWorkThreadId,
   fetchAllProfiles,
   setUserRole,
   fetchWhitelist,
@@ -142,7 +143,8 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     ? import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID
     : import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
 
-  const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
+  const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
+  const webhookUrl = baseWebhookUrl.includes('?') ? `${baseWebhookUrl}&wait=true` : `${baseWebhookUrl}?wait=true`;
 
   // Format a profile into a Discord mention, falling back to plain @username.
   const ping = (profile) => {
@@ -222,14 +224,22 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     body = JSON.stringify(payload);
   }
 
-  fetch(webhookUrl, {
-    method: 'POST',
-    headers,
-    body,
-  }).catch((err) => {
+  try {
+    const response = await fetch(webhookUrl, {
+      method: 'POST',
+      headers,
+      body,
+    });
+    if (!response.ok) {
+      throw new Error(`Discord webhook returned status ${response.status}`);
+    }
+    const data = await response.json();
+    return { messageId: data?.id, threadId: threadId };
+  } catch (err) {
     // Never let a logging failure block the underlying database action.
     console.warn('[NARP] Discord log failed:', err);
-  });
+    return null;
+  }
 }
 
 /* ---------------------------------------------------------------------------
@@ -1891,9 +1901,49 @@ const maskEmail = (email) => {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole }) {
+function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+
+  const activeProfile = supabaseReady ? profile : {
+    id: 'dev-user-id',
+    username: 'Dev Administrator',
+    email: 'dev@example.com',
+    avatar_url: null,
+    role: devRole,
+    work_thread_id: profile?.work_thread_id || '',
+  };
+
+  const [threadInput, setThreadInput] = useState(activeProfile?.work_thread_id || '');
+  const [savingThread, setSavingThread] = useState(false);
+  const [saveStatus, setSaveStatus] = useState('');
+
+  useEffect(() => {
+    setThreadInput(activeProfile?.work_thread_id || '');
+  }, [activeProfile?.work_thread_id]);
+
+  const handleSaveThread = async () => {
+    try {
+      setSavingThread(true);
+      setSaveStatus('');
+      if (!supabaseReady) {
+        onProfileUpdate?.({
+          ...profile,
+          work_thread_id: threadInput
+        });
+        setSaveStatus('Saved (Dev simulation)!');
+        return;
+      }
+      const updatedProfile = await updateMyWorkThreadId(threadInput);
+      onProfileUpdate?.(updatedProfile);
+      setSaveStatus('Saved successfully!');
+    } catch (err) {
+      console.error(err);
+      setSaveStatus('Save failed: ' + err.message);
+    } finally {
+      setSavingThread(false);
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -1909,14 +1959,6 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
       document.removeEventListener('touchstart', handleOutsideClick);
     };
   }, [open]);
-
-  const activeProfile = supabaseReady ? profile : {
-    id: 'dev-user-id',
-    username: 'Dev Administrator',
-    email: 'dev@example.com',
-    avatar_url: null,
-    role: devRole,
-  };
 
   if (supabaseReady && !activeProfile) {
     return (
@@ -1962,6 +2004,33 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
                     className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-t border-slate-100">
               <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole === 'staff' ? 'Reviewer' : devRole})
             </button>
+          )}
+          {activeProfile && ['staff', 'admin', 'owner'].includes(activeProfile.role) && (
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex flex-col gap-1.5">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase">Personal Work Thread ID</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  placeholder="Thread ID..."
+                  value={threadInput}
+                  onChange={(e) => setThreadInput(e.target.value)}
+                  className="w-full text-xs px-2 py-1.5 border border-slate-200 rounded-lg bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveThread}
+                  disabled={savingThread}
+                  className="text-xs px-3 py-1.5 font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 transition-colors"
+                >
+                  {savingThread ? '...' : 'Save'}
+                </button>
+              </div>
+              {saveStatus && (
+                <div className={`text-[10px] font-semibold ${saveStatus.includes('failed') ? 'text-rose-500' : 'text-emerald-600'}`}>
+                  {saveStatus}
+                </div>
+              )}
+            </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
                   type="button"
@@ -3050,6 +3119,7 @@ export default function App() {
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
 
+        let logData = null;
         try {
           const chats = await fetchReviewChats(id);
           let chatTranscript = null;
@@ -3061,9 +3131,38 @@ export default function App() {
               return `[${time}] ${name}:\n${msgText}`;
             }).join('\n\n') + '\n\n';
           }
-          await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile, chatTranscript);
+          logData = await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile, chatTranscript);
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        }
+
+        if (item.operation === 'insert' && profile?.work_thread_id) {
+          try {
+            const actionType = (profile.role === 'admin' || profile.role === 'owner')
+              ? 'Admin Approval'
+              : '2nd Pair of Eyes';
+            const itemName = displayData?.name || 'Unknown';
+            const docLink = displayData?.link || 'N/A';
+            const mainLogUrl = logData
+              ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
+              : '';
+
+            await fetch('/.netlify/functions/reviewer-work-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                threadId: profile.work_thread_id,
+                reviewerId: profile.discord_id,
+                reviewerName: profile.username,
+                actionType,
+                itemName,
+                docLink,
+                mainLogUrl,
+              }),
+            });
+          } catch (workLogErr) {
+            console.warn('[NARP] Reviewer work log failed:', workLogErr);
+          }
         }
       }
 
@@ -3085,6 +3184,7 @@ export default function App() {
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
 
+        let logData = null;
         try {
           const chats = await fetchReviewChats(id);
           let chatTranscript = null;
@@ -3096,9 +3196,36 @@ export default function App() {
               return `[${time}] ${name}:\n${msgText}`;
             }).join('\n\n') + '\n\n';
           }
-          await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript);
+          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript);
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        }
+
+        if (item.operation === 'insert' && profile?.work_thread_id) {
+          try {
+            const actionType = 'Denied';
+            const itemName = displayData?.name || 'Unknown';
+            const docLink = displayData?.link || 'N/A';
+            const mainLogUrl = logData
+              ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
+              : '';
+
+            await fetch('/.netlify/functions/reviewer-work-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                threadId: profile.work_thread_id,
+                reviewerId: profile.discord_id,
+                reviewerName: profile.username,
+                actionType,
+                itemName,
+                docLink,
+                mainLogUrl,
+              }),
+            });
+          } catch (workLogErr) {
+            console.warn('[NARP] Reviewer work log failed:', workLogErr);
+          }
         }
       }
 
@@ -3120,6 +3247,30 @@ export default function App() {
       const itemType = 'Jutsu';
 
       await reviewPendingJutsu(id, profile.id);
+
+      if (item && item.operation === 'insert' && profile?.work_thread_id) {
+        try {
+          const actionType = 'First Check';
+          const docLink = display?.link || 'N/A';
+          const mainLogUrl = '';
+
+          await fetch('/.netlify/functions/reviewer-work-log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              threadId: profile.work_thread_id,
+              reviewerId: profile.discord_id,
+              reviewerName: profile.username,
+              actionType,
+              itemName,
+              docLink,
+              mainLogUrl,
+            }),
+          });
+        } catch (workLogErr) {
+          console.warn('[NARP] Reviewer work log failed:', workLogErr);
+        }
+      }
 
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
@@ -3295,6 +3446,7 @@ export default function App() {
               onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
               onSignIn={handleSignIn}
               onSignOut={handleSignOut}
+              onProfileUpdate={setProfile}
             />
           </div>
         </div>
