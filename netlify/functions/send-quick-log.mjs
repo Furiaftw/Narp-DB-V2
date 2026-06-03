@@ -9,25 +9,33 @@ export default async (req) => {
 
   try {
     const {
-      threadId,
-      reviewerName,
-      actionType,
-      itemName,
-      docLink,
+      type,
+      link,
+      reviewerId,
       myCharactersLink,
       upgradesLink
     } = await req.json();
 
-    if (!threadId) {
-      return new Response(JSON.stringify({ error: 'Missing threadId' }), {
-        status: 400,
+    const baseUrl = process.env.VITE_DISCORD_LOG_WEBHOOK_URL;
+    if (!baseUrl) {
+      return new Response(JSON.stringify({ error: 'VITE_DISCORD_LOG_WEBHOOK_URL not configured' }), {
+        status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    const baseUrl = process.env.DISCORD_WORK_LOG_WEBHOOK_URL;
-    if (!baseUrl) {
-      return new Response(JSON.stringify({ error: 'DISCORD_WORK_LOG_WEBHOOK_URL not configured' }), {
+    // Map type to thread ID
+    let threadId = '';
+    if (type === 'Character') {
+      threadId = process.env.VITE_DISCORD_OC_THREAD_ID;
+    } else if (type === 'Summon') {
+      threadId = process.env.VITE_DISCORD_SUMMON_THREAD_ID;
+    } else if (type === 'Custom Item') {
+      threadId = process.env.VITE_DISCORD_ITEM_THREAD_ID;
+    }
+
+    if (!threadId) {
+      return new Response(JSON.stringify({ error: `Discord thread ID for type '${type}' not configured` }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -35,24 +43,14 @@ export default async (req) => {
 
     const webhookUrl = `${baseUrl}?thread_id=${threadId}`;
 
-    // Color is Green (3066993)
-    const color = 3066993;
-
-    let description = `**Action:** ${actionType}\n**Document Link:** ${docLink}`;
-
-    // Links: If myCharactersLink and upgradesLink exist, append them as clickable markdown
+    // Format the message
+    let formattedMessage = `Name Reviewer: <@${reviewerId}>\nType of Submission: ${type}\nDecision: Approved\n\nLinks:\nSheet: ${link}\n`;
     if (myCharactersLink) {
-      description += `\n**My-Characters Thread:** [My-Characters Thread](${myCharactersLink})`;
+      formattedMessage += `My-Characters: ${myCharactersLink}\n`;
     }
     if (upgradesLink) {
-      description += `\n**Upgrades Thread:** [Upgrades Thread](${upgradesLink})`;
+      formattedMessage += `Upgrades: ${upgradesLink}\n`;
     }
-
-    const embed = {
-      title: `${actionType}: ${itemName}`,
-      description,
-      color,
-    };
 
     const discordResponse = await fetch(webhookUrl, {
       method: 'POST',
@@ -60,7 +58,7 @@ export default async (req) => {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        embeds: [embed]
+        content: formattedMessage.trim()
       }),
     });
 
