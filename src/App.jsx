@@ -1249,24 +1249,24 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Character'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                      disabled
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
                     >
-                      <Icon n="PlusCir" size={14} className="text-emerald-500" /> OC Submission
+                      <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission (Under Development)
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                      disabled
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
                     >
-                      <Icon n="PlusCir" size={14} className="text-amber-500" /> Summon
+                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon (Under Development)
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                      disabled
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
                     >
-                      <Icon n="PlusCir" size={14} className="text-purple-500" /> Custom Item
+                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item (Under Development)
                     </button>
                   </div>
                 )}
