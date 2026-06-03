@@ -1354,45 +1354,33 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
   const [upgradesLink, setUpgradesLink] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [isSecondReviewer, setIsSecondReviewer] = useState(false);
 
   const isCharacter = type === 'Character';
+  const isStaff = profile?.role === 'staff' || profile?.role === 'admin' || profile?.role === 'owner';
 
   const myCharsValid = !myCharactersLink || myCharactersLink.includes('1473338902264676424');
   const upgradesValid = !upgradesLink || upgradesLink.includes('1473338902264676425');
-  const linksInvalid = !myCharsValid || !upgradesValid;
+  const linksInvalid = isSecondReviewer && (!myCharsValid || !upgradesValid);
 
-  const isAnyLinkEmpty = isCharacter && (!myCharactersLink.trim() || !upgradesLink.trim());
-  const submitDisabled = !link.trim() || linksInvalid || submitting;
+  const isAnyLinkEmpty = isSecondReviewer && isCharacter && (!myCharactersLink.trim() || !upgradesLink.trim());
+  const submitDisabled = !link.trim() || (isSecondReviewer && linksInvalid) || submitting;
 
   let submitBtnStyle = "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed";
-  if (isCharacter && isAnyLinkEmpty && !linksInvalid && link.trim()) {
+  if (isCharacter && isSecondReviewer && isAnyLinkEmpty && !linksInvalid && link.trim()) {
     submitBtnStyle = "bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed";
   }
 
-  const markdownText = `Final Step
-───────────────────────
-Your character is almost approved! There is one last step before you are all set.
-
-Please create a thread in
-◈ [my-characters](https://discord.com/channels/1473338897697214584/1473338902264676424) — your character RP log area
-◈ [character-upgrades](https://discord.com/channels/1473338897697214584/1473338902264676425) — your character upgrades log area
-
-Make sure to use the template below for both posts. Once done, your character will be added to the rosters and you will receive your roles! If you need help, ping @unknown-role and we will guide you through it.
-
-COPY THE TEMPLATE BELOW FOR my-characters
-Character name | @tagyourself
+  const templateText = `Character name | @tagyourself
 Village: [If not in village put wanderer or rogue]
 Rank: [As per character sheet]
 Bloodline/hidden: [Name of bloodline, if there is one]
 Approved by: [Tag the reviewers involved]
 Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
-Character Doc: [Link your approved character's google doc here]
+Character Doc: [Link your approved character's google doc here]`;
 
-───────────────────────
-NARP Review Team · Almost there!`;
-
-  const handleCopyMarkdown = () => {
-    copyText(markdownText, () => {
+  const handleCopyTemplate = () => {
+    copyText(templateText, () => {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     });
@@ -1411,8 +1399,8 @@ NARP Review Team · Almost there!`;
           type,
           link,
           reviewerId: profile?.discord_id || '',
-          myCharactersLink: isCharacter ? myCharactersLink : '',
-          upgradesLink: isCharacter ? upgradesLink : '',
+          myCharactersLink: (isCharacter && isSecondReviewer) ? myCharactersLink : '',
+          upgradesLink: (isCharacter && isSecondReviewer) ? upgradesLink : '',
         }),
       });
 
@@ -1429,8 +1417,8 @@ NARP Review Team · Almost there!`;
           actionType: 'Approved',
           itemName: `New ${type} Submission`,
           docLink: link,
-          myCharactersLink: isCharacter ? myCharactersLink : '',
-          upgradesLink: isCharacter ? upgradesLink : '',
+          myCharactersLink: (isCharacter && isSecondReviewer) ? myCharactersLink : '',
+          upgradesLink: (isCharacter && isSecondReviewer) ? upgradesLink : '',
         }),
       });
 
@@ -1473,7 +1461,19 @@ NARP Review Team · Almost there!`;
             />
           </div>
 
-          {isCharacter && (
+          {isCharacter && isStaff && (
+            <label className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
+              <input
+                type="checkbox"
+                checked={isSecondReviewer}
+                onChange={e => setIsSecondReviewer(e.target.checked)}
+                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
+              />
+              <span>Second Reviewer / Final Approval Step</span>
+            </label>
+          )}
+
+          {isCharacter && isSecondReviewer && (
             <>
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">My-Characters Thread Link (Optional)</label>
@@ -1511,14 +1511,14 @@ NARP Review Team · Almost there!`;
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-2 text-slate-700 max-h-48 overflow-y-auto">
                 <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1.5 sticky top-0 bg-slate-50">
-                  <span className="font-bold text-slate-800">Final Step Copy Block</span>
+                  <span className="font-bold text-slate-800">Final Step Block</span>
                   <button
                     type="button"
-                    onClick={handleCopyMarkdown}
+                    onClick={handleCopyTemplate}
                     className={`text-[10px] font-bold px-2 py-1 rounded transition-all flex items-center gap-1 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`}
                   >
                     <Icon n={copied ? 'Check' : 'Copy'} size={12} />
-                    <span>{copied ? 'Copied!' : 'Copy Raw Markdown'}</span>
+                    <span>{copied ? 'Copied!' : 'Copy Template'}</span>
                   </button>
                 </div>
                 <p className="font-bold text-slate-800 text-sm">Final Step</p>
@@ -1535,13 +1535,7 @@ NARP Review Team · Almost there!`;
                 <div className="border-t border-slate-200 my-1"></div>
                 <p className="font-bold text-slate-800">COPY THE TEMPLATE BELOW FOR my-characters</p>
                 <pre className="bg-slate-100 p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
-{`Character name | @tagyourself
-Village: [If not in village put wanderer or rogue]
-Rank: [As per character sheet]
-Bloodline/hidden: [Name of bloodline, if there is one]
-Approved by: [Tag the reviewers involved]
-Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
-Character Doc: [Link your approved character's google doc here]`}
+{templateText}
                 </pre>
                 <div className="border-t border-slate-200 my-1"></div>
                 <p className="text-slate-500 italic">NARP Review Team · Almost there!</p>
