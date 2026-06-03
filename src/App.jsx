@@ -139,10 +139,16 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return; // Logging not configured — skip silently.
 
+  const isCharacter = itemData?.type === 'Character';
+
   // Route to the correct forum thread based on the jutsu's type.
-  const threadId = toArray(itemData?.types).includes('Battlemode')
+  let threadId = toArray(itemData?.types).includes('Battlemode')
     ? import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID
     : import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
+
+  if (isCharacter) {
+    threadId = import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+  }
 
   const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
   const webhookUrl = baseWebhookUrl.includes('?') ? `${baseWebhookUrl}&wait=true` : `${baseWebhookUrl}?wait=true`;
@@ -175,31 +181,59 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
   const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
   const approvalDate = new Date().toLocaleString();
 
-  const description = [
-    `**Name Entry Creator:** ${creatorPing}`,
-    `**Name Reviewer:** ${reviewerPing}`,
-    `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
-    '',
-    `**Decision:** ${decision}`,
-    '',
-    '**Entry Details:**',
-    `Nature: ${natureVal}`,
-    `Rank: ${rankVal}`,
-    `Type: ${typeVal}`,
-    `Spec: ${specVal}`,
-    `Bloodline: ${bloodlineVal}`,
-    '',
-    '**Link to sheet:**',
-    `${linkVal}`,
-    '',
-    '**Dates:**',
-    `Creation Date: ${creationDate}`,
-    `Approval Date: ${approvalDate}`
-  ].join('\n');
+  let description;
+  if (isCharacter) {
+    const characterDesc = [
+      `**Name Entry Creator:** ${creatorPing}`,
+      `**Name Reviewer:** ${reviewerPing}`,
+      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
+      '',
+      `**Decision:** ${decision}`,
+      '',
+      '**OC Details:**',
+      `Type of Submission: Character`,
+      `Link to sheet: ${linkVal}`,
+    ];
+    if (itemData?.myCharactersLink) {
+      characterDesc.push(`My-Characters Link: ${itemData.myCharactersLink}`);
+    }
+    if (itemData?.upgradesLink) {
+      characterDesc.push(`Upgrades Link: ${itemData.upgradesLink}`);
+    }
+    characterDesc.push(
+      '',
+      '**Dates:**',
+      `Creation Date: ${creationDate}`,
+      `Approval Date: ${approvalDate}`
+    );
+    description = characterDesc.join('\n');
+  } else {
+    description = [
+      `**Name Entry Creator:** ${creatorPing}`,
+      `**Name Reviewer:** ${reviewerPing}`,
+      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
+      '',
+      `**Decision:** ${decision}`,
+      '',
+      '**Entry Details:**',
+      `Nature: ${natureVal}`,
+      `Rank: ${rankVal}`,
+      `Type: ${typeVal}`,
+      `Spec: ${specVal}`,
+      `Bloodline: ${bloodlineVal}`,
+      '',
+      '**Link to sheet:**',
+      `${linkVal}`,
+      '',
+      '**Dates:**',
+      `Creation Date: ${creationDate}`,
+      `Approval Date: ${approvalDate}`
+    ].join('\n');
+  }
 
   const payload = {
     embeds: [{
-      title: itemData?.name || 'Jutsu Entry',
+      title: isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'),
       description,
       color,
     }],
@@ -1350,41 +1384,10 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
    ============================================================================ */
 function StatelessSubmissionModal({ type, profile, onClose }) {
   const [link, setLink] = useState('');
-  const [myCharactersLink, setMyCharactersLink] = useState('');
-  const [upgradesLink, setUpgradesLink] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [isSecondReviewer, setIsSecondReviewer] = useState(false);
 
   const isCharacter = type === 'Character';
-  const isStaff = profile?.role === 'staff' || profile?.role === 'admin' || profile?.role === 'owner';
-
-  const myCharsValid = !myCharactersLink || myCharactersLink.includes('1473338902264676424');
-  const upgradesValid = !upgradesLink || upgradesLink.includes('1473338902264676425');
-  const linksInvalid = isSecondReviewer && (!myCharsValid || !upgradesValid);
-
-  const isAnyLinkEmpty = isSecondReviewer && isCharacter && (!myCharactersLink.trim() || !upgradesLink.trim());
-  const submitDisabled = !link.trim() || (isSecondReviewer && linksInvalid) || submitting;
-
-  let submitBtnStyle = "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed";
-  if (isCharacter && isSecondReviewer && isAnyLinkEmpty && !linksInvalid && link.trim()) {
-    submitBtnStyle = "bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed";
-  }
-
-  const templateText = `Character name | @tagyourself
-Village: [If not in village put wanderer or rogue]
-Rank: [As per character sheet]
-Bloodline/hidden: [Name of bloodline, if there is one]
-Approved by: [Tag the reviewers involved]
-Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
-Character Doc: [Link your approved character's google doc here]`;
-
-  const handleCopyTemplate = () => {
-    copyText(templateText, () => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
+  const submitDisabled = !link.trim() || submitting;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1392,43 +1395,58 @@ Character Doc: [Link your approved character's google doc here]`;
 
     setSubmitting(true);
     try {
-      const logRes = await fetch('/.netlify/functions/send-quick-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type,
-          link,
-          reviewerId: profile?.discord_id || '',
-          myCharactersLink: (isCharacter && isSecondReviewer) ? myCharactersLink : '',
-          upgradesLink: (isCharacter && isSecondReviewer) ? upgradesLink : '',
-        }),
-      });
+      if (isCharacter) {
+        // Character submissions are sent to the database queue as pending items
+        await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
 
-      if (!logRes.ok) {
-        throw new Error('Quick log function failed: ' + logRes.statusText);
-      }
+        // Trigger a reviewer ping for creation
+        await fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            triggerType: 'creation',
+            itemName: 'OC Submission',
+            itemType: 'Character',
+          }),
+        }).catch((pingErr) => {
+          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+        });
+      } else {
+        // Other types (Summon, Custom Item) remain stateless quick logs
+        const logRes = await fetch('/.netlify/functions/send-quick-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            type,
+            link,
+            reviewerId: profile?.discord_id || '',
+          }),
+        });
 
-      const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          threadId: profile?.work_thread_id || '',
-          reviewerName: profile?.username || '',
-          actionType: 'Approved',
-          itemName: `New ${type} Submission`,
-          docLink: link,
-          myCharactersLink: (isCharacter && isSecondReviewer) ? myCharactersLink : '',
-          upgradesLink: (isCharacter && isSecondReviewer) ? upgradesLink : '',
-        }),
-      });
+        if (!logRes.ok) {
+          throw new Error('Quick log function failed: ' + logRes.statusText);
+        }
 
-      if (!workLogRes.ok) {
-        throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
+        const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            threadId: profile?.work_thread_id || '',
+            reviewerName: profile?.username || '',
+            actionType: 'Approved',
+            itemName: `New ${type} Submission`,
+            docLink: link,
+          }),
+        });
+
+        if (!workLogRes.ok) {
+          throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
+        }
       }
 
       onClose();
     } catch (err) {
-      console.error('[NARP] Failed to submit quick log:', err);
+      console.error('[NARP] Failed to submit log:', err);
       alert('Submission failed: ' + (err.message || err));
     } finally {
       setSubmitting(false);
@@ -1461,88 +1479,6 @@ Character Doc: [Link your approved character's google doc here]`;
             />
           </div>
 
-          {isCharacter && isStaff && (
-            <label className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors">
-              <input
-                type="checkbox"
-                checked={isSecondReviewer}
-                onChange={e => setIsSecondReviewer(e.target.checked)}
-                className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
-              />
-              <span>Second Reviewer / Final Approval Step</span>
-            </label>
-          )}
-
-          {isCharacter && isSecondReviewer && (
-            <>
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">My-Characters Thread Link (Optional)</label>
-                <input
-                  type="url"
-                  value={myCharactersLink}
-                  onChange={e => setMyCharactersLink(e.target.value)}
-                  placeholder="https://discord.com/channels/.../1473338902264676424"
-                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
-                />
-                {!myCharsValid && (
-                  <p className="text-red-500 text-xs mt-1 font-bold">Invalid link. Must be from the my-characters forum</p>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Character-Upgrades Thread Link (Optional)</label>
-                <input
-                  type="url"
-                  value={upgradesLink}
-                  onChange={e => setUpgradesLink(e.target.value)}
-                  placeholder="https://discord.com/channels/.../1473338902264676425"
-                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
-                />
-                {!upgradesValid && (
-                  <p className="text-red-500 text-xs mt-1 font-bold">Invalid link. Must be from the character-upgrades forum</p>
-                )}
-              </div>
-
-              {isAnyLinkEmpty && !linksInvalid && link.trim() && (
-                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
-                  <p className="text-amber-700 text-xs font-semibold">Missing thread links. These are needed to format the work log and OC log properly.</p>
-                </div>
-              )}
-
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-2 text-slate-700 max-h-48 overflow-y-auto">
-                <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1.5 sticky top-0 bg-slate-50">
-                  <span className="font-bold text-slate-800">Final Step Block</span>
-                  <button
-                    type="button"
-                    onClick={handleCopyTemplate}
-                    className={`text-[10px] font-bold px-2 py-1 rounded transition-all flex items-center gap-1 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`}
-                  >
-                    <Icon n={copied ? 'Check' : 'Copy'} size={12} />
-                    <span>{copied ? 'Copied!' : 'Copy Template'}</span>
-                  </button>
-                </div>
-                <p className="font-bold text-slate-800 text-sm">Final Step</p>
-                <div className="border-t border-slate-200 my-1"></div>
-                <p>Your character is almost approved! There is one last step before you are all set.</p>
-                <p>Please create a thread in</p>
-                <p>
-                  ◈ <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-bold">my-characters</a> — your character RP log area
-                </p>
-                <p>
-                  ◈ <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-bold">character-upgrades</a> — your character upgrades log area
-                </p>
-                <p>Make sure to use the template below for both posts. Once done, your character will be added to the rosters and you will receive your roles! If you need help, ping <span className="font-semibold">@unknown-role</span> and we will guide you through it.</p>
-                <div className="border-t border-slate-200 my-1"></div>
-                <p className="font-bold text-slate-800">COPY THE TEMPLATE BELOW FOR my-characters</p>
-                <pre className="bg-slate-100 p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
-{templateText}
-                </pre>
-                <div className="border-t border-slate-200 my-1"></div>
-                <p className="text-slate-500 italic">NARP Review Team · Almost there!</p>
-              </div>
-            </>
-          )}
-
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
             <button
               type="button"
@@ -1554,12 +1490,244 @@ Character Doc: [Link your approved character's google doc here]`;
             <button
               type="submit"
               disabled={submitDisabled}
-              className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md ${submitBtnStyle}`}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {submitting ? 'Submitting...' : 'Submit'}
             </button>
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   COMPONENT: SystemFinalStepBlock
+   ============================================================================ */
+function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) {
+  const [myLink, setMyLink] = useState(pending?.data?.myCharactersLink || '');
+  const [upgLink, setUpgLink] = useState(pending?.data?.upgradesLink || '');
+  const [copied, setCopied] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [nudged, setNudged] = useState(false);
+  const [nudging, setNudging] = useState(false);
+
+  const isSubmitter = currentUserId === pending?.submitted_by;
+
+  const myLinkValid = !myLink || myLink.includes('1473338902264676424');
+  const upgLinkValid = !upgLink || upgLink.includes('1473338902264676425');
+
+  const linksSavedAndVerified = pending?.data?.myCharactersLink && 
+                                pending?.data?.myCharactersLink.includes('1473338902264676424') && 
+                                pending?.data?.upgradesLink && 
+                                pending?.data?.upgradesLink.includes('1473338902264676425');
+
+  const templateText = `Character name | @tagyourself
+Village: [If not in village put wanderer or rogue]
+Rank: [As per character sheet]
+Bloodline/hidden: [Name of bloodline, if there is one]
+Approved by: [Tag the reviewers involved]
+Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
+Character Doc: [Link your approved character's google doc here]`;
+
+  const handleCopy = () => {
+    copyText(templateText, () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const handleSave = async () => {
+    if (!myLink.trim() || !upgLink.trim()) {
+      setError('Both links are required.');
+      return;
+    }
+    if (!myLink.includes('1473338902264676424')) {
+      setError('Invalid My-Characters Link. Must contain 1473338902264676424.');
+      return;
+    }
+    if (!upgLink.includes('1473338902264676425')) {
+      setError('Invalid Character-Upgrades Link. Must contain 1473338902264676425.');
+      return;
+    }
+
+    setError('');
+    setSaving(true);
+    try {
+      await onUpdatePending({
+        ...pending.data,
+        myCharactersLink: myLink.trim(),
+        upgradesLink: upgLink.trim()
+      });
+    } catch (err) {
+      setError('Failed to save links: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleNudge = async () => {
+    if (!pending?.data?.second_reviewer_discord_id) {
+      alert('Reviewer Discord ID is not available. Try activating the final step again.');
+      return;
+    }
+    setNudging(true);
+    try {
+      const res = await fetch('/.netlify/functions/nudge-reviewer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pendingId: pending.id,
+          submitterName: pending.submitter?.username || 'Player',
+          reviewerDiscordId: pending.data.second_reviewer_discord_id,
+          myCharactersLink: pending.data.myCharactersLink,
+          upgradesLink: pending.data.upgradesLink,
+          docLink: pending.data.link
+        })
+      });
+      if (res.ok) {
+        setNudged(true);
+      } else {
+        const errText = await res.text();
+        alert('Nudge failed: ' + errText);
+      }
+    } catch (err) {
+      alert('Nudge error: ' + err.message);
+    } finally {
+      setNudging(false);
+    }
+  };
+
+  return (
+    <div className="w-full bg-slate-900 border border-amber-500/30 rounded-3xl p-5 my-2 flex flex-col gap-4 text-white shadow-lg animate-in fade-in">
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2.5" className="text-amber-400">
+          <circle cx="12" cy="12" r="10" />
+          <line x1="12" y1="8" x2="12" y2="12" />
+          <line x1="12" y1="16" x2="12.01" y2="16" />
+        </svg>
+        <span className="font-serif font-black tracking-wider text-sm uppercase text-amber-400">Final Step: OC Submission</span>
+      </div>
+
+      <div className="text-xs space-y-2 text-slate-300 leading-relaxed">
+        <p className="font-bold text-white text-sm">Your character is almost approved!</p>
+        <p>Please create a thread in the following forums on Discord:</p>
+        <div className="flex flex-col gap-1.5 pl-2 mt-1">
+          <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
+            ◈ my-characters — your character RP log area
+          </a>
+          <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
+            ◈ character-upgrades — your character upgrades log area
+          </a>
+        </div>
+        <p className="mt-2">Use the template below for both threads. Once done, your character will be added to the rosters!</p>
+      </div>
+
+      <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
+        <div className="flex justify-between items-center mb-2">
+          <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Thread Template</span>
+          <button
+            type="button"
+            onClick={handleCopy}
+            className={`text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all flex items-center gap-1.5 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+          >
+            {copied ? 'Copied!' : 'Copy Template'}
+          </button>
+        </div>
+        <pre className="text-[10px] font-mono whitespace-pre-wrap text-slate-300 bg-slate-900/50 p-3 rounded-xl max-h-36 overflow-y-auto border border-slate-800/50">
+          {templateText}
+        </pre>
+      </div>
+
+      <div className="border-t border-slate-800/80 pt-4 flex flex-col gap-3">
+        {isSubmitter ? (
+          <>
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My-Characters Thread Link</label>
+              <input
+                type="url"
+                value={myLink}
+                onChange={e => { setMyLink(e.target.value); setError(''); }}
+                placeholder="https://discord.com/channels/.../1473338902264676424"
+                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+              />
+              {!myLinkValid && (
+                <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the my-characters forum</p>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Character-Upgrades Thread Link</label>
+              <input
+                type="url"
+                value={upgLink}
+                onChange={e => { setUpgLink(e.target.value); setError(''); }}
+                placeholder="https://discord.com/channels/.../1473338902264676425"
+                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+              />
+              {!upgLinkValid && (
+                <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the character-upgrades forum</p>
+              )}
+            </div>
+
+            {error && (
+              <p className="text-red-400 text-xs font-bold bg-red-950/30 border border-red-900/50 p-2.5 rounded-xl">{error}</p>
+            )}
+
+            {!linksSavedAndVerified ? (
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={saving || !myLink.trim() || !upgLink.trim() || !myLinkValid || !upgLinkValid}
+                className="w-full mt-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition-colors"
+              >
+                {saving ? 'Verifying...' : 'Verify and Save Links'}
+              </button>
+            ) : (
+              <div className="flex flex-col gap-2.5 mt-1 bg-emerald-950/20 border border-emerald-900/50 p-4 rounded-2xl">
+                <div className="flex items-center gap-2 text-emerald-400 text-xs font-bold">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="3" className="shrink-0">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span>Links verified and saved successfully!</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleNudge}
+                  disabled={nudging || nudged}
+                  className={`w-full font-bold py-2.5 rounded-xl text-xs transition-all flex items-center justify-center gap-2 shadow-sm ${nudged ? 'bg-slate-800 text-slate-500 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700 text-white'}`}
+                >
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+                  </svg>
+                  {nudged ? 'Reviewer Nudged!' : nudging ? 'Nudging...' : 'Nudge Second Reviewer'}
+                </button>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="text-xs space-y-3">
+            {linksSavedAndVerified ? (
+              <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800">
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Verified links provided by submitter:</p>
+                <div className="flex flex-col gap-2 pl-1">
+                  <a href={pending.data.myCharactersLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
+                    My-Characters Thread Link
+                  </a>
+                  <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
+                    Character-Upgrades Thread Link
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 flex items-center gap-2.5 text-slate-400">
+                <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                <span>Waiting for submitter to submit forum links...</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2397,7 +2565,9 @@ function PendingJutsuCard({
   currentUserRole,
   refreshTrigger,
   onClaim,
-  isMySubmissionsView = false
+  isMySubmissionsView = false,
+  currentUserProfile = null,
+  refreshPending = null
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -2569,6 +2739,34 @@ function PendingJutsuCard({
       }
     } catch (err) {
       alert('Error sending message: ' + (err.message || err));
+    }
+  };
+
+  const finalStepActivated = pending.data?.finalStepActivated || chatMessages.some(m => m.message && m.message.startsWith('[SYSTEM_FINAL_STEP]'));
+
+  const handleActivateFinalStep = async () => {
+    try {
+      const systemMessage = `[SYSTEM_FINAL_STEP] Initialized by ${currentUserProfile?.username || 'Reviewer'}`;
+      await sendReviewChat(pending.id, systemMessage, false);
+
+      const nextData = {
+        ...pending.data,
+        finalStepActivated: true,
+        second_reviewer_id: currentUserId,
+        second_reviewer_discord_id: currentUserProfile?.discord_id || '',
+        second_reviewer_username: currentUserProfile?.username || ''
+      };
+      await updatePendingJutsuData(pending.id, nextData);
+
+      if (refreshPending) {
+        await refreshPending();
+      }
+      const freshMsgs = await fetchReviewChats(pending.id);
+      if (freshMsgs) {
+        setChatMessages(freshMsgs);
+      }
+    } catch (err) {
+      alert('Error activating final step: ' + err.message);
     }
   };
 
@@ -2785,6 +2983,26 @@ function PendingJutsuCard({
                   </div>
                 )}
 
+                {/* Activate Final Step Banner */}
+                {pending?.data?.type === 'Character' && isStaff && currentUserId !== pending.submitted_by && !finalStepActivated && (
+                  <div className="p-4 bg-amber-50 border-b border-amber-200 flex flex-col gap-2 items-center text-center shrink-0">
+                    <p className="text-xs text-amber-800 font-semibold">
+                      You are the reviewer. Activate the final step for this Character submission to provide thread link boxes and template.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleActivateFinalStep}
+                      className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <line x1="12" y1="5" x2="12" y2="19" />
+                        <line x1="5" y1="12" x2="19" y2="12" />
+                      </svg>
+                      Activate Final Step
+                    </button>
+                  </div>
+                )}
+
                 {/* Chat Body */}
                 <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3">
                   {filteredMessages.length === 0 ? (
@@ -2801,6 +3019,24 @@ function PendingJutsuCard({
                     </div>
                   ) : (
                     filteredMessages.map((msg) => {
+                      const isSystemFinalStep = msg.message && msg.message.startsWith('[SYSTEM_FINAL_STEP]');
+                      if (isSystemFinalStep) {
+                        return (
+                          <SystemFinalStepBlock
+                            key={msg.id}
+                            msg={msg}
+                            pending={pending}
+                            currentUserId={currentUserId}
+                            onUpdatePending={async (newData) => {
+                              await updatePendingJutsuData(pending.id, newData);
+                              if (refreshPending) {
+                                await refreshPending();
+                              }
+                            }}
+                          />
+                        );
+                      }
+
                       const isMe = msg.sender_id === currentUserId;
                       const senderName = msg.profiles?.username || 'Unknown User';
                       const isPrivate = msg.is_staff_only;
@@ -3444,6 +3680,8 @@ export default function App() {
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
 
+        const isCharacter = item.data?.type === 'Character';
+
         let logData = null;
         try {
           const chats = await fetchReviewChats(id);
@@ -3456,7 +3694,14 @@ export default function App() {
               return `[${time}] ${name}:\n${msgText}`;
             }).join('\n\n') + '\n\n';
           }
-          logData = await sendDiscordLog(displayData, isDelete ? 'Deleted' : 'Approved', item.submitter, item.first_reviewer, profile, chatTranscript);
+          logData = await sendDiscordLog(
+            isCharacter ? { ...displayData, name: 'OC Submission' } : displayData,
+            isDelete ? 'Deleted' : 'Approved',
+            item.submitter,
+            item.first_reviewer,
+            profile,
+            chatTranscript
+          );
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
         }
@@ -3466,7 +3711,7 @@ export default function App() {
             const actionType = (profile.role === 'admin' || profile.role === 'owner')
               ? 'Admin Approval'
               : '2nd Pair of Eyes';
-            const itemName = displayData?.name || 'Unknown';
+            const itemName = isCharacter ? 'OC Submission' : (displayData?.name || 'Unknown');
             const docLink = displayData?.link || 'N/A';
             const mainLogUrl = logData
               ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
@@ -3483,15 +3728,22 @@ export default function App() {
                 itemName,
                 docLink,
                 mainLogUrl,
+                myCharactersLink: displayData?.myCharactersLink || '',
+                upgradesLink: displayData?.upgradesLink || '',
               }),
             });
           } catch (workLogErr) {
             console.warn('[NARP] Reviewer work log failed:', workLogErr);
           }
         }
+
+        if (isCharacter) {
+          await cancelPendingJutsu(id); // Deletes from the pending list directly
+        } else {
+          await approvePendingJutsu(id); // Standard database merge RPC
+        }
       }
 
-      await approvePendingJutsu(id);
       await refreshPending();
       await refreshDB();
     } catch (e) {
@@ -3875,7 +4127,9 @@ export default function App() {
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
-                        isMySubmissionsView={false} />
+                        isMySubmissionsView={false}
+                        currentUserProfile={profile}
+                        refreshPending={refreshPending} />
                     );
                   })}
                 </div>
@@ -3913,7 +4167,9 @@ export default function App() {
                         currentUserRole={role}
                         refreshTrigger={refreshTrigger}
                         onClaim={handleClaimPending}
-                        isMySubmissionsView={true} />
+                        isMySubmissionsView={true}
+                        currentUserProfile={profile}
+                        refreshPending={refreshPending} />
                     );
                   })}
                 </div>
