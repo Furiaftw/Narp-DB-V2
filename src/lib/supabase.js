@@ -90,11 +90,23 @@ export const fetchMyProfile = async () => {
     }
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
     .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
     .eq('id', session.user.id)
     .maybeSingle();
+
+  if (error && error.code === '42703') {
+    // Fallback: work_thread_id column does not exist in profiles table
+    const fallback = await supabase
+      .from('profiles')
+      .select('id, email, username, avatar_url, role, discord_id')
+      .eq('id', session.user.id)
+      .maybeSingle();
+    data = fallback.data;
+    error = fallback.error;
+  }
+
   if (error) throw error;
   if (data) return data;
 
@@ -159,10 +171,21 @@ export const setUserWorkThreadId = async (userId, threadId) => {
 
 export const fetchAllProfiles = async () => {
   if (!supabase) return [];
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('profiles')
     .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id')
     .order('created_at', { ascending: true });
+
+  if (error && error.code === '42703') {
+    // Fallback: work_thread_id column does not exist in profiles table
+    const fallback = await supabase
+      .from('profiles')
+      .select('id, email, username, avatar_url, role, discord_id, created_at')
+      .order('created_at', { ascending: true });
+    data = fallback.data;
+    error = fallback.error;
+  }
+
   if (error) throw error;
   return data || [];
 };
