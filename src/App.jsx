@@ -15,6 +15,7 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
+  updateMyWorkThreadId,
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
@@ -1103,10 +1104,28 @@ const HIDE_ONLY = [
   { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
-function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd }) {
+function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
+
+  const [addDdOpen, setAddDdOpen] = useState(false);
+  const addDdRef = useRef(null);
+
+  useEffect(() => {
+    if (!addDdOpen) return;
+    const handleOutsideClick = (e) => {
+      if (addDdRef.current && !addDdRef.current.contains(e.target)) {
+        setAddDdOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [addDdOpen]);
 
   const ActiveChip = ({ label, onRemove }) => (
     <span className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-lg shrink-0 shadow-sm">
@@ -1180,10 +1199,44 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
             </button>
 
             {isAdmin && (
-              <button onClick={onAdd}
-                      className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-colors shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg">
-                <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span>
-              </button>
+              <div className="relative shrink-0" ref={addDdRef}>
+                <button onClick={() => setAddDdOpen(!addDdOpen)}
+                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg">
+                  <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span> <Icon n="Down" size={12} className="text-white opacity-80" />
+                </button>
+                {addDdOpen && (
+                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+                    <button
+                      type="button"
+                      onClick={() => { setAddDdOpen(false); onAdd(); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                    >
+                      <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Character'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                    >
+                      <Icon n="PlusCir" size={14} className="text-emerald-500" /> OC Submission
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                    >
+                      <Icon n="PlusCir" size={14} className="text-amber-500" /> Summon
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
+                    >
+                      <Icon n="PlusCir" size={14} className="text-purple-500" /> Custom Item
+                    </button>
+                  </div>
+                )}
+              </div>
             )}
           </div>
 
@@ -1289,6 +1342,232 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
         </div>
       )}
     </>
+  );
+}
+
+/* ============================================================================
+   MODAL: StatelessSubmissionModal
+   ============================================================================ */
+function StatelessSubmissionModal({ type, profile, onClose }) {
+  const [link, setLink] = useState('');
+  const [myCharactersLink, setMyCharactersLink] = useState('');
+  const [upgradesLink, setUpgradesLink] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const isCharacter = type === 'Character';
+
+  const myCharsValid = !myCharactersLink || myCharactersLink.includes('1473338902264676424');
+  const upgradesValid = !upgradesLink || upgradesLink.includes('1473338902264676425');
+  const linksInvalid = !myCharsValid || !upgradesValid;
+
+  const isAnyLinkEmpty = isCharacter && (!myCharactersLink.trim() || !upgradesLink.trim());
+  const submitDisabled = !link.trim() || linksInvalid || submitting;
+
+  let submitBtnStyle = "bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed";
+  if (isCharacter && isAnyLinkEmpty && !linksInvalid && link.trim()) {
+    submitBtnStyle = "bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed";
+  }
+
+  const markdownText = `Final Step
+───────────────────────
+Your character is almost approved! There is one last step before you are all set.
+
+Please create a thread in
+◈ [my-characters](https://discord.com/channels/1473338897697214584/1473338902264676424) — your character RP log area
+◈ [character-upgrades](https://discord.com/channels/1473338897697214584/1473338902264676425) — your character upgrades log area
+
+Make sure to use the template below for both posts. Once done, your character will be added to the rosters and you will receive your roles! If you need help, ping @unknown-role and we will guide you through it.
+
+COPY THE TEMPLATE BELOW FOR my-characters
+Character name | @tagyourself
+Village: [If not in village put wanderer or rogue]
+Rank: [As per character sheet]
+Bloodline/hidden: [Name of bloodline, if there is one]
+Approved by: [Tag the reviewers involved]
+Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
+Character Doc: [Link your approved character's google doc here]
+
+───────────────────────
+NARP Review Team · Almost there!`;
+
+  const handleCopyMarkdown = () => {
+    copyText(markdownText, () => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitDisabled) return;
+
+    setSubmitting(true);
+    try {
+      const logRes = await fetch('/.netlify/functions/send-quick-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type,
+          link,
+          reviewerId: profile?.discord_id || '',
+          myCharactersLink: isCharacter ? myCharactersLink : '',
+          upgradesLink: isCharacter ? upgradesLink : '',
+        }),
+      });
+
+      if (!logRes.ok) {
+        throw new Error('Quick log function failed: ' + logRes.statusText);
+      }
+
+      const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          threadId: profile?.work_thread_id || '',
+          reviewerName: profile?.username || '',
+          actionType: 'Approved',
+          itemName: `New ${type} Submission`,
+          docLink: link,
+          myCharactersLink: isCharacter ? myCharactersLink : '',
+          upgradesLink: isCharacter ? upgradesLink : '',
+        }),
+      });
+
+      if (!workLogRes.ok) {
+        throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
+      }
+
+      onClose();
+    } catch (err) {
+      console.error('[NARP] Failed to submit quick log:', err);
+      alert('Submission failed: ' + (err.message || err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+      <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon n="PlusCir" size={18} className="text-indigo-400 shrink-0" />
+            <h2 className="font-serif font-bold text-base truncate">Log New {type}</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+            <Icon n="X" size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Document Link (Mandatory)</label>
+            <input
+              type="url"
+              required
+              value={link}
+              onChange={e => setLink(e.target.value)}
+              placeholder="https://docs.google.com/..."
+              className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          {isCharacter && (
+            <>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">My-Characters Thread Link (Optional)</label>
+                <input
+                  type="url"
+                  value={myCharactersLink}
+                  onChange={e => setMyCharactersLink(e.target.value)}
+                  placeholder="https://discord.com/channels/.../1473338902264676424"
+                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+                {!myCharsValid && (
+                  <p className="text-red-500 text-xs mt-1 font-bold">Invalid link. Must be from the my-characters forum</p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Character-Upgrades Thread Link (Optional)</label>
+                <input
+                  type="url"
+                  value={upgradesLink}
+                  onChange={e => setUpgradesLink(e.target.value)}
+                  placeholder="https://discord.com/channels/.../1473338902264676425"
+                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+                {!upgradesValid && (
+                  <p className="text-red-500 text-xs mt-1 font-bold">Invalid link. Must be from the character-upgrades forum</p>
+                )}
+              </div>
+
+              {isAnyLinkEmpty && !linksInvalid && link.trim() && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <p className="text-amber-700 text-xs font-semibold">Missing thread links. These are needed to format the work log and OC log properly.</p>
+                </div>
+              )}
+
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs space-y-2 text-slate-700 max-h-48 overflow-y-auto">
+                <div className="flex justify-between items-center border-b border-slate-200 pb-1.5 mb-1.5 sticky top-0 bg-slate-50">
+                  <span className="font-bold text-slate-800">Final Step Copy Block</span>
+                  <button
+                    type="button"
+                    onClick={handleCopyMarkdown}
+                    className={`text-[10px] font-bold px-2 py-1 rounded transition-all flex items-center gap-1 ${copied ? 'bg-emerald-500 text-white' : 'bg-slate-800 text-slate-200 hover:bg-slate-700'}`}
+                  >
+                    <Icon n={copied ? 'Check' : 'Copy'} size={12} />
+                    <span>{copied ? 'Copied!' : 'Copy Raw Markdown'}</span>
+                  </button>
+                </div>
+                <p className="font-bold text-slate-800 text-sm">Final Step</p>
+                <div className="border-t border-slate-200 my-1"></div>
+                <p>Your character is almost approved! There is one last step before you are all set.</p>
+                <p>Please create a thread in</p>
+                <p>
+                  ◈ <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-bold">my-characters</a> — your character RP log area
+                </p>
+                <p>
+                  ◈ <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-bold">character-upgrades</a> — your character upgrades log area
+                </p>
+                <p>Make sure to use the template below for both posts. Once done, your character will be added to the rosters and you will receive your roles! If you need help, ping <span className="font-semibold">@unknown-role</span> and we will guide you through it.</p>
+                <div className="border-t border-slate-200 my-1"></div>
+                <p className="font-bold text-slate-800">COPY THE TEMPLATE BELOW FOR my-characters</p>
+                <pre className="bg-slate-100 p-2 rounded text-[10px] font-mono whitespace-pre-wrap">
+{`Character name | @tagyourself
+Village: [If not in village put wanderer or rogue]
+Rank: [As per character sheet]
+Bloodline/hidden: [Name of bloodline, if there is one]
+Approved by: [Tag the reviewers involved]
+Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
+Character Doc: [Link your approved character's google doc here]`}
+                </pre>
+                <div className="border-t border-slate-200 my-1"></div>
+                <p className="text-slate-500 italic">NARP Review Team · Almost there!</p>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitDisabled}
+              className={`px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md ${submitBtnStyle}`}
+            >
+              {submitting ? 'Submitting...' : 'Submit'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 
@@ -1967,6 +2246,13 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
     work_thread_id: profile?.work_thread_id || '',
   };
 
+  const [workThreadId, setWorkThreadId] = useState(activeProfile?.work_thread_id || '');
+  const [savingWorkThread, setSavingWorkThread] = useState(false);
+
+  useEffect(() => {
+    setWorkThreadId(activeProfile?.work_thread_id || '');
+  }, [activeProfile?.work_thread_id]);
+
   useEffect(() => {
     if (!open) return;
     const handleOutsideClick = (e) => {
@@ -2000,6 +2286,23 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
+  const handleSaveWorkThread = async () => {
+    setSavingWorkThread(true);
+    try {
+      if (supabaseReady) {
+        const updated = await updateMyWorkThreadId(workThreadId);
+        onProfileUpdate(updated);
+      } else {
+        onProfileUpdate({ ...profile, work_thread_id: workThreadId });
+      }
+    } catch (err) {
+      console.error('[NARP] Failed to update work thread ID:', err);
+      alert('Failed to update work thread ID: ' + (err.message || err));
+    } finally {
+      setSavingWorkThread(false);
+    }
+  };
+
   return (
     <div className="relative shrink-0" ref={menuRef}>
       <button onClick={() => setOpen(!open)}
@@ -2020,6 +2323,28 @@ function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onTogg
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
+          {['staff', 'admin', 'owner'].includes(activeProfile?.role) && (
+            <div className="p-4 border-b border-slate-100 bg-slate-50">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Work Log Thread ID</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={workThreadId}
+                  onChange={(e) => setWorkThreadId(e.target.value)}
+                  placeholder="Thread ID"
+                  className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveWorkThread}
+                  disabled={savingWorkThread}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
+                >
+                  {savingWorkThread ? '...' : 'Save'}
+                </button>
+              </div>
+            </div>
+          )}
           {!supabaseReady && (
             <button onClick={onToggleDevRole}
                     type="button"
@@ -2822,6 +3147,7 @@ export default function App() {
   }, [loading]);
 
   const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false });
+  const [statelessType, setStatelessType] = useState(null);
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -3464,7 +3790,8 @@ export default function App() {
           specOptions={sortedSpecs}
           clearF={clearF}
           isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
-          onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })} />
+          onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+          onOpenStatelessSubmission={setStatelessType} />
       </div>
 
       {/* TAB BAR */}
@@ -3832,6 +4159,14 @@ export default function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {statelessType && (
+        <StatelessSubmissionModal
+          type={statelessType}
+          profile={profile}
+          onClose={() => setStatelessType(null)}
+        />
       )}
 
       <SessionListCart list={cart}
