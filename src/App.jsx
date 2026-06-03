@@ -24,6 +24,7 @@ import {
   removeFromWhitelist,
   fetchPendingJutsus,
   submitPendingJutsu,
+  submitStatelessPending,
   reviewPendingJutsu,
   updatePendingJutsuData,
   subscribeToDatabaseChanges,
@@ -1384,10 +1385,20 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
    ============================================================================ */
 function StatelessSubmissionModal({ type, profile, onClose }) {
   const [link, setLink] = useState('');
+  const [myCharactersLink, setMyCharactersLink] = useState('');
+  const [upgradesLink, setUpgradesLink] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const isCharacter = type === 'Character';
-  const submitDisabled = !link.trim() || submitting;
+
+  // Validation
+  const myLinkValid = !myCharactersLink || myCharactersLink.includes('1473338902264676424');
+  const upgLinkValid = !upgradesLink || upgradesLink.includes('1473338902264676425');
+
+  const hasInvalidLinks = isCharacter && ((myCharactersLink && !myLinkValid) || (upgradesLink && !upgLinkValid));
+  const hasMissingLinks = isCharacter && (!myCharactersLink.trim() || !upgradesLink.trim());
+
+  const submitDisabled = !link.trim() || submitting || hasInvalidLinks;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1395,58 +1406,31 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
 
     setSubmitting(true);
     try {
-      if (isCharacter) {
-        // Character submissions are sent to the database queue as pending items
-        await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
+      const dataPayload = {
+        link: link.trim(),
+        name: type === 'Character' ? 'OC Submission' : `${type} Submission`,
+        myCharactersLink: isCharacter && myCharactersLink.trim() ? myCharactersLink.trim() : null,
+        upgradesLink: isCharacter && upgradesLink.trim() ? upgradesLink.trim() : null,
+      };
 
-        // Trigger a reviewer ping for creation
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: 'OC Submission',
-            itemType: 'Character',
-          }),
-        }).catch((pingErr) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-        });
-      } else {
-        // Other types (Summon, Custom Item) remain stateless quick logs
-        const logRes = await fetch('/.netlify/functions/send-quick-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            link,
-            reviewerId: profile?.discord_id || '',
-          }),
-        });
+      await submitStatelessPending(type, dataPayload);
 
-        if (!logRes.ok) {
-          throw new Error('Quick log function failed: ' + logRes.statusText);
-        }
-
-        const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            threadId: profile?.work_thread_id || '',
-            reviewerName: profile?.username || '',
-            actionType: 'Approved',
-            itemName: `New ${type} Submission`,
-            docLink: link,
-          }),
-        });
-
-        if (!workLogRes.ok) {
-          throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
-        }
-      }
+      // Trigger a reviewer ping for creation
+      await fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: type === 'Character' ? 'OC Submission' : `${type} Submission`,
+          itemType: type,
+        }),
+      }).catch((pingErr) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+      });
 
       onClose();
     } catch (err) {
-      console.error('[NARP] Failed to submit log:', err);
+      console.error('[NARP] Failed to submit stateless pending:', err);
       alert('Submission failed: ' + (err.message || err));
     } finally {
       setSubmitting(false);
@@ -1478,6 +1462,48 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
               className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
             />
           </div>
+
+          {isCharacter && (
+            <>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">My-Characters Thread Link (Optional)</label>
+                <input
+                  type="url"
+                  value={myCharactersLink}
+                  onChange={e => setMyCharactersLink(e.target.value)}
+                  placeholder="https://discord.com/channels/.../1473338902264676424"
+                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+                {myCharactersLink && !myLinkValid && (
+                  <p className="text-red-500 text-[11px] font-semibold mt-1">Invalid Link. Must contain 1473338902264676424.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Character-Upgrades Thread Link (Optional)</label>
+                <input
+                  type="url"
+                  value={upgradesLink}
+                  onChange={e => setUpgradesLink(e.target.value)}
+                  placeholder="https://discord.com/channels/.../1473338902264676425"
+                  className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+                />
+                {upgradesLink && !upgLinkValid && (
+                  <p className="text-red-500 text-[11px] font-semibold mt-1">Invalid Link. Must contain 1473338902264676425.</p>
+                )}
+              </div>
+
+              {hasMissingLinks && (
+                <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl p-3 flex gap-2">
+                  <span className="text-amber-500 shrink-0">⚠️</span>
+                  <div>
+                    <p className="font-bold">Missing Forum Thread Links</p>
+                    <p className="text-[11px] text-amber-700/90 mt-0.5">Warning: Submitting without these links means reviewers will have to manually prompt you later.</p>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
 
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
             <button
@@ -2819,7 +2845,36 @@ function PendingJutsuCard({
         )}
       </div>
 
-      {op !== 'delete' && (
+      {pending.isStateless && (
+        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1.5">
+          <div><span className="font-semibold">Submission Type:</span> {pending.data?.type || 'Stateless Submission'}</div>
+          {pending.data?.link && (
+            <div>
+              <span className="font-semibold">Doc Link:</span>{' '}
+              <a href={pending.data.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold inline-flex items-center gap-1">
+                View Document 🔗
+              </a>
+            </div>
+          )}
+          {pending.data?.myCharactersLink && (
+            <div>
+              <span className="font-semibold">My-Characters Thread:</span>{' '}
+              <a href={pending.data.myCharactersLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold inline-flex items-center gap-1">
+                View Thread 🔗
+              </a>
+            </div>
+          )}
+          {pending.data?.upgradesLink && (
+            <div>
+              <span className="font-semibold">Character-Upgrades Thread:</span>{' '}
+              <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline font-semibold inline-flex items-center gap-1">
+                View Thread 🔗
+              </a>
+            </div>
+          )}
+        </div>
+      )}
+      {!pending.isStateless && op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
           {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
           {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
@@ -3675,6 +3730,56 @@ export default function App() {
       // (the "2nd pair of eyes" in the double-approver workflow).
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
+        if (item.isStateless) {
+          // Stateless submission approval
+          const logRes = await fetch('/.netlify/functions/send-quick-log', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              type: item.data?.type || 'Character',
+              link: item.data?.link || '',
+              reviewerId: profile?.discord_id || '',
+              myCharactersLink: item.data?.myCharactersLink || '',
+              upgradesLink: item.data?.upgradesLink || ''
+            }),
+          });
+          if (!logRes.ok) {
+            const errText = await logRes.text();
+            throw new Error('Quick log function failed: ' + errText);
+          }
+
+          if (profile?.work_thread_id) {
+            const actionType = (profile.role === 'admin' || profile.role === 'owner')
+              ? 'Admin Approval'
+              : '2nd Pair of Eyes';
+            const itemName = item.data?.type === 'Character' ? 'OC Submission' : (item.data?.name || `New ${item.data?.type} Submission`);
+            const docLink = item.data?.link || '';
+
+            const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                threadId: profile.work_thread_id,
+                reviewerId: profile.discord_id || '',
+                reviewerName: profile.username || '',
+                actionType,
+                itemName,
+                docLink,
+                myCharactersLink: item.data?.myCharactersLink || '',
+                upgradesLink: item.data?.upgradesLink || ''
+              }),
+            });
+            if (!workLogRes.ok) {
+              const errText = await workLogRes.text();
+              console.warn('[NARP] Reviewer work log failed:', errText);
+            }
+          }
+
+          await cancelPendingJutsu(id); // Deletes from pending_stateless_submissions
+          await refreshPending();
+          return;
+        }
+
         const isDelete = item.operation === 'delete';
         const displayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
@@ -3756,6 +3861,12 @@ export default function App() {
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
+        if (item.isStateless) {
+          await cancelPendingJutsu(id);
+          await refreshPending();
+          return;
+        }
+
         const isDelete = item.operation === 'delete';
         const displayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })

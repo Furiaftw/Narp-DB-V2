@@ -216,22 +216,74 @@ export const fetchPendingJutsus = async () => {
     .order('submitted_at', { ascending: false });
 
   if (result.error) throw result.error;
-  const pending = result.data;
-  if (!pending?.length) return [];
+  const pending = result.data || [];
 
-  const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
+  // Fetch stateless pending entries too
+  let statelessList = [];
+  try {
+    const statelessResult = await supabase
+      .from('pending_stateless_submissions')
+      .select('id, type, data, submitted_by, created_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)');
+    if (statelessResult.error) {
+      console.warn('[NARP] fetch stateless submissions failed:', statelessResult.error);
+    } else {
+      statelessList = (statelessResult.data || []).map(s => ({
+        id: s.id,
+        operation: 'insert',
+        target_id: null,
+        data: {
+          ...s.data,
+          type: s.type,
+        },
+        submitted_by: s.submitted_by,
+        submitted_at: s.created_at,
+        status: s.status,
+        first_reviewer_id: s.first_reviewer_id,
+        assigned_to: s.assigned_to,
+        assignee: s.assignee,
+        isStateless: true,
+      }));
+    }
+  } catch (err) {
+    console.warn('[NARP] Error fetching stateless submissions:', err);
+  }
+
+  // Combine both lists
+  const combined = [...pending, ...statelessList];
+
+  if (!combined.length) return [];
+
+  const profileIds = [...new Set(combined.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
     .select('id, username, email, avatar_url, role, discord_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
-  return pending.map(p => ({
+  const mapped = combined.map(p => ({
     ...p,
     submitter: profileById.get(p.submitted_by) || null,
     first_reviewer: p.first_reviewer_id ? (profileById.get(p.first_reviewer_id) || null) : null,
     assignee: p.assignee || (p.assigned_to ? profileById.get(p.assigned_to) : null) || null,
   }));
+
+  // Sort by submitted_at descending
+  mapped.sort((a, b) => new Date(b.submitted_at) - new Date(a.submitted_at));
+  return mapped;
+};
+
+export const submitStatelessPending = async (type, data) => {
+  if (!supabase) return;
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to submit');
+
+  const { error } = await supabase.from('pending_stateless_submissions').insert({
+    type,
+    data,
+    submitted_by: session.user.id,
+    status: 'pending_review',
+  });
+  if (error) throw error;
 };
 
 export const submitPendingJutsu = async (operation, targetId, data, status = 'pending_approval') => {
@@ -252,36 +304,71 @@ export const submitPendingJutsu = async (operation, targetId, data, status = 'pe
 
 export const reviewPendingJutsu = async (id, reviewerId) => {
   if (!supabase) return;
-  const { error } = await supabase
+  const { data, error: err1 } = await supabase
     .from('pending_jutsus')
     .update({
       status: 'pending_approval',
       first_reviewer_id: reviewerId,
     })
-    .eq('id', id);
-  if (error) throw error;
+    .eq('id', id)
+    .select();
+
+  if (!data || data.length === 0) {
+    const { error: err2 } = await supabase
+      .from('pending_stateless_submissions')
+      .update({
+        status: 'pending_approval',
+        first_reviewer_id: reviewerId,
+      })
+      .eq('id', id);
+    if (err2) throw err2;
+  } else {
+    if (err1) throw err1;
+  }
 };
 
 export const claimPendingSubmission = async (pendingId, userId) => {
   if (!supabase) throw new Error('Supabase is not initialized');
-  const { data, error } = await supabase
+  const { data, error: err1 } = await supabase
     .from('pending_jutsus')
     .update({ assigned_to: userId })
     .eq('id', pendingId)
     .select();
-  if (error) throw error;
+
+  if (!data || data.length === 0) {
+    const { data: dataStateless, error: err2 } = await supabase
+      .from('pending_stateless_submissions')
+      .update({ assigned_to: userId })
+      .eq('id', pendingId)
+      .select();
+    if (err2) throw err2;
+    return dataStateless;
+  }
+  if (err1) throw err1;
   return data;
 };
 
 export const updatePendingJutsuData = async (id, newData) => {
   if (!supabase) return;
-  const { data, error } = await supabase
+  const { data, error: err1 } = await supabase
     .from('pending_jutsus')
     .update({ data: newData })
     .eq('id', id)
     .select();
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Edit blocked by database security or row not found.');
+
+  if (!data || data.length === 0) {
+    const { data: dataStateless, error: err2 } = await supabase
+      .from('pending_stateless_submissions')
+      .update({ data: newData })
+      .eq('id', id)
+      .select();
+    if (err2) throw err2;
+    if (!dataStateless || dataStateless.length === 0) {
+      throw new Error('Edit blocked by database security or row not found.');
+    }
+  } else {
+    if (err1) throw err1;
+  }
 };
 
 export const markSubmissionAsRead = async (pendingId) => {
@@ -385,8 +472,9 @@ export const approvePendingJutsu = async (id) => {
 
 export const cancelPendingJutsu = async (id) => {
   if (!supabase) return;
-  const { error } = await supabase.from('pending_jutsus').delete().eq('id', id);
-  if (error) throw error;
+  const { error: err1 } = await supabase.from('pending_jutsus').delete().eq('id', id);
+  const { error: err2 } = await supabase.from('pending_stateless_submissions').delete().eq('id', id);
+  if (err1 && err2) throw err1;
 };
 
 /* --- Role change audit log ------------------------------------------------- */
