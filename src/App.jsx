@@ -16,7 +16,6 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
-  updateMyWorkThreadId,
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
@@ -768,7 +767,7 @@ function SlotsEditor({ value, onChange, defCount = 1 }) {
    COMPONENT: JutsuCard
    UPDATED: Clean layout, proper rounded corners, inset rank/cost box.
    ============================================================================ */
-function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots }) {
+function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, isActualAdmin = false }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
   const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
@@ -881,30 +880,34 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
           {myTags.map(t => (
             <span key={t} className="group text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200 flex items-center gap-1.5 shadow-sm">
               {t}
-              <button onClick={() => setPersonalTagsForJutsu(j._id, myTags.filter(x => x !== t))}
-                      className="opacity-40 hover:text-red-600 hover:opacity-100 transition-opacity">×</button>
+              {isActualAdmin && (
+                <button onClick={() => setPersonalTagsForJutsu(j._id, myTags.filter(x => x !== t))}
+                        className="opacity-40 hover:text-red-600 hover:opacity-100 transition-opacity">×</button>
+              )}
             </span>
           ))}
           
           {/* Tag Add Button */}
-          {tagging ? (
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const v = tagInput.trim();
-              if (v && !myTags.includes(v)) setPersonalTagsForJutsu(j._id, [...myTags, v]);
-              setTagging(false); setTagInput('');
-            }} className="inline-block">
-              <input autoFocus value={tagInput} onChange={e => setTagInput(e.target.value)}
-                     onBlur={() => { setTagging(false); setTagInput(''); }}
-                     onKeyDown={e => { if (e.key === 'Escape') { setTagging(false); setTagInput(''); } }}
-                     className="text-xs px-2 py-0.5 border-2 border-indigo-300 rounded-md outline-none w-24 bg-white shadow-sm"
-                     placeholder="Type & Enter" />
-            </form>
-          ) : (
-            <button onClick={(e) => { e.stopPropagation(); setTagging(true); }}
-                    className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2.5 py-1 rounded-md flex items-center gap-1 transition-colors">
-              <Icon n="Plus" size={11}/> Tag
-            </button>
+          {isActualAdmin && (
+            tagging ? (
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const v = tagInput.trim();
+                if (v && !myTags.includes(v)) setPersonalTagsForJutsu(j._id, [...myTags, v]);
+                setTagging(false); setTagInput('');
+              }} className="inline-block">
+                <input autoFocus value={tagInput} onChange={e => setTagInput(e.target.value)}
+                       onBlur={() => { setTagging(false); setTagInput(''); }}
+                       onKeyDown={e => { if (e.key === 'Escape') { setTagging(false); setTagInput(''); } }}
+                       className="text-xs px-2 py-0.5 border-2 border-indigo-300 rounded-md outline-none w-24 bg-white shadow-sm"
+                       placeholder="Type & Enter" />
+              </form>
+            ) : (
+              <button onClick={(e) => { e.stopPropagation(); setTagging(true); }}
+                      className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2.5 py-1 rounded-md flex items-center gap-1 transition-colors">
+                <Icon n="Plus" size={11}/> Tag
+              </button>
+            )
           )}
         </div>
 
@@ -2635,13 +2638,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
     work_thread_id: profile?.work_thread_id || '',
   };
 
-  const [workThreadId, setWorkThreadId] = useState(activeProfile?.work_thread_id || '');
-  const [savingWorkThread, setSavingWorkThread] = useState(false);
-
-  useEffect(() => {
-    setWorkThreadId(activeProfile?.work_thread_id || '');
-  }, [activeProfile?.work_thread_id]);
-
   useEffect(() => {
     if (!open) return;
     const handleOutsideClick = (e) => {
@@ -2700,23 +2696,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
-  const handleSaveWorkThread = async () => {
-    setSavingWorkThread(true);
-    try {
-      if (supabaseReady) {
-        const updated = await updateMyWorkThreadId(workThreadId);
-        onProfileUpdate(updated);
-      } else {
-        onProfileUpdate({ ...profile, work_thread_id: workThreadId });
-      }
-    } catch (err) {
-      console.error('[NARP] Failed to update work thread ID:', err);
-      alert('Failed to update work thread ID: ' + (err.message || err));
-    } finally {
-      setSavingWorkThread(false);
-    }
-  };
-
   return (
     <div className="relative shrink-0" ref={menuRef}>
       <button onClick={() => setOpen(!open)}
@@ -2737,28 +2716,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {['staff', 'admin', 'owner'].includes(activeProfile?.role) && (
-            <div className="p-4 border-b border-slate-100 bg-slate-50">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Work Log Thread ID</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={workThreadId}
-                  onChange={(e) => setWorkThreadId(e.target.value)}
-                  placeholder="Thread ID"
-                  className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveWorkThread}
-                  disabled={savingWorkThread}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
-                >
-                  {savingWorkThread ? '...' : 'Save'}
-                </button>
-              </div>
-            </div>
-          )}
           {!supabaseReady && (
             <button onClick={onToggleDevRole}
                     type="button"
@@ -4346,6 +4303,7 @@ export default function App() {
                                pTags={pTags} setPersonalTagsForJutsu={setPersonalTagsForJutsu}
                                handleCopy={handleCopy} cart={cart} copiedId={modals.copiedId}
                                isAdmin={isStaff}
+                               isActualAdmin={isAdmin}
                                onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
                                onViewSlots={(jutsu) => setSlotsView(jutsu)} />

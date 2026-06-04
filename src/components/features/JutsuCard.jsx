@@ -7,7 +7,7 @@ import { RANK_COST_MAP, RANK_COST_NUM } from '../../constants/catalog';
    COMPONENT: JutsuCard
    UPDATED: Clean layout, proper rounded corners, inset rank/cost box.
    ============================================================================ */
-export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots }) {
+export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, isActualAdmin = false }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
   const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
@@ -120,30 +120,34 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
           {myTags.map(t => (
             <span key={t} className="group text-xs font-bold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200 flex items-center gap-1.5 shadow-sm">
               {t}
-              <button onClick={() => setPersonalTagsForJutsu(j._id, myTags.filter(x => x !== t))}
-                      className="opacity-40 hover:text-red-600 hover:opacity-100 transition-opacity">×</button>
+              {isActualAdmin && (
+                <button onClick={() => setPersonalTagsForJutsu(j._id, myTags.filter(x => x !== t))}
+                        className="opacity-40 hover:text-red-600 hover:opacity-100 transition-opacity">×</button>
+              )}
             </span>
           ))}
           
           {/* Tag Add Button */}
-          {tagging ? (
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const v = tagInput.trim();
-              if (v && !myTags.includes(v)) setPersonalTagsForJutsu(j._id, [...myTags, v]);
-              setTagging(false); setTagInput('');
-            }} className="inline-block">
-              <input autoFocus value={tagInput} onChange={e => setTagInput(e.target.value)}
-                     onBlur={() => { setTagging(false); setTagInput(''); }}
-                     onKeyDown={e => { if (e.key === 'Escape') { setTagging(false); setTagInput(''); } }}
-                     className="text-xs px-2 py-0.5 border-2 border-indigo-300 rounded-md outline-none w-24 bg-white shadow-sm"
-                     placeholder="Type & Enter" />
-            </form>
-          ) : (
-            <button onClick={(e) => { e.stopPropagation(); setTagging(true); }}
-                    className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2.5 py-1 rounded-md flex items-center gap-1 transition-colors">
-              <Icon n="Plus" size={11}/> Tag
-            </button>
+          {isActualAdmin && (
+            tagging ? (
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const v = tagInput.trim();
+                if (v && !myTags.includes(v)) setPersonalTagsForJutsu(j._id, [...myTags, v]);
+                setTagging(false); setTagInput('');
+              }} className="inline-block">
+                <input autoFocus value={tagInput} onChange={e => setTagInput(e.target.value)}
+                       onBlur={() => { setTagging(false); setTagInput(''); }}
+                       onKeyDown={e => { if (e.key === 'Escape') { setTagging(false); setTagInput(''); } }}
+                       className="text-xs px-2 py-0.5 border-2 border-indigo-300 rounded-md outline-none w-24 bg-white shadow-sm"
+                       placeholder="Type & Enter" />
+              </form>
+            ) : (
+              <button onClick={(e) => { e.stopPropagation(); setTagging(true); }}
+                      className="text-xs font-semibold text-indigo-500 hover:bg-indigo-50 border border-dashed border-indigo-200 px-2.5 py-1 rounded-md flex items-center gap-1 transition-colors">
+                <Icon n="Plus" size={11}/> Tag
+              </button>
+            )
           )}
         </div>
 

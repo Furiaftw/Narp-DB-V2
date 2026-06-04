@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../ui/Icon';
 import { ProfileAvatar } from '../ui/RankLogo';
-import { updateMyWorkThreadId } from '../../lib/supabase';
 
 export function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate }) {
   const [open, setOpen] = useState(false);
@@ -15,13 +14,6 @@ export function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole,
     role: devRole,
     work_thread_id: profile?.work_thread_id || '',
   };
-
-  const [workThreadId, setWorkThreadId] = useState(activeProfile?.work_thread_id || '');
-  const [savingWorkThread, setSavingWorkThread] = useState(false);
-
-  useEffect(() => {
-    setWorkThreadId(activeProfile?.work_thread_id || '');
-  }, [activeProfile?.work_thread_id]);
 
   useEffect(() => {
     if (!open) return;
@@ -56,23 +48,6 @@ export function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole,
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
-  const handleSaveWorkThread = async () => {
-    setSavingWorkThread(true);
-    try {
-      if (supabaseReady) {
-        const updated = await updateMyWorkThreadId(workThreadId);
-        onProfileUpdate(updated);
-      } else {
-        onProfileUpdate({ ...profile, work_thread_id: workThreadId });
-      }
-    } catch (err) {
-      console.error('[NARP] Failed to update work thread ID:', err);
-      alert('Failed to update work thread ID: ' + (err.message || err));
-    } finally {
-      setSavingWorkThread(false);
-    }
-  };
-
   return (
     <div className="relative shrink-0" ref={menuRef}>
       <button onClick={() => setOpen(!open)}
@@ -93,28 +68,6 @@ export function UserMenu({ profile, onSignIn, onSignOut, supabaseReady, devRole,
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {['staff', 'admin', 'owner'].includes(activeProfile?.role) && (
-            <div className="p-4 border-b border-slate-100 bg-slate-50">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Work Log Thread ID</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={workThreadId}
-                  onChange={(e) => setWorkThreadId(e.target.value)}
-                  placeholder="Thread ID"
-                  className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveWorkThread}
-                  disabled={savingWorkThread}
-                  className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
-                >
-                  {savingWorkThread ? '...' : 'Save'}
-                </button>
-              </div>
-            </div>
-          )}
           {!supabaseReady && (
             <button onClick={onToggleDevRole}
                     type="button"
