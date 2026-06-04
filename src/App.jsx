@@ -1419,6 +1419,7 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
             triggerType: 'creation',
             itemName: 'OC Submission',
             itemType: 'Character',
+            submitterName: profile?.username || 'Unknown',
           }),
         }).catch((pingErr) => {
           console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
@@ -2849,6 +2850,7 @@ function PendingJutsuCard({
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
+  const [hasSubmitterChatted, setHasSubmitterChatted] = useState(false);
   const messagesEndRef = useRef(null);
 
   const isClaimed = !!(
@@ -2899,6 +2901,18 @@ function PendingJutsuCard({
       });
     }
   }, [isChatOpen, refreshTrigger, pending.id]);
+
+  // For non-admin staff: check if the submitter has ever sent a message
+  useEffect(() => {
+    if (!hasStaffPrivileges || ['admin', 'owner'].includes(currentUser.role) || !pending?.id || !supabase) return;
+    supabase
+      .from('pending_chats')
+      .select('id')
+      .eq('pending_id', pending.id)
+      .eq('sender_id', pending.submitted_by)
+      .limit(1)
+      .then(({ data }) => { setHasSubmitterChatted((data || []).length > 0); });
+  }, [pending.id, pending.submitted_by, hasStaffPrivileges, currentUser.role, refreshTrigger]);
 
   useEffect(() => {
     if (!isChatOpen || !pending?.id || !supabase) return;
@@ -3111,10 +3125,13 @@ function PendingJutsuCard({
         {pending.status === 'pending_review' ? (
           hasStaffPrivileges ? (
             <>
-              <button onClick={() => onReview(pending.id)}
-                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                <Icon n="Check" size={14}/> Review (Step 1)
-              </button>
+              {/* Review (Step 1): admins always see it; non-admin staff only after claiming */}
+              {(['admin', 'owner'].includes(currentUser.role) || isClaimed) && (
+                <button onClick={() => onReview(pending.id)}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                  <Icon n="Check" size={14}/> Review (Step 1)
+                </button>
+              )}
               {['admin', 'owner'].includes(currentUser.role) && (
                 <button onClick={() => onApprove(pending.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
@@ -3152,7 +3169,8 @@ function PendingJutsuCard({
             <Icon n="Edit" size={14}/> Edit
           </button>
         )}
-        {hasStaffPrivileges && (
+        {/* Cancel: admins always; non-admin staff only after claim + submitter has chatted */}
+        {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || (isClaimed && hasSubmitterChatted)) && (
           <button onClick={() => onCancel(pending.id)}
                   className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
             <Icon n="X" size={14}/> Cancel
@@ -3541,6 +3559,10 @@ export default function App() {
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [pendingHasNew, setPendingHasNew] = useState(false);
+  const [mySubsHasNew, setMySubsHasNew] = useState(false);
+  const prevPendingCountRef = useRef(0);
+  const tabRef = useRef('jutsus');
 
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
@@ -3812,6 +3834,8 @@ export default function App() {
     }
   }, [refreshPending]);
 
+  useEffect(() => { tabRef.current = tab; }, [tab]);
+
   useEffect(() => {
     if (!supabaseReady || !profile) return;
     let channel = null;
@@ -3819,7 +3843,12 @@ export default function App() {
     try {
       channel = subscribeToDatabaseChanges(() => {
         clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => { refreshDB(); }, 500);
+        debounceTimer = setTimeout(() => {
+          refreshDB();
+          // Flag badges when realtime fires and user is elsewhere
+          if (isStaff && tabRef.current !== 'pending') setPendingHasNew(true);
+          if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
+        }, 500);
       });
     } catch (err) {
       console.warn('[NARP] Failed to subscribe to database changes:', err);
@@ -3834,7 +3863,25 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB]);
+  }, [supabaseReady, profile, refreshDB, isStaff]);
+
+  // 30-second polling to catch submissions missed by realtime
+  useEffect(() => {
+    if (!supabaseReady || !profile) return;
+    const interval = setInterval(() => {
+      refreshPending();
+    }, 30000);
+    return () => clearInterval(interval);
+  }, [supabaseReady, profile, refreshPending]);
+
+  // Raise pending-tab badge when count grows while user is on another tab
+  useEffect(() => {
+    if (!pendingLoaded) return;
+    if (prevPendingCountRef.current !== null && pendingJutsus.length > prevPendingCountRef.current && tabRef.current !== 'pending') {
+      setPendingHasNew(true);
+    }
+    prevPendingCountRef.current = pendingJutsus.length;
+  }, [pendingJutsus.length, pendingLoaded]);
 
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity, askSecondApproval }) => {
     const isJutsus = t === 'jutsus';
@@ -3871,6 +3918,7 @@ export default function App() {
             triggerType: 'creation',
             itemName: entity?.name || 'Unknown',
             itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
+            submitterName: profile?.username || 'Unknown',
           }),
         }).catch((err) => {
           console.warn('[NARP] Reviewer ping creation alert failed:', err);
@@ -3928,9 +3976,14 @@ export default function App() {
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
         const isDelete = item.operation === 'delete';
-        const displayData = isDelete
+        const rawDisplayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
+        // Preserve original submission timestamp so Discord log shows correct Creation Date
+        const displayData = isDelete ? rawDisplayData : {
+          ...rawDisplayData,
+          _createdAt: rawDisplayData?._createdAt || item.submitted_at,
+        };
 
         const isCharacter = item.data?.type === 'Character';
 
@@ -4051,11 +4104,19 @@ export default function App() {
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
           : item.data;
 
+        // Detect whether this submission was ever claimed
+        const wasEverClaimed = !!(item.assigned_to && (
+          typeof item.assigned_to === 'object'
+            ? item.assigned_to.id
+            : (typeof item.assigned_to === 'string' && item.assigned_to.trim() !== '')
+        ));
+
+        let chats = [];
         let logData = null;
         try {
-          const chats = await fetchReviewChats(id);
+          chats = (await fetchReviewChats(id)) || [];
           let chatTranscript = null;
-          if (chats && chats.length > 0) {
+          if (chats.length > 0) {
             chatTranscript = chats.map(c => {
               const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
               const name = c.profiles?.username || 'Unknown';
@@ -4096,8 +4157,9 @@ export default function App() {
           }
         }
 
-        // DM submitter — denied
-        if (item?.submitter?.discord_id) {
+        // DM submitter — only when there was real engagement (claimed or chat happened)
+        const hasChatActivity = chats.length > 0;
+        if ((wasEverClaimed || hasChatActivity) && item?.submitter?.discord_id) {
           fetch('/.netlify/functions/discord-dm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4335,13 +4397,15 @@ export default function App() {
   const TABS = [
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
-    ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
-    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length }] : []),
+    ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
+    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
   const switchTab = (tabId) => {
     setTab(tabId);
+    if (tabId === 'pending') setPendingHasNew(false);
+    if (tabId === 'my_submissions') setMySubsHasNew(false);
     setExpRow(null);
     clearF();
     setF(p => ({ ...p, sort: 'az', showFilters: false }));
@@ -4406,8 +4470,15 @@ export default function App() {
             {TABS.map(t => (
               <button key={t.id} onClick={() => switchTab(t.id)}
                       className={`px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${tab === t.id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-                {t.label}
-                <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${tab === t.id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+                <span className="relative">
+                  {t.label}
+                  {t.hasNew && tab !== t.id && (
+                    <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
+                  )}
+                </span>
+                {t.count !== undefined && (
+                  <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${tab === t.id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+                )}
               </button>
             ))}
           </div>

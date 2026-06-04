@@ -41,7 +41,7 @@ export default async (req) => {
     });
   }
 
-  const { threadId, reviewerName, actionType, itemName, docLink, myCharactersLink, upgradesLink } = body;
+  const { threadId, reviewerName, actionType, itemName, docLink, myCharactersLink, upgradesLink, mainLogUrl } = body;
 
   if (!threadId) {
     return new Response(JSON.stringify({ error: 'Missing threadId' }), {
@@ -77,6 +77,9 @@ export default async (req) => {
     }
     if (upgradesLink) {
       description += `\n**Upgrades Thread:** [Upgrades Thread](${upgradesLink})`;
+    }
+    if (mainLogUrl) {
+      description += `\n**Log:** [Log](${mainLogUrl})`;
     }
 
     const embed = {

@@ -169,7 +169,7 @@ export function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specO
       </div>
 
       {f.showFilters && tab === 'jutsus' && (
-        <div className="bg-slate-50 border-b border-slate-200 p-6 md:p-8 relative z-20 shadow-inner">
+        <div className="bg-slate-50 border-b border-slate-200 p-6 md:p-8 relative overflow-visible shadow-inner">
           <div className="max-w-6xl mx-auto space-y-10">
               <div>
                 <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Basic Properties</h3>
