@@ -67,7 +67,19 @@ export default async (req) => {
       });
     }
 
-    const rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID;
+    // Prefer DB config, fall back to env vars
+    let rawThreadId = null;
+    try {
+      const { data: cfgRow } = await supabase
+        .from('webhook_config')
+        .select('config_value')
+        .eq('config_key', 'discord_ping_thread_id')
+        .maybeSingle();
+      rawThreadId = cfgRow?.config_value || null;
+    } catch {}
+    if (!rawThreadId) {
+      rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID || null;
+    }
     const safeThreadId = rawThreadId && /^\d{17,20}$/.test(rawThreadId) ? rawThreadId : null;
     const webhookUrl = safeThreadId ? `${baseUrl}?thread_id=${safeThreadId}` : baseUrl;
 

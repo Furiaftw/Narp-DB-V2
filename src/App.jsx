@@ -36,6 +36,8 @@ import {
   fetchReviewChats,
   sendReviewChat,
   claimPendingSubmission,
+  fetchWebhookConfig,
+  saveWebhookConfig,
 } from './lib/supabase';
 
 
@@ -137,19 +139,19 @@ const getNatureColor = (n) => ({
      • staff queue (double-approver)  → submitter !== reviewer
      • admin direct write (single)    → submitter === reviewer (same user id)
    --------------------------------------------------------------------------- */
-async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null) {
+async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null, config = {}) {
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return; // Logging not configured — skip silently.
 
   const isCharacter = itemData?.type === 'Character';
 
-  // Route to the correct forum thread based on the jutsu's type.
+  // Route to the correct forum thread — prefer DB config, fall back to env vars.
   let threadId = toArray(itemData?.types).includes('Battlemode')
-    ? import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID
-    : import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
+    ? (config.discord_battlemode_thread_id || import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID)
+    : (config.discord_jutsu_thread_id     || import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID);
 
   if (isCharacter) {
-    threadId = import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+    threadId = config.discord_oc_thread_id || import.meta.env.VITE_DISCORD_OC_THREAD_ID;
   }
 
   const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
@@ -2155,7 +2157,7 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, webhookConfig = {}, onWebhookConfigSave }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
@@ -2303,6 +2305,37 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 </button>
               </div>
             </div>
+
+            {/* Webhook Config — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="MessageSquare" size={20} className="text-violet-500" /> Discord Notification Config
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">Configure where Discord notifications are sent. Webhook URLs remain in Netlify env vars (they contain auth tokens).</p>
+                <div className="space-y-3">
+                  {[
+                    { key: 'discord_guild_id',            label: 'Guild ID',             placeholder: '12345678901234567' },
+                    { key: 'discord_jutsu_thread_id',     label: 'Jutsu Thread',         placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_battlemode_thread_id',label: 'Battlemode Thread',    placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
+                    { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
+                  ].map(({ key, label, placeholder }) => (
+                    <WebhookConfigRow
+                      key={key}
+                      label={label}
+                      placeholder={placeholder}
+                      initialValue={webhookConfig[key] || ''}
+                      onSave={(value) => onWebhookConfigSave(key, value)}
+                    />
+                  ))}
+                </div>
+                <p className="text-[10px] text-slate-400 mt-4">Changes take effect immediately — no redeploy needed.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -2320,6 +2353,52 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   COMPONENT: WebhookConfigRow
+   ============================================================================ */
+function WebhookConfigRow({ label, placeholder, initialValue, onSave }) {
+  const [value, setValue] = useState(initialValue);
+  const [status, setStatus] = useState('idle'); // idle | saving | success | error
+  const [errMsg, setErrMsg] = useState('');
+
+  useEffect(() => { setValue(initialValue); }, [initialValue]);
+
+  const handleSave = async () => {
+    setStatus('saving');
+    setErrMsg('');
+    try {
+      await onSave(value.trim());
+      setStatus('success');
+      setTimeout(() => setStatus('idle'), 2000);
+    } catch (e) {
+      setErrMsg(e.message || 'Save failed');
+      setStatus('error');
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2">
+      <label className="text-xs font-bold text-slate-600 w-36 shrink-0">{label}</label>
+      <input
+        type="text"
+        value={value}
+        onChange={e => { setValue(e.target.value); setStatus('idle'); }}
+        placeholder={placeholder}
+        className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 font-mono"
+      />
+      <button
+        onClick={handleSave}
+        disabled={status === 'saving'}
+        className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 shrink-0"
+      >
+        {status === 'saving' ? '…' : 'Save'}
+      </button>
+      {status === 'success' && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓</span>}
+      {status === 'error'   && <span className="text-red-500 text-[10px] shrink-0" title={errMsg}>✗</span>}
     </div>
   );
 }
@@ -3319,6 +3398,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   const [profile, setProfile] = useState(null);
+  const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
   const supabaseReady = isSupabaseConfigured();
 
@@ -3511,7 +3591,12 @@ export default function App() {
           }
         }
 
-        if (!cancelled) setProfile(p);
+        if (!cancelled) {
+          setProfile(p);
+          if (p.role === 'owner' || p.role === 'admin') {
+            fetchWebhookConfig().then(setWebhookConfig).catch(() => {});
+          }
+        }
       } catch (e) {
         console.warn('[NARP] profile fetch failed:', e);
         if (!cancelled) setProfile(null);
@@ -3677,7 +3762,7 @@ export default function App() {
               // Direct admin write bypasses the staff queue, so log it as a
               // single-approver action (current user as both submitter and
               // reviewer) before persisting the change.
-              await sendDiscordLog(entity, 'Approved', profile, profile, profile);
+              await sendDiscordLog(entity, 'Approved', profile, profile, profile, null, webhookConfig);
               await upsertJutsu(entity);
             }
             else if (t === 'bloodlines') await upsertBloodline(entity);
@@ -3736,7 +3821,8 @@ export default function App() {
             item.submitter,
             item.first_reviewer,
             profile,
-            chatTranscript
+            chatTranscript,
+            webhookConfig
           );
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
@@ -3811,7 +3897,7 @@ export default function App() {
               return `[${time}] ${name}:\n${msgText}`;
             }).join('\n\n') + '\n\n';
           }
-          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript);
+          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript, webhookConfig);
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
         }
@@ -4354,6 +4440,12 @@ export default function App() {
           onRefresh={refreshDB}
           refreshing={refreshing}
           isOwner={isOwner}
+          webhookConfig={webhookConfig}
+          onWebhookConfigSave={(key, value) => {
+            saveWebhookConfig(key, value).then(() => {
+              setWebhookConfig(prev => ({ ...prev, [key]: value }));
+            }).catch(e => console.warn('[NARP] webhook config save failed:', e));
+          }}
           onOpenAuditLog={() => setModals(m => ({ ...m, audit: true }))}
           onManageBL={() => setModals(m => ({ ...m, manageBL: true }))} />
       )}
