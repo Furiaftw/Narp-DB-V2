@@ -207,6 +207,27 @@ export const setUserRole = async (userId, role) => {
   if (error) throw error;
 };
 
+/* --- Webhook config -------------------------------------------------------- */
+
+export const fetchWebhookConfig = async () => {
+  if (!supabase) return {};
+  const { data, error } = await supabase
+    .from('webhook_config')
+    .select('config_key, config_value');
+  if (error) throw error;
+  return Object.fromEntries((data || []).map(r => [r.config_key, r.config_value]));
+};
+
+export const saveWebhookConfig = async (key, value) => {
+  if (!supabase) return;
+  const session = await getCurrentSession();
+  const { error } = await supabase
+    .from('webhook_config')
+    .update({ config_value: value, updated_at: new Date().toISOString(), updated_by: session?.user?.id || null })
+    .eq('config_key', key);
+  if (error) throw error;
+};
+
 /* --- Whitelist ------------------------------------------------------------- */
 
 export const fetchWhitelist = async () => {
