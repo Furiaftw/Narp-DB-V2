@@ -32,6 +32,7 @@ export function StatelessSubmissionModal({ type, profile, onClose }) {
             triggerType: 'creation',
             itemName: 'OC Submission',
             itemType: 'Character',
+            submitterName: profile?.username || 'Unknown',
           }),
         }).catch((pingErr) => {
           console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);

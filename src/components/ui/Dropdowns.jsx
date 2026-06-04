@@ -50,7 +50,7 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-96 flex flex-col absolute z-40 top-full">
+        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-96 flex flex-col absolute z-[9999] top-full">
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-3 shrink-0">
             <div className="flex flex-wrap gap-1.5">
               {['All', ...BL_CATS].map(c => (
@@ -148,7 +148,7 @@ export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, o
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-72 flex flex-col absolute z-30 top-full">
+        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-72 flex flex-col absolute z-[9999] top-full">
           <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 relative">
             <Icon n="Search" size={14} className="absolute left-6 top-6 text-slate-400"/>
             <input type="text" placeholder="Search..." value={str} onChange={e => setStr(e.target.value)}

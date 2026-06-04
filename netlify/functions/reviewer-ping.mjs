@@ -41,7 +41,7 @@ export default async (req) => {
     });
   }
 
-  const { triggerType, itemName, itemType } = body;
+  const { triggerType, itemName, itemType, submitterName } = body;
 
   if (!triggerType || !itemName || !itemType) {
     return new Response(JSON.stringify({ error: 'Missing required parameters: triggerType, itemName, itemType' }), {
@@ -85,7 +85,8 @@ export default async (req) => {
 
     let messageString = '';
     if (triggerType === 'creation') {
-      messageString = `A new technique submission entry was uploaded: **${itemName}**. Status: Awaiting Reviewer.`;
+      const byLine = submitterName ? ` by ${submitterName}` : '';
+      messageString = `A new technique submission entry was uploaded: **${itemName}**${byLine}.`;
     } else if (triggerType === 'retracted') {
       messageString = `Technique submission **${itemName}** was retracted by the player.`;
     } else if (triggerType === 'second_approval') {
