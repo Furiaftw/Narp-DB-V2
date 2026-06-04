@@ -41,6 +41,16 @@ export const signInWithDiscord = async () => {
   if (error) throw error;
 };
 
+export const signInWithDevAccess = async () => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const res = await fetch('/.netlify/functions/dev-login', { method: 'POST' });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Dev login failed (${res.status})`);
+  const { email, password } = body;
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+};
+
 export const signOut = async () => {
   if (!supabase) return;
   const { error } = await supabase.auth.signOut();
