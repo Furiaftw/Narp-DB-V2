@@ -276,7 +276,7 @@ export const fetchPendingJutsus = async () => {
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role, discord_id')
+    .select('id, username, email, avatar_url, role, discord_id, work_thread_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
@@ -284,7 +284,7 @@ export const fetchPendingJutsus = async () => {
     ...p,
     submitter: profileById.get(p.submitted_by) || null,
     first_reviewer: p.first_reviewer_id ? (profileById.get(p.first_reviewer_id) || null) : null,
-    assignee: p.assignee || (p.assigned_to ? profileById.get(p.assigned_to) : null) || null,
+    assignee: (p.assigned_to ? profileById.get(p.assigned_to) : null) || p.assignee || null,
   }));
 };
 

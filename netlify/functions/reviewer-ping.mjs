@@ -85,7 +85,9 @@ export default async (req) => {
 
     let messageString = '';
     if (triggerType === 'creation') {
-      messageString = `A new ${itemType} entry was created: **${itemName}**.`;
+      messageString = `A new technique submission entry was uploaded: **${itemName}**. Status: Awaiting Reviewer.`;
+    } else if (triggerType === 'retracted') {
+      messageString = `Technique submission **${itemName}** was retracted by the player.`;
     } else if (triggerType === 'second_approval') {
       messageString = `<@&${roleId}> Pending approval request for the ${itemType} entry: **${itemName}**. Second pair of eyes needed!`;
     } else {
