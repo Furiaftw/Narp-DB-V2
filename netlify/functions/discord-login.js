@@ -134,7 +134,7 @@ export default async (req) => {
     const securePassword = crypto.randomBytes(16).toString('hex');
 
     // Check if the user exists via admin.listUsers()
-    const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+    const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers({ perPage: 1000, page: 1 });
     if (listError) {
       return new Response(JSON.stringify({ error: `Supabase listUsers failed: ${listError.message}` }), {
         status: 500,

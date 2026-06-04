@@ -1,5 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_DATABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
+
 export default async (req) => {
-  // Only allow POST requests
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -7,16 +14,43 @@ export default async (req) => {
     });
   }
 
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response(JSON.stringify({ error: 'Missing auth token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const token = authHeader.slice(7);
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let body;
   try {
-    const { triggerType, itemName, itemType } = await req.json();
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
-    if (!triggerType || !itemName || !itemType) {
-      return new Response(JSON.stringify({ error: 'Missing required parameters: triggerType, itemName, itemType' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+  const { triggerType, itemName, itemType } = body;
 
+  if (!triggerType || !itemName || !itemType) {
+    return new Response(JSON.stringify({ error: 'Missing required parameters: triggerType, itemName, itemType' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
     const baseUrl = process.env.DISCORD_LOG_WEBHOOK_URL || process.env.VITE_DISCORD_LOG_WEBHOOK_URL;
     if (!baseUrl) {
       return new Response(JSON.stringify({ error: 'Webhook URL not configured' }), {
@@ -33,8 +67,9 @@ export default async (req) => {
       });
     }
 
-    const threadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID;
-    const webhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
+    const rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID;
+    const safeThreadId = rawThreadId && /^\d{17,20}$/.test(rawThreadId) ? rawThreadId : null;
+    const webhookUrl = safeThreadId ? `${baseUrl}?thread_id=${safeThreadId}` : baseUrl;
 
     let messageString = '';
     if (triggerType === 'creation') {
@@ -50,9 +85,7 @@ export default async (req) => {
 
     const discordResponse = await fetch(webhookUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content: messageString }),
     });
 
@@ -75,5 +108,3 @@ export default async (req) => {
     });
   }
 };
-
-

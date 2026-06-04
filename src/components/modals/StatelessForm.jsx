@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Icon from '../ui/Icon';
-import { submitPendingJutsu } from '../../lib/supabase';
+import { submitPendingJutsu, getCurrentSession } from '../../lib/supabase';
 
 /* ============================================================================
    MODAL: StatelessSubmissionModal
@@ -23,9 +23,11 @@ export function StatelessSubmissionModal({ type, profile, onClose }) {
         await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
 
         // Trigger a reviewer ping for creation
+        const sess1 = await getCurrentSession();
+        const authHdr1 = sess1?.access_token ? { Authorization: `Bearer ${sess1.access_token}` } : {};
         await fetch('/.netlify/functions/reviewer-ping', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHdr1 },
           body: JSON.stringify({
             triggerType: 'creation',
             itemName: 'OC Submission',
@@ -50,9 +52,11 @@ export function StatelessSubmissionModal({ type, profile, onClose }) {
           throw new Error('Quick log function failed: ' + logRes.statusText);
         }
 
+        const sess2 = await getCurrentSession();
+        const authHdr2 = sess2?.access_token ? { Authorization: `Bearer ${sess2.access_token}` } : {};
         const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHdr2 },
           body: JSON.stringify({
             threadId: profile?.work_thread_id || '',
             reviewerName: profile?.username || '',

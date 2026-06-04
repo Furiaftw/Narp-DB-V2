@@ -51,6 +51,7 @@ const STORAGE = {
   ROLE:       'narp_role_v1',
   TAGS:       'narp_tags_v1',
   VIEW_MODE:  'narp_view_mode_v1',
+  CART:       'narp_cart_v1',
 };
 
 /* ---------------------------------------------------------------------------
@@ -1401,9 +1402,11 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
         await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
 
         // Trigger a reviewer ping for creation
+        const sess1 = await getCurrentSession();
+        const authHdr1 = sess1?.access_token ? { Authorization: `Bearer ${sess1.access_token}` } : {};
         await fetch('/.netlify/functions/reviewer-ping', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHdr1 },
           body: JSON.stringify({
             triggerType: 'creation',
             itemName: 'OC Submission',
@@ -1428,9 +1431,11 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
           throw new Error('Quick log function failed: ' + logRes.statusText);
         }
 
+        const sess2 = await getCurrentSession();
+        const authHdr2 = sess2?.access_token ? { Authorization: `Bearer ${sess2.access_token}` } : {};
         const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHdr2 },
           body: JSON.stringify({
             threadId: profile?.work_thread_id || '',
             reviewerName: profile?.username || '',
@@ -3375,7 +3380,7 @@ export default function App() {
 
   const [viewMode, setViewMode] = useState(() => LS.get(STORAGE.VIEW_MODE, 'card'));
   const [expRow, setExpRow]     = useState(null);
-  const [cart, setCart]         = useState([]);
+  const [cart, setCart]         = useState(() => LS.get(STORAGE.CART, []));
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
 
   const [f, setF] = useState(INITIAL_FILTER_STATE);
@@ -3410,6 +3415,7 @@ export default function App() {
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
+  useEffect(() => { LS.set(STORAGE.CART, cart); }, [cart]);
 
   useEffect(() => {
     async function initializeDiscordActivity() {
@@ -3593,15 +3599,17 @@ export default function App() {
   useEffect(() => {
     if (!supabaseReady || !profile) return;
     let channel = null;
+    let debounceTimer = null;
     try {
       channel = subscribeToDatabaseChanges(() => {
-        refreshDB();
-        refreshPending();
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => { refreshDB(); }, 500);
       });
     } catch (err) {
       console.warn('[NARP] Failed to subscribe to database changes:', err);
     }
     return () => {
+      clearTimeout(debounceTimer);
       if (channel) {
         try {
           supabase.removeChannel(channel);
@@ -3610,7 +3618,7 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB, refreshPending]);
+  }, [supabaseReady, profile, refreshDB]);
 
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity, askSecondApproval }) => {
     const isJutsus = t === 'jutsus';
@@ -3638,18 +3646,19 @@ export default function App() {
       await submitPendingJutsu(operation, targetId, payload, status);
 
       const tab = t;
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          triggerType: 'creation',
-          itemName: entity?.name || 'Unknown',
-          itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
-        }),
-      }).catch((err) => {
-        console.warn('[NARP] Reviewer ping creation alert failed:', err);
+      getCurrentSession().then(sess => {
+        const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+        fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHdr },
+          body: JSON.stringify({
+            triggerType: 'creation',
+            itemName: entity?.name || 'Unknown',
+            itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
+          }),
+        }).catch((err) => {
+          console.warn('[NARP] Reviewer ping creation alert failed:', err);
+        });
       });
 
       await refreshPending();
@@ -3744,9 +3753,11 @@ export default function App() {
               ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
               : '';
 
+            const sess = await getCurrentSession();
+            const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...authHdr },
               body: JSON.stringify({
                 threadId: profile.work_thread_id,
                 reviewerId: profile.discord_id,
@@ -3814,9 +3825,11 @@ export default function App() {
               ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
               : '';
 
+            const sess = await getCurrentSession();
+            const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', ...authHdr },
               body: JSON.stringify({
                 threadId: profile.work_thread_id,
                 reviewerId: profile.discord_id,
@@ -3858,9 +3871,11 @@ export default function App() {
           const docLink = display?.link || 'N/A';
           const mainLogUrl = '';
 
+          const sess = await getCurrentSession();
+          const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
           await fetch('/.netlify/functions/reviewer-work-log', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...authHdr },
             body: JSON.stringify({
               threadId: profile.work_thread_id,
               reviewerId: profile.discord_id,
@@ -3876,16 +3891,15 @@ export default function App() {
         }
       }
 
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          triggerType: 'second_approval',
-          itemName,
-          itemType
-        })
-      }).catch((pingErr) => {
-        console.warn('Failed to send reviewer second approval ping:', pingErr);
+      getCurrentSession().then(sess => {
+        const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+        fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHdr },
+          body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType }),
+        }).catch((pingErr) => {
+          console.warn('Failed to send reviewer second approval ping:', pingErr);
+        });
       });
 
       await refreshPending();
