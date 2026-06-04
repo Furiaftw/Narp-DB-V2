@@ -1,5 +1,12 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_DATABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
+
 export default async (req) => {
-  // Only allow POST requests
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -7,24 +14,50 @@ export default async (req) => {
     });
   }
 
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response(JSON.stringify({ error: 'Missing auth token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const token = authHeader.slice(7);
+  const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  let body;
   try {
-    const {
-      threadId,
-      reviewerName,
-      actionType,
-      itemName,
-      docLink,
-      myCharactersLink,
-      upgradesLink
-    } = await req.json();
+    body = await req.json();
+  } catch {
+    return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
 
-    if (!threadId) {
-      return new Response(JSON.stringify({ error: 'Missing threadId' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }
+  const { threadId, reviewerName, actionType, itemName, docLink, myCharactersLink, upgradesLink } = body;
 
+  if (!threadId) {
+    return new Response(JSON.stringify({ error: 'Missing threadId' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  if (!/^\d{17,20}$/.test(threadId)) {
+    return new Response(JSON.stringify({ error: 'Invalid threadId format' }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
     const baseUrl = process.env.DISCORD_WORK_LOG_WEBHOOK_URL;
     if (!baseUrl) {
       return new Response(JSON.stringify({ error: 'DISCORD_WORK_LOG_WEBHOOK_URL not configured' }), {
@@ -35,12 +68,10 @@ export default async (req) => {
 
     const webhookUrl = `${baseUrl}?thread_id=${threadId}`;
 
-    // Color is Green (3066993)
     const color = 3066993;
 
     let description = `**Action:** ${actionType}\n**Document Link:** ${docLink}`;
 
-    // Links: If myCharactersLink and upgradesLink exist, append them as clickable markdown
     if (myCharactersLink) {
       description += `\n**My-Characters Thread:** [My-Characters Thread](${myCharactersLink})`;
     }
@@ -56,12 +87,8 @@ export default async (req) => {
 
     const discordResponse = await fetch(webhookUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        embeds: [embed]
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ embeds: [embed] }),
     });
 
     if (!discordResponse.ok) {
