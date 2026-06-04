@@ -9,7 +9,7 @@ import { RANK_COST_MAP, RANK_COST_NUM } from '../../constants/catalog';
    ============================================================================ */
 export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
-  const rArr  = toArray(j.rank);
+  const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
   const cTags = toArray(j.custom_tags);
   const isBm  = tArr.includes('Battlemode');

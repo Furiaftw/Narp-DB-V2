@@ -458,7 +458,7 @@ const MANAGE_TABLES = {
 
 const normalizeDB = (d) => ({
   jutsus: (d.jutsus || []).map((j, i) => {
-    const rArr = toArray(j.rank);
+    const rArr = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
     let cost = j.cost || '';
     if (cost) {
       const sumCU  = rArr.reduce((s, r) => s + (RANK_COST_NUM[r] || 0), 0) + ' CU';
@@ -770,7 +770,7 @@ function SlotsEditor({ value, onChange, defCount = 1 }) {
    ============================================================================ */
 function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
-  const rArr  = toArray(j.rank);
+  const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
   const cTags = toArray(j.custom_tags);
   const isBm  = tArr.includes('Battlemode');
@@ -1049,7 +1049,7 @@ const formatSessionList = (items) => {
     out.push('', `**${heading}**`);
     for (const j of grp.items) {
       const isBm  = toArray(j.types).includes('Battlemode');
-      const ranks = toArray(j.rank);
+      const ranks = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
 
       let rankStr;
       if (isBm) {
@@ -2008,9 +2008,9 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         rank   = [BM_TIER_TO_RANK[bmTier] || ''];
       } else if (!p._cCost) {
         p.cost = '';
-        rank = toArray(p.rank);
+        rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       } else {
-        rank = toArray(p.rank);
+        rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       }
       const conds = toArray(p.conditions);
       entity = {
@@ -2156,7 +2156,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
                   {!fd._cCost && (
                     <span className="text-indigo-500 ml-2">
                       (auto: {(() => {
-                        const r = toArray(fd.rank);
+                        const r = toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
                         return r.length === 1 ? RANK_COST_MAP[r[0]] : (r.length > 1 ? r.map(x => RANK_COST_MAP[x]).filter(Boolean).join(' / ') : '');
                       })()})
                     </span>
@@ -2170,7 +2170,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
                   ) : (
                     <div className="flex-1 bg-slate-100 border rounded-xl px-4 py-3 text-sm text-slate-500 font-semibold shadow-sm flex items-center gap-1 flex-wrap">
                       {toArray(fd.rank).length > 0
-                        ? toArray(fd.rank).map((r, i) => (
+                        ? toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0)).map((r, i) => (
                             <span key={i} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black">
                               {RANK_COST_MAP[r] || '-'}
                             </span>
