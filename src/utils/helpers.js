@@ -145,7 +145,7 @@ export const formatSessionList = (items) => {
     out.push('', `**${heading}**`);
     for (const j of grp.items) {
       const isBm  = toArray(j.types).includes('Battlemode');
-      const ranks = toArray(j.rank);
+      const ranks = toArray(j.rank).slice().sort((a, b) => (RANK_ORDER_NUM[a] || 0) - (RANK_ORDER_NUM[b] || 0));
 
       let rankStr;
       if (isBm) {

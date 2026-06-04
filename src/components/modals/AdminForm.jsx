@@ -3,7 +3,7 @@ import Icon from '../ui/Icon';
 import { GenericDropdown, BloodlineDropdown } from '../ui/Dropdowns';
 import SlotsEditor from '../ui/SlotsEditor';
 import { toArray } from '../../utils/helpers';
-import { BM_TIER_TO_RANK, RANK_COST_MAP, MANAGE_TABLES } from '../../constants/catalog';
+import { BM_TIER_TO_RANK, RANK_COST_MAP, MANAGE_TABLES, RANK_COST_NUM } from '../../constants/catalog';
 
 /* ============================================================================
    MODAL: AdminFormModal
@@ -69,9 +69,9 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
         rank   = [BM_TIER_TO_RANK[bmTier] || ''];
       } else if (!p._cCost) {
         p.cost = '';
-        rank = toArray(p.rank);
+        rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       } else {
-        rank = toArray(p.rank);
+        rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       }
       const conds = toArray(p.conditions);
       entity = {
@@ -208,7 +208,7 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
                   {!fd._cCost && (
                     <span className="text-indigo-500 ml-2">
                       (auto: {(() => {
-                        const r = toArray(fd.rank);
+                        const r = toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
                         return r.length === 1 ? RANK_COST_MAP[r[0]] : (r.length > 1 ? r.map(x => RANK_COST_MAP[x]).filter(Boolean).join(' / ') : '');
                       })()})
                     </span>
@@ -222,7 +222,7 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
                   ) : (
                     <div className="flex-1 bg-slate-100 border rounded-xl px-4 py-3 text-sm text-slate-500 font-semibold shadow-sm flex items-center gap-1 flex-wrap">
                       {toArray(fd.rank).length > 0
-                        ? toArray(fd.rank).map((r, i) => (
+                        ? toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0)).map((r, i) => (
                             <span key={i} className="px-2 py-0.5 bg-indigo-50 border border-indigo-100 text-indigo-600 rounded-md text-xs font-black">
                               {RANK_COST_MAP[r] || '-'}
                             </span>
