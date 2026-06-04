@@ -518,24 +518,30 @@ const toRowJutsu = (j, withId = true) => {
 };
 
 const fromRowBloodline = (row) => ({
-  _id:         row.id,
-  _createdAt:  row.created_at,
-  _createdBy:  row.created_by,
-  _modifiedBy: row.last_modified_by,
-  name:        row.name || '',
-  category:    row.category || 'Custom',
-  subcategory: row.subcategory || 'Other',
-  custom_tags: row.custom_tags || [],
-  link:        row.link || '',
+  _id:                      row.id,
+  _createdAt:               row.created_at,
+  _createdBy:               row.created_by,
+  _modifiedBy:              row.last_modified_by,
+  name:                     row.name || '',
+  category:                 row.category || 'Custom',
+  subcategory:              row.subcategory || 'Other',
+  custom_tags:              row.custom_tags || [],
+  link:                     row.link || '',
+  proprietary_ability_link: row.proprietary_ability_link || '',
+  max_slots:                row.max_slots ?? 5,
+  slots:                    row.slots ? (typeof row.slots === 'string' ? row.slots : JSON.stringify(row.slots)) : '',
 });
 
 const toRowBloodline = (b) => ({
-  id:          b._id,
-  name:        b.name || '',
-  category:    b.category || null,
-  subcategory: b.subcategory || null,
-  custom_tags: b.custom_tags || [],
-  link:        b.link || null,
+  id:                       b._id,
+  name:                     b.name || '',
+  category:                 b.category || null,
+  subcategory:              b.subcategory || null,
+  custom_tags:              b.custom_tags || [],
+  link:                     b.link || null,
+  proprietary_ability_link: b.proprietary_ability_link || null,
+  max_slots:                b.max_slots != null ? Number(b.max_slots) : 5,
+  slots:                    b.slots ? (typeof b.slots === 'string' ? JSON.parse(b.slots) : b.slots) : null,
 });
 
 // Exposed so the App can build the JSON payload for pending submissions.

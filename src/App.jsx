@@ -444,11 +444,14 @@ const MANAGE_TABLES = {
   bloodlines: {
     label: 'Bloodlines',
     fields: [
-      { k: 'name',        l: 'Name',            req: true, col: 1 },
-      { k: 'link',        l: 'Doc Link',                   col: 1 },
-      { k: 'category',    l: 'Category',        t: 'chip', opts: BL_CATS,    req: true, col: 1 },
-      { k: 'subcategory', l: 'Subcategory',     t: 'chip', opts: BL_SUBCATS, req: true, col: 1 },
-      { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },
+      { k: 'name',                   l: 'Name',                                req: true, col: 1 },
+      { k: 'link',                   l: 'Doc Link',                                       col: 1 },
+      { k: 'proprietary_ability_link', l: 'Proprietary Ability Doc Link',                 col: 1 },
+      { k: 'category',               l: 'Category',    t: 'chip', opts: BL_CATS,    req: true, col: 1 },
+      { k: 'subcategory',            l: 'Subcategory', t: 'chip', opts: BL_SUBCATS, req: true, col: 1 },
+      { k: 'max_slots',              l: 'Max Slots',                                       col: 1 },
+      { k: 'slots',                  l: 'Slots',       t: 'slots', defCountField: 'max_slots', col: 2 },
+      { k: 'custom_tags',            l: 'Custom Tags (comma separated)',                   col: 2 },
     ],
   },
 };
@@ -489,13 +492,16 @@ const normalizeDB = (d) => ({
   bloodlines: Array.isArray(d.bloodlines)
     ? d.bloodlines.map((b, i) => ({
         ...b,
-        _id:         b._id || `b-${i}`,
-        name:        b.name || '',
-        category:    b.category    || 'Custom',
-        subcategory: b.subcategory || 'Other',
-        custom_tags: toArray(b.custom_tags),
-        link:        b.link || b.doc_link || '',
-        _createdAt:  b._createdAt || b.created_at || null,
+        _id:                      b._id || `b-${i}`,
+        name:                     b.name || '',
+        category:                 b.category    || 'Custom',
+        subcategory:              b.subcategory || 'Other',
+        custom_tags:              toArray(b.custom_tags),
+        link:                     b.link || b.doc_link || '',
+        proprietary_ability_link: b.proprietary_ability_link || '',
+        max_slots:                b.max_slots != null ? Number(b.max_slots) : 5,
+        slots:                    b.slots || '',
+        _createdAt:               b._createdAt || b.created_at || null,
       }))
     : STATIC_SEED.bloodlines,
 
@@ -1806,6 +1812,139 @@ function SlotsViewModal({ jutsu, onClose }) {
 }
 
 /* ============================================================================
+   COMPONENT: BloodlineRosterCard
+   ============================================================================ */
+function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
+  const { remaining, total, parsed } = getSlotStatus(bl.slots);
+  const hasSlots = total > 0;
+  const effectiveMax = hasSlots ? total : (bl.max_slots || 0);
+  const filledCount = hasSlots ? (total - remaining) : 0;
+
+  let badgeClass = null, badgeLabel = null;
+  if (effectiveMax > 0) {
+    if (hasSlots && remaining === 0) {
+      badgeClass = 'bg-red-100 text-red-800 border-red-200';
+      badgeLabel = 'Full';
+    } else if (hasSlots && remaining <= 2) {
+      badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
+      badgeLabel = 'Ask Staff';
+    } else {
+      badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+      badgeLabel = `Open · ${effectiveMax - filledCount} left`;
+    }
+  }
+
+  const filledSlots = parsed.filter(s => s?.username);
+
+  return (
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+      <div className="p-4 flex-1">
+        <div className="flex items-start justify-between gap-2 mb-3">
+          <h3 className="font-bold text-slate-900 text-sm leading-tight">{bl.name}</h3>
+          {isAdmin && (
+            <button onClick={onEdit} className="shrink-0 text-slate-400 hover:text-indigo-600 transition-colors p-0.5">
+              <Icon n="Edit" size={14} />
+            </button>
+          )}
+        </div>
+
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {bl.link && (
+            <a href={bl.link} target="_blank" rel="noopener noreferrer"
+               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 transition-colors">
+              <Icon n="ExtLink" size={10} /> Doc
+            </a>
+          )}
+          {bl.proprietary_ability_link && (
+            <a href={bl.proprietary_ability_link} target="_blank" rel="noopener noreferrer"
+               className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
+              <Icon n="ExtLink" size={10} /> Ability
+            </a>
+          )}
+        </div>
+
+        {badgeLabel && (
+          <div className="mb-3">
+            <span className={`inline-flex items-center text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-1 rounded-full border ${badgeClass}`}>
+              {badgeLabel}
+            </span>
+          </div>
+        )}
+
+        {filledSlots.length > 0 && (
+          <div className="space-y-1">
+            {filledSlots.map((slot, i) => (
+              <div key={i} className="text-xs text-slate-600 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0" />
+                {slot.discord_link ? (
+                  <a href={slot.discord_link} target="_blank" rel="noopener noreferrer" className="text-indigo-700 hover:underline font-medium truncate">
+                    {slot.username}
+                  </a>
+                ) : (
+                  <span className="font-medium truncate">{slot.username}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="px-4 py-2 border-t border-slate-100 bg-slate-50">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">{bl.category}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   COMPONENT: BloodlinesRosterTab
+   ============================================================================ */
+function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit }) {
+  const ORDER = ['Dojutsu', 'KKG', 'Hiden', 'Specialization', 'Other'];
+  const SUBCAT_LABELS = { Dojutsu: 'Dojutsu', KKG: 'Kekkei Genkai', Hiden: 'Hiden', Specialization: 'Specialization', Other: 'Other' };
+
+  const grouped = ORDER.reduce((acc, sub) => {
+    acc[sub] = (bloodlines || []).filter(b => b.subcategory === sub).sort((a, b) => a.name.localeCompare(b.name));
+    return acc;
+  }, {});
+
+  const uncategorized = (bloodlines || []).filter(b => !ORDER.includes(b.subcategory)).sort((a, b) => a.name.localeCompare(b.name));
+  if (uncategorized.length) grouped['Other'] = [...(grouped['Other'] || []), ...uncategorized];
+
+  if (!bloodlines || bloodlines.length === 0) {
+    return (
+      <div className="max-w-6xl mx-auto text-center py-16">
+        <Icon n="Alert" size={40} className="text-slate-300 mx-auto mb-3" />
+        <p className="text-slate-500 font-semibold">No bloodlines in the database yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-10">
+      {ORDER.map(sub => {
+        const items = grouped[sub];
+        if (!items || items.length === 0) return null;
+        return (
+          <div key={sub}>
+            <div className="flex items-center gap-3 mb-4">
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{SUBCAT_LABELS[sub]}</h2>
+              <div className="flex-1 h-px bg-slate-200" />
+              <span className="text-xs font-bold text-slate-400">{items.length}</span>
+            </div>
+            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+              {items.map(bl => (
+                <BloodlineRosterCard key={bl._id} bl={bl} isAdmin={isAdmin} onEdit={() => onEdit(bl)} />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ============================================================================
    MODAL: AdminFormModal
    ============================================================================ */
 function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPending, isAdmin = false, isPendingEdit = false }) {
@@ -1895,13 +2034,16 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
       };
     } else if (tab === 'bloodlines') {
       entity = {
-        _id:         eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b-${Date.now()}`),
-        name:        p.name || '',
-        category:    p.category || 'Custom',
-        subcategory: p.subcategory || 'Other',
-        custom_tags: toArray(p.custom_tags),
-        link:        p.link || '',
-        _createdAt:  eRow._createdAt || new Date().toISOString(),
+        _id:                      eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b-${Date.now()}`),
+        name:                     p.name || '',
+        category:                 p.category || 'Custom',
+        subcategory:              p.subcategory || 'Other',
+        custom_tags:              toArray(p.custom_tags),
+        link:                     p.link || '',
+        proprietary_ability_link: p.proprietary_ability_link || '',
+        max_slots:                p.max_slots != null && p.max_slots !== '' ? Number(p.max_slots) : 5,
+        slots:                    p.slots || '',
+        _createdAt:               eRow._createdAt || new Date().toISOString(),
       };
     }
     try {
@@ -1996,7 +2138,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
                     isOpen={ddOpen === field.k}
                     onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
                 ) : field.t === 'slots' ? (
-                  <SlotsEditor value={fd[field.k] || ''} onChange={v => setFd({ ...fd, [field.k]: v })} defCount={field.defCount} />
+                  <SlotsEditor value={fd[field.k] || ''} onChange={v => setFd({ ...fd, [field.k]: v })} defCount={field.defCount || (field.defCountField ? (parseInt(fd[field.defCountField]) || 1) : 1)} />
                 ) : (
                   <input type="text" value={fd[field.k] || ''}
                          onChange={(e) => setFd({ ...fd, [field.k]: e.target.value })}
@@ -4103,7 +4245,8 @@ export default function App() {
   }
 
   const TABS = [
-    { id: 'jutsus', label: 'Jutsus', count: (db.jutsus || []).length },
+    { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
+    { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true }] : []),
     ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
@@ -4169,7 +4312,7 @@ export default function App() {
       </div>
 
       {/* TAB BAR */}
-      {(isStaff || !!profile) && (
+      {TABS.length > 1 && (
         <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky z-20" style={{ top: `${headerHeight}px` }}>
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
             {TABS.map(t => (
@@ -4224,6 +4367,14 @@ export default function App() {
               </>
             )}
           </div>
+        )}
+
+        {tab === 'bloodlines' && (
+          <BloodlinesRosterTab
+            bloodlines={db.bloodlines || []}
+            isAdmin={isAdmin}
+            onEdit={(bl) => setAdminForm({ r: bl, tab: 'bloodlines' })}
+          />
         )}
 
         {tab === 'pending' && isStaff && (
