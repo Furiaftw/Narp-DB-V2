@@ -2911,7 +2911,9 @@ function PendingJutsuCard({
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
 
-  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by && !['staff', 'admin', 'owner'].includes(currentUser.role);
+  // isStrictSubmitter: true for anyone who submitted this item, regardless of role.
+  // Staff reviewing their OWN submission see the submitter view, not the reviewer view.
+  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by;
 
   const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
 
@@ -3247,7 +3249,8 @@ function PendingJutsuCard({
             </button>
           )
         )}
-        {onEdit && (
+        {/* Edit: staff can always edit others' submissions; submitter can only edit their own while unclaimed */}
+        {onEdit && (!isStrictSubmitter || !isClaimed) && (
           <button onClick={() => onEdit(pending)}
                   className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
                   title="Edit pending payload">
@@ -3854,7 +3857,10 @@ export default function App() {
     if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
-      const filtered = isStaff ? list : list.filter(p => p.submitted_by === profile?.id);
+      // Staff see all submissions EXCEPT their own (those go to My Submissions only)
+      const filtered = isStaff
+        ? list.filter(p => p.submitted_by !== profile?.id)
+        : list.filter(p => p.submitted_by === profile?.id);
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
@@ -4105,12 +4111,13 @@ export default function App() {
         const sess = await getCurrentSession();
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
 
-        // Work log for the final approver
+        // Single work log embed per reviewer at approval time, labelled by role.
+        const firstReviewer = item.first_reviewer;
+        const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id;
         if (item.operation === 'insert' && profile?.work_thread_id) {
           try {
-            const actionType = (profile.role === 'admin' || profile.role === 'owner')
-              ? 'Admin Approval'
-              : '2nd Pair of Eyes';
+            // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
+            const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4131,9 +4138,8 @@ export default function App() {
           }
         }
 
-        // Work log for the first reviewer (if different from current approver)
-        const firstReviewer = item.first_reviewer;
-        if (item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id) {
+        // First reviewer's embed — sent at approval so it includes the log URL and all links.
+        if (hasDifferentFirstReviewer) {
           try {
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
@@ -4142,10 +4148,12 @@ export default function App() {
                 threadId: firstReviewer.work_thread_id,
                 reviewerId: firstReviewer.discord_id,
                 reviewerName: firstReviewer.username,
-                actionType: 'First Check',
+                actionType: 'First Reviewer',
                 itemName: approvalItemName,
                 docLink: approvalDocLink,
                 mainLogUrl,
+                myCharactersLink: displayData?.myCharactersLink || '',
+                upgradesLink: displayData?.upgradesLink || '',
               }),
             });
           } catch (workLogErr) {
@@ -4275,31 +4283,7 @@ export default function App() {
 
       await reviewPendingJutsu(id, profile.id);
 
-      if (item && item.operation === 'insert' && profile?.work_thread_id) {
-        try {
-          const actionType = 'First Check';
-          const docLink = display?.link || 'N/A';
-          const mainLogUrl = '';
-
-          const sess = await getCurrentSession();
-          const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-          await fetch('/.netlify/functions/reviewer-work-log', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHdr },
-            body: JSON.stringify({
-              threadId: profile.work_thread_id,
-              reviewerId: profile.discord_id,
-              reviewerName: profile.username,
-              actionType,
-              itemName,
-              docLink,
-              mainLogUrl,
-            }),
-          });
-        } catch (workLogErr) {
-          console.warn('[NARP] Reviewer work log failed:', workLogErr);
-        }
-      }
+      // No work log embed at first-check time — the single combined embed is sent at approval.
 
       getCurrentSession().then(sess => {
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};

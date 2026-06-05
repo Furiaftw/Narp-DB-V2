@@ -20,6 +20,12 @@
     "/*.ico"
   ]
 
+# Service worker must not be cached so the browser always fetches the latest version.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
 # Vite outputs an SPA — every unknown path should fall through to index.html
 # so React handles the routing instead of returning a 404.
 [[redirects]]
