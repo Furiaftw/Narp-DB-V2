@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import Icon from '../ui/Icon';
-import { copyText, renderMessageWithLinks, getSlotStatus, toArray } from '../../utils/helpers';
+import { copyText, renderMessageWithLinks, getSlotStatus, toArray, getNetlifyImageUrl, getNetlifyImageSrcSet } from '../../utils/helpers';
 import {
   supabase,
   fetchReviewChats,
@@ -494,7 +494,15 @@ export function PendingJutsuCard({
               <span className="text-[10px] font-bold uppercase text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded flex items-center gap-1">
                 Claimed by
                 {pending.assignee.avatar_url && (
-                  <img src={pending.assignee.avatar_url} alt="" className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
+                  <img
+                    src={getNetlifyImageUrl(pending.assignee.avatar_url, 14)}
+                    srcSet={getNetlifyImageSrcSet(pending.assignee.avatar_url)}
+                    alt=""
+                    className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                    width={14}
+                    height={14}
+                    loading="lazy"
+                  />
                 )}
                 <span className="truncate max-w-[100px]">{pending.assignee.username}</span>
               </span>
@@ -750,9 +758,13 @@ export function PendingJutsuCard({
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && (
                               <img
-                                src={msg.profiles.avatar_url}
+                                src={getNetlifyImageUrl(msg.profiles.avatar_url, 20)}
+                                srcSet={getNetlifyImageSrcSet(msg.profiles.avatar_url)}
                                 alt={senderName}
                                 className="w-5 h-5 rounded-full object-cover shrink-0"
+                                width={20}
+                                height={20}
+                                loading="lazy"
                               />
                             )}
                             <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>

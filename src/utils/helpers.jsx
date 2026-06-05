@@ -314,3 +314,22 @@ export async function sendDiscordLog(itemData, actionType, submitterProfile, fir
     return null;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   NETLIFY IMAGE CDN UTILITIES
+   --------------------------------------------------------------------------- */
+export const getNetlifyImageUrl = (url, width) => {
+  if (!url) return '';
+  if (url.startsWith('/.netlify/images') || url.startsWith('data:')) return url;
+  return `/.netlify/images?url=${encodeURIComponent(url)}&w=${width}&fm=avif&q=80`;
+};
+
+export const getNetlifyImageSrcSet = (url) => {
+  if (!url) return '';
+  if (url.startsWith('data:')) return '';
+  const w400 = getNetlifyImageUrl(url, 400);
+  const w800 = getNetlifyImageUrl(url, 800);
+  const w1200 = getNetlifyImageUrl(url, 1200);
+  return `${w400} 400w, ${w800} 800w, ${w1200} 1200w`;
+};
+
