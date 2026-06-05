@@ -572,6 +572,13 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
     onToggle();
   }, [isOpen, onToggle]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => onToggle();
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
+  }, [isOpen, onToggle]);
+
   const filtered = (bloodlinesDb || []).filter(b =>
     (fCat === 'All' || b.category === fCat) &&
     (fSub === 'All' || b.subcategory === fSub) &&
@@ -703,6 +710,13 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
   const handleToggle = useCallback(() => {
     if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 288));
     onToggle();
+  }, [isOpen, onToggle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => onToggle();
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
   }, [isOpen, onToggle]);
 
   return (

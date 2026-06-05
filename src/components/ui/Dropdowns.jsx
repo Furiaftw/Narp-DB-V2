@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import Icon from './Icon';
 import { BL_CATS, BL_SUBCATS } from '../../constants/catalog';
 
@@ -32,6 +32,13 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
       setPanelStyle(computeFixedPos(triggerRef.current, 384));
     }
     onToggle();
+  }, [isOpen, onToggle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => onToggle();
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
   }, [isOpen, onToggle]);
 
   const filtered = (bloodlinesDb || []).filter(b =>
@@ -166,6 +173,13 @@ export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, o
       setPanelStyle(computeFixedPos(triggerRef.current, 288));
     }
     onToggle();
+  }, [isOpen, onToggle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => onToggle();
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
   }, [isOpen, onToggle]);
 
   return (
