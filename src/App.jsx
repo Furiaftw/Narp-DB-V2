@@ -38,6 +38,7 @@ import {
   fetchWebhookConfig,
   saveWebhookConfig,
 } from './lib/supabase';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 
 
 /* ============================================================================
@@ -2640,7 +2641,32 @@ function WebhookConfigRow({ label, placeholder, initialValue, onSave }) {
 function ProfileAvatar({ profile, className = "w-10 h-10 rounded-lg shrink-0 object-cover" }) {
   const isDiscordAvatar = profile?.avatar_url && (profile.avatar_url.includes('discord') || profile.avatar_url.includes('discordapp'));
   if (isDiscordAvatar) {
-    return <img src={profile.avatar_url} alt={profile.username || 'Avatar'} className={className} />;
+    let width = 40;
+    let height = 40;
+    if (className.includes('w-6') || className.includes('h-6')) {
+      width = 24;
+      height = 24;
+    } else if (className.includes('w-8') || className.includes('h-8')) {
+      width = 32;
+      height = 32;
+    } else if (className.includes('w-5') || className.includes('h-5')) {
+      width = 20;
+      height = 20;
+    } else if (className.includes('w-3.5') || className.includes('h-3.5')) {
+      width = 14;
+      height = 14;
+    }
+    return (
+      <img
+        src={getNetlifyImageUrl(profile.avatar_url, width)}
+        srcSet={getNetlifyImageSrcSet(profile.avatar_url)}
+        alt={profile.username || 'Avatar'}
+        className={className}
+        width={width}
+        height={height}
+        loading="lazy"
+      />
+    );
   }
   return <RankLogo role={profile?.role} className={className} />;
 }
@@ -3127,7 +3153,15 @@ function PendingJutsuCard({
               <span className="text-[10px] font-bold uppercase text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded flex items-center gap-1">
                 Claimed by
                 {pending.assignee.avatar_url && (
-                  <img src={pending.assignee.avatar_url} alt="" className="w-3.5 h-3.5 rounded-full object-cover shrink-0" />
+                  <img
+                    src={getNetlifyImageUrl(pending.assignee.avatar_url, 14)}
+                    srcSet={getNetlifyImageSrcSet(pending.assignee.avatar_url)}
+                    alt=""
+                    className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
+                    width={14}
+                    height={14}
+                    loading="lazy"
+                  />
                 )}
                 <span className="truncate max-w-[100px]">{pending.assignee.username}</span>
               </span>
@@ -3355,9 +3389,13 @@ function PendingJutsuCard({
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && (
                               <img
-                                src={msg.profiles.avatar_url}
+                                src={getNetlifyImageUrl(msg.profiles.avatar_url, 20)}
+                                srcSet={getNetlifyImageSrcSet(msg.profiles.avatar_url)}
                                 alt={senderName}
                                 className="w-5 h-5 rounded-full object-cover shrink-0"
+                                width={20}
+                                height={20}
+                                loading="lazy"
                               />
                             )}
                             <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
@@ -4711,9 +4749,13 @@ export default function App() {
                               <td className="py-3 px-4 flex items-center gap-3">
                                 {m.avatar_url ? (
                                   <img
-                                    src={m.avatar_url}
+                                    src={getNetlifyImageUrl(m.avatar_url, 32)}
+                                    srcSet={getNetlifyImageSrcSet(m.avatar_url)}
                                     alt={m.username}
                                     className="w-8 h-8 rounded-full object-cover border border-slate-200"
+                                    width={32}
+                                    height={32}
+                                    loading="lazy"
                                   />
                                 ) : (
                                   <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 text-xs font-bold text-slate-500">
