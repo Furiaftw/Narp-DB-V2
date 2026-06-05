@@ -243,37 +243,30 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     }],
   };
 
-  let body;
-  const headers = {};
-
-  if (chatTranscript) {
-    const nameSlug = (itemData?.name || 'entry')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const fileName = `transcript-${nameSlug || 'entry'}.txt`;
-
-    const blob = new Blob([chatTranscript], { type: 'text/plain' });
-    const formData = new FormData();
-    formData.append('file', blob, fileName);
-    formData.append('payload_json', JSON.stringify(payload));
-    body = formData;
-  } else {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(payload);
-  }
+  const nameSlug = (itemData?.name || 'entry')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
 
   try {
-    const response = await fetch(webhookUrl, {
+    const sess = await getCurrentSession();
+    const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+
+    const res = await fetch('/.netlify/functions/send-discord-log', {
       method: 'POST',
-      headers,
-      body,
+      headers: { 'Content-Type': 'application/json', ...authHdr },
+      body: JSON.stringify({
+        threadId,
+        payload,
+        docUrl: itemData?.link || '',
+        docName: nameSlug || 'entry',
+        chatTranscript: chatTranscript || null,
+      }),
     });
-    if (!response.ok) {
-      throw new Error(`Discord webhook returned status ${response.status}`);
-    }
-    const data = await response.json();
-    return { messageId: data?.id, threadId: threadId };
+
+    if (!res.ok) throw new Error(`Discord log function returned ${res.status}`);
+    const data = await res.json();
+    return { messageId: data.messageId, threadId: data.threadId ?? threadId };
   } catch (err) {
     // Never let a logging failure block the underlying database action.
     console.warn('[NARP] Discord log failed:', err);
