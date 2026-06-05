@@ -544,10 +544,43 @@ const loadDB = async () => {
 /* ============================================================================
    COMPONENT: BloodlineDropdown
    ============================================================================ */
+
+/* Compute fixed-position style for a dropdown panel from the trigger button rect. */
+function computeDropdownPos(triggerEl, maxH) {
+  if (!triggerEl) return { top: 0, left: 0, width: 200, maxHeight: maxH };
+  const rect = triggerEl.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+  const clampedLeft = Math.min(rect.left, window.innerWidth - rect.width - 8);
+  const left = Math.max(8, clampedLeft);
+  return openUp
+    ? { bottom: window.innerHeight - rect.top + 4, left, width: rect.width, maxHeight: Math.min(spaceAbove, maxH) }
+    : { top: rect.bottom + 4, left, width: rect.width, maxHeight: Math.min(spaceBelow, maxH) };
+}
+
 function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen, onToggle, isMulti = true }) {
   const [fCat, setFCat] = useState('All');
   const [fSub, setFSub] = useState('All');
   const [str,  setStr]  = useState('');
+  const triggerRef = useRef(null);
+  const panelRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState({});
+
+  const handleToggle = useCallback(() => {
+    if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 384));
+    onToggle();
+  }, [isOpen, onToggle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = (e) => {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      onToggle();
+    };
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
+  }, [isOpen, onToggle]);
 
   const filtered = (bloodlinesDb || []).filter(b =>
     (fCat === 'All' || b.category === fCat) &&
@@ -580,7 +613,7 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
     <div className="relative flex flex-col w-full">
       {l && <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{l}</label>}
 
-      <button type="button" onClick={onToggle}
+      <button ref={triggerRef} type="button" onClick={handleToggle}
               className="w-full text-sm bg-white border border-slate-200 rounded-xl p-3.5 text-left flex items-center justify-between shadow-sm hover:border-indigo-400">
         <span className={count ? (isMulti ? 'text-indigo-700' : 'text-slate-800') + ' font-bold' : 'text-slate-500'}>
           {buttonLabel}
@@ -589,7 +622,8 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-96 flex flex-col absolute z-40 top-full">
+        <div ref={panelRef} style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+             className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-3 shrink-0">
             <div className="flex flex-wrap gap-1.5">
               {['All', ...BL_CATS].map(c => (
@@ -629,13 +663,13 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
                 <label key={b._id}
                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${isSel ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
                   {isMulti && (
-                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors shrink-0 ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
                       <Icon n="Check" size={14}/>
                     </div>
                   )}
                   <input type="checkbox" checked={isSel} onChange={() => toggle(b.name)} className="hidden" />
-                  <div className="flex flex-col">
-                    <span className={`text-sm ${isSel ? 'font-bold text-indigo-900' : 'font-medium text-slate-700'}`}>{b.name}</span>
+                  <div className="flex flex-col min-w-0">
+                    <span className={`text-sm truncate ${isSel ? 'font-bold text-indigo-900' : 'font-medium text-slate-700'}`}>{b.name}</span>
                     <span className="text-[10px] text-slate-400 font-semibold">{b.category} • {b.subcategory}</span>
                   </div>
                 </label>
@@ -670,15 +704,33 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
    ============================================================================ */
 function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle }) {
   const [str, setStr] = useState('');
+  const triggerRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState({});
   const arr = sel || [];
   const filtered = str ? opts.filter(o => (o.label || o).toLowerCase().includes(str.toLowerCase())) : opts;
   const toggle = (v) => onChange(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+  const panelRef = useRef(null);
+
+  const handleToggle = useCallback(() => {
+    if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 288));
+    onToggle();
+  }, [isOpen, onToggle]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = (e) => {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      onToggle();
+    };
+    window.addEventListener('scroll', close, { capture: true, passive: true });
+    return () => window.removeEventListener('scroll', close, { capture: true });
+  }, [isOpen, onToggle]);
 
   return (
     <div className="relative flex flex-col w-full">
       {l && <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{l}</label>}
 
-      <button type="button" onClick={onToggle}
+      <button ref={triggerRef} type="button" onClick={handleToggle}
               className="w-full text-sm bg-white border border-slate-200 rounded-xl p-3.5 text-left flex items-center justify-between shadow-sm hover:border-indigo-400">
         <span className={arr.length ? 'text-indigo-700 font-bold' : 'text-slate-500'}>
           {!arr.length ? placeholder : arr.length === 1 ? (arr[0].label || arr[0]) : `${arr.length} selected`}
@@ -687,7 +739,8 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-72 flex flex-col absolute z-30 top-full">
+        <div ref={panelRef} style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+             className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 relative">
             <Icon n="Search" size={14} className="absolute left-6 top-6 text-slate-400"/>
             <input type="text" placeholder="Search..." value={str} onChange={e => setStr(e.target.value)}
@@ -699,11 +752,11 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
               return (
                 <label key={value}
                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${isSel ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-                  <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                  <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors shrink-0 ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
                     <Icon n="Check" size={14}/>
                   </div>
                   <input type="checkbox" checked={isSel} onChange={() => toggle(value)} className="hidden" />
-                  <span className="text-sm font-medium text-slate-600">{label}</span>
+                  <span className="text-sm font-medium text-slate-600 truncate">{label}</span>
                 </label>
               );
             })}
@@ -1305,90 +1358,122 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
         </div>
       </div>
 
-      {f.showFilters && tab === 'jutsus' && (
-        <div className="bg-slate-50 border-b border-slate-200 p-6 md:p-8 relative z-20 shadow-inner">
-          <div className="max-w-6xl mx-auto space-y-10">
-              <div>
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Basic Properties</h3>
-                <div className="space-y-6">
-                  <ChipFilter title="Nature"      values={NATURES}     fKey="nat" />
-                  <ChipFilter title="Jutsu Types" values={JUTSU_TYPES} fKey="typ" />
-                  {f.typ.includes('Battlemode') && (
-                    <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
-                      <ChipFilter title="Battlemode Tiers" values={BM_TIERS} fKey="bm" />
-                    </div>
-                  )}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <ChipFilter title="Rank"   values={RANKS}  fKey="rnk" />
-                    <ChipFilter title="Origin" values={ORIGIN} fKey="org" />
-                  </div>
-                </div>
+    </>
+  );
+}
+
+/* ============================================================================
+   COMPONENT: FilterBarPanel
+   Rendered OUTSIDE the sticky header so it sits in normal document flow.
+   This eliminates layout reflow on open (scroll delay) and lets the fixed-
+   position dropdown panels escape the viewport freely.
+   ============================================================================ */
+function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
+  const [ddOpen, setDdOpen] = useState(null);
+  const toggleArr = (key, value) =>
+    setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
+
+  const ChipFilter = ({ title, values, fKey }) => (
+    <div>
+      <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">{title}</label>
+      <div className="flex flex-wrap gap-2.5">
+        {values.map(x => (
+          <button key={x} onClick={() => toggleArr(fKey, x)}
+                  className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all border ${
+                    f[fKey].includes(x)
+                      ? (fKey === 'nat' ? getNatureColor(x) + ' ring-1 ring-offset-1 shadow-sm' : 'bg-indigo-100 border-indigo-300 text-indigo-800 shadow-sm')
+                      : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                  }`}>
+            {x}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+
+  if (!f.showFilters || tab !== 'jutsus') return null;
+
+  return (
+    <div className="bg-slate-50 border-b border-slate-200 p-6 md:p-8">
+      <div className="max-w-6xl mx-auto space-y-10">
+        <div>
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Basic Properties</h3>
+          <div className="space-y-6">
+            <ChipFilter title="Nature"      values={NATURES}     fKey="nat" />
+            <ChipFilter title="Jutsu Types" values={JUTSU_TYPES} fKey="typ" />
+            {f.typ.includes('Battlemode') && (
+              <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
+                <ChipFilter title="Battlemode Tiers" values={BM_TIERS} fKey="bm" />
               </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <ChipFilter title="Rank"   values={RANKS}  fKey="rnk" />
+              <ChipFilter title="Origin" values={ORIGIN} fKey="org" />
+            </div>
+          </div>
+        </div>
 
-              <div>
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Detailed Tags</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl">
-                  <GenericDropdown
-                    l="Specialization" placeholder="Any Specialization"
-                    opts={specOptions.map(s => ({ value: s, label: s }))}
-                    sel={f.spc} onChange={v => setF(p => ({ ...p, spc: v }))}
-                    isOpen={ddOpen === 'f_spc'} onToggle={() => setDdOpen(ddOpen === 'f_spc' ? null : 'f_spc')} />
-                  <BloodlineDropdown
-                    l="Bloodlines" placeholder="Any Bloodline"
-                    bloodlinesDb={bloodlinesDb}
-                    sel={f.bl} onChange={v => setF(p => ({ ...p, bl: v }))} isMulti
-                    isOpen={ddOpen === 'f_bl'} onToggle={() => setDdOpen(ddOpen === 'f_bl' ? null : 'f_bl')} />
-                </div>
-              </div>
+        <div>
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Detailed Tags</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl">
+            <GenericDropdown
+              l="Specialization" placeholder="Any Specialization"
+              opts={specOptions.map(s => ({ value: s, label: s }))}
+              sel={f.spc} onChange={v => setF(p => ({ ...p, spc: v }))}
+              isOpen={ddOpen === 'f_spc'} onToggle={() => setDdOpen(ddOpen === 'f_spc' ? null : 'f_spc')} />
+            <BloodlineDropdown
+              l="Bloodlines" placeholder="Any Bloodline"
+              bloodlinesDb={bloodlinesDb}
+              sel={f.bl} onChange={v => setF(p => ({ ...p, bl: v }))} isMulti
+              isOpen={ddOpen === 'f_bl'} onToggle={() => setDdOpen(ddOpen === 'f_bl' ? null : 'f_bl')} />
+          </div>
+        </div>
 
-              <div>
-                <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Conditions &amp; Exclusions</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Show Only</label>
-                    <div className="flex flex-wrap gap-4">
-                      {TOGGLE_PAIRS.map(p => (
-                        <label key={p.showKey} className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors ${f[p.showKey] ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
-                            <Icon n="Check" size={14}/>
-                          </div>
-                          <input type="checkbox" checked={f[p.showKey]} className="hidden"
-                                 onChange={e => setF(prev => ({
-                                   ...prev,
-                                   [p.showKey]: e.target.checked,
-                                   ...(e.target.checked ? { [p.hideKey]: false } : {}),
-                                 }))} />
-                          {p.label}
-                        </label>
-                      ))}
+        <div>
+          <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Conditions &amp; Exclusions</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Show Only</label>
+              <div className="flex flex-wrap gap-4">
+                {TOGGLE_PAIRS.map(p => (
+                  <label key={p.showKey} className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer group">
+                    <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors ${f[p.showKey] ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                      <Icon n="Check" size={14}/>
                     </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Hide (Exclude)</label>
-                    <div className="flex flex-wrap gap-4">
-                      {[...TOGGLE_PAIRS, ...HIDE_ONLY].map(p => (
-                        <label key={p.hideKey} className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer group">
-                          <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors ${f[p.hideKey] ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
-                            <Icon n="X" size={14}/>
-                          </div>
-                          <input type="checkbox" checked={!!f[p.hideKey]} className="hidden"
-                                 onChange={e => setF(prev => ({
-                                   ...prev,
-                                   [p.hideKey]: e.target.checked,
-                                   ...(e.target.checked && p.showKey ? { [p.showKey]: false } : {}),
-                                 }))} />
-                          {p.label}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                    <input type="checkbox" checked={f[p.showKey]} className="hidden"
+                           onChange={e => setF(prev => ({
+                             ...prev,
+                             [p.showKey]: e.target.checked,
+                             ...(e.target.checked ? { [p.hideKey]: false } : {}),
+                           }))} />
+                    {p.label}
+                  </label>
+                ))}
               </div>
             </div>
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 block">Hide (Exclude)</label>
+              <div className="flex flex-wrap gap-4">
+                {[...TOGGLE_PAIRS, ...HIDE_ONLY].map(p => (
+                  <label key={p.hideKey} className="flex items-center gap-2.5 text-sm font-bold text-slate-700 cursor-pointer group">
+                    <div className={`w-5 h-5 rounded flex items-center justify-center border-2 transition-colors ${f[p.hideKey] ? 'bg-rose-500 border-rose-500 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                      <Icon n="X" size={14}/>
+                    </div>
+                    <input type="checkbox" checked={!!f[p.hideKey]} className="hidden"
+                           onChange={e => setF(prev => ({
+                             ...prev,
+                             [p.hideKey]: e.target.checked,
+                             ...(e.target.checked && p.showKey ? { [p.showKey]: false } : {}),
+                           }))} />
+                    {p.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -4412,13 +4497,17 @@ export default function App() {
         <FilterBar
           tab={tab} f={f} setF={setF}
           activeFilterCount={fCount}
-          bloodlinesDb={sortedBloodlines}
-          specOptions={sortedSpecs}
           clearF={clearF}
           isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
           onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
           onOpenStatelessSubmission={setStatelessType} />
       </div>
+
+      {/* FILTER PANEL — outside sticky header, in normal document flow */}
+      <FilterBarPanel
+        tab={tab} f={f} setF={setF}
+        bloodlinesDb={sortedBloodlines}
+        specOptions={sortedSpecs} />
 
       {/* TAB BAR */}
       {TABS.length > 1 && (
