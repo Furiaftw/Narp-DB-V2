@@ -1,6 +1,21 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import Icon from './Icon';
 import { BL_CATS, BL_SUBCATS } from '../../constants/catalog';
+
+/* Compute fixed-position style for a dropdown panel relative to its trigger button.
+   Picks up or down based on available space. */
+function computeFixedPos(triggerEl, maxH) {
+  if (!triggerEl) return { top: 0, left: 0, width: 200, maxHeight: maxH };
+  const rect = triggerEl.getBoundingClientRect();
+  const spaceBelow = window.innerHeight - rect.bottom - 8;
+  const spaceAbove = rect.top - 8;
+  const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
+  const clampedLeft = Math.min(rect.left, window.innerWidth - rect.width - 8);
+  const finalLeft = Math.max(8, clampedLeft);
+  return openUp
+    ? { bottom: window.innerHeight - rect.top + 4, left: finalLeft, width: rect.width, maxHeight: Math.min(spaceAbove, maxH) }
+    : { top: rect.bottom + 4, left: finalLeft, width: rect.width, maxHeight: Math.min(spaceBelow, maxH) };
+}
 
 /* ============================================================================
    COMPONENT: BloodlineDropdown
@@ -9,6 +24,15 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
   const [fCat, setFCat] = useState('All');
   const [fSub, setFSub] = useState('All');
   const [str,  setStr]  = useState('');
+  const triggerRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState({});
+
+  const handleToggle = useCallback(() => {
+    if (!isOpen) {
+      setPanelStyle(computeFixedPos(triggerRef.current, 384));
+    }
+    onToggle();
+  }, [isOpen, onToggle]);
 
   const filtered = (bloodlinesDb || []).filter(b =>
     (fCat === 'All' || b.category === fCat) &&
@@ -28,8 +52,7 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
   const selectAllVisible = () => {
     if (!isMulti) return;
     const visibleNames = filtered.map(b => b.name);
-    const next = Array.from(new Set([...sel, ...visibleNames]));
-    onChange(next);
+    onChange(Array.from(new Set([...sel, ...visibleNames])));
   };
 
   const count = isMulti ? sel.length : (sel ? 1 : 0);
@@ -41,7 +64,7 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
     <div className="relative flex flex-col w-full">
       {l && <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{l}</label>}
 
-      <button type="button" onClick={onToggle}
+      <button ref={triggerRef} type="button" onClick={handleToggle}
               className="w-full text-sm bg-white border border-slate-200 rounded-xl p-3.5 text-left flex items-center justify-between shadow-sm hover:border-indigo-400">
         <span className={count ? (isMulti ? 'text-indigo-700' : 'text-slate-800') + ' font-bold' : 'text-slate-500'}>
           {buttonLabel}
@@ -50,7 +73,8 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-96 flex flex-col absolute z-[9999] top-full">
+        <div style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+             className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-3 shrink-0">
             <div className="flex flex-wrap gap-1.5">
               {['All', ...BL_CATS].map(c => (
@@ -90,13 +114,13 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
                 <label key={b._id}
                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${isSel ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
                   {isMulti && (
-                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                    <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors shrink-0 ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
                       <Icon n="Check" size={14}/>
                     </div>
                   )}
                   <input type="checkbox" checked={isSel} onChange={() => toggle(b.name)} className="hidden" />
-                  <div className="flex flex-col">
-                    <span className={`text-sm ${isSel ? 'font-bold text-indigo-900' : 'font-medium text-slate-700'}`}>{b.name}</span>
+                  <div className="flex flex-col min-w-0">
+                    <span className={`text-sm truncate ${isSel ? 'font-bold text-indigo-900' : 'font-medium text-slate-700'}`}>{b.name}</span>
                     <span className="text-[10px] text-slate-400 font-semibold">{b.category} • {b.subcategory}</span>
                   </div>
                 </label>
@@ -131,15 +155,24 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
    ============================================================================ */
 export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle }) {
   const [str, setStr] = useState('');
+  const triggerRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState({});
   const arr = sel || [];
   const filtered = str ? opts.filter(o => (o.label || o).toLowerCase().includes(str.toLowerCase())) : opts;
   const toggle = (v) => onChange(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+
+  const handleToggle = useCallback(() => {
+    if (!isOpen) {
+      setPanelStyle(computeFixedPos(triggerRef.current, 288));
+    }
+    onToggle();
+  }, [isOpen, onToggle]);
 
   return (
     <div className="relative flex flex-col w-full">
       {l && <label className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-2">{l}</label>}
 
-      <button type="button" onClick={onToggle}
+      <button ref={triggerRef} type="button" onClick={handleToggle}
               className="w-full text-sm bg-white border border-slate-200 rounded-xl p-3.5 text-left flex items-center justify-between shadow-sm hover:border-indigo-400">
         <span className={arr.length ? 'text-indigo-700 font-bold' : 'text-slate-500'}>
           {!arr.length ? placeholder : arr.length === 1 ? (arr[0].label || arr[0]) : `${arr.length} selected`}
@@ -148,7 +181,8 @@ export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, o
       </button>
 
       {isOpen && (
-        <div className="mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl max-h-72 flex flex-col absolute z-[9999] top-full">
+        <div style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+             className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 relative">
             <Icon n="Search" size={14} className="absolute left-6 top-6 text-slate-400"/>
             <input type="text" placeholder="Search..." value={str} onChange={e => setStr(e.target.value)}
@@ -160,11 +194,11 @@ export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, o
               return (
                 <label key={value}
                        className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${isSel ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
-                  <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
+                  <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors shrink-0 ${isSel ? 'bg-indigo-600 border-indigo-600 text-white' : 'bg-white border-slate-300 text-transparent'}`}>
                     <Icon n="Check" size={14}/>
                   </div>
                   <input type="checkbox" checked={isSel} onChange={() => toggle(value)} className="hidden" />
-                  <span className="text-sm font-medium text-slate-600">{label}</span>
+                  <span className="text-sm font-medium text-slate-600 truncate">{label}</span>
                 </label>
               );
             })}
