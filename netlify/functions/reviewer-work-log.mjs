@@ -70,7 +70,7 @@ export default async (req) => {
 
     const color = 3066993;
 
-    let description = `**Action:** ${actionType}\n**Document Link:** ${docLink}`;
+    let description = `**Entry Name:** ${actionType}\n**Document Link:** ${docLink}`;
 
     if (myCharactersLink) {
       description += `\n**My-Characters Thread:** [My-Characters Thread](${myCharactersLink})`;
@@ -79,7 +79,7 @@ export default async (req) => {
       description += `\n**Upgrades Thread:** [Upgrades Thread](${upgradesLink})`;
     }
     if (mainLogUrl) {
-      description += `\n**Log:** [Log](${mainLogUrl})`;
+      description += `\n**Log:** [Hyperlink](${mainLogUrl})`;
     }
 
     const embed = {
