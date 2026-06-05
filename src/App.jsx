@@ -2894,7 +2894,9 @@ function PendingJutsuCard({
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
 
-  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by && !['staff', 'admin', 'owner'].includes(currentUser.role);
+  // isStrictSubmitter: true for anyone who submitted this item, regardless of role.
+  // Staff reviewing their OWN submission see the submitter view, not the reviewer view.
+  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by;
 
   const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
 
@@ -3238,7 +3240,8 @@ function PendingJutsuCard({
             </button>
           )
         )}
-        {onEdit && (
+        {/* Edit: staff can always edit others' submissions; submitter can only edit their own while unclaimed */}
+        {onEdit && (!isStrictSubmitter || !isClaimed) && (
           <button onClick={() => onEdit(pending)}
                   className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
                   title="Edit pending payload">
@@ -3720,7 +3723,16 @@ export default function App() {
     return () => observer.disconnect();
   }, [loading]);
 
-  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false });
+  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false, iosInstall: false });
+  const [installPrompt, setInstallPrompt] = useState(null);
+  const [appInstalled, setAppInstalled]   = useState(() => window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone);
+
+  useEffect(() => {
+    const handler = (e) => { e.preventDefault(); setInstallPrompt(e); };
+    window.addEventListener('beforeinstallprompt', handler);
+    window.addEventListener('appinstalled', () => { setInstallPrompt(null); setAppInstalled(true); });
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
   const [statelessType, setStatelessType] = useState(null);
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
@@ -3849,7 +3861,10 @@ export default function App() {
     if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
-      const filtered = isStaff ? list : list.filter(p => p.submitted_by === profile?.id);
+      // Staff see all submissions EXCEPT their own (those go to My Submissions only)
+      const filtered = isStaff
+        ? list.filter(p => p.submitted_by !== profile?.id)
+        : list.filter(p => p.submitted_by === profile?.id);
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
@@ -4100,12 +4115,13 @@ export default function App() {
         const sess = await getCurrentSession();
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
 
-        // Work log for the final approver
+        // Single work log embed per reviewer at approval time, labelled by role.
+        const firstReviewer = item.first_reviewer;
+        const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id;
         if (item.operation === 'insert' && profile?.work_thread_id) {
           try {
-            const actionType = (profile.role === 'admin' || profile.role === 'owner')
-              ? 'Admin Approval'
-              : '2nd Pair of Eyes';
+            // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
+            const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4126,9 +4142,8 @@ export default function App() {
           }
         }
 
-        // Work log for the first reviewer (if different from current approver)
-        const firstReviewer = item.first_reviewer;
-        if (item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id) {
+        // First reviewer's embed — sent at approval so it includes the log URL and all links.
+        if (hasDifferentFirstReviewer) {
           try {
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
@@ -4137,10 +4152,12 @@ export default function App() {
                 threadId: firstReviewer.work_thread_id,
                 reviewerId: firstReviewer.discord_id,
                 reviewerName: firstReviewer.username,
-                actionType: 'First Check',
+                actionType: 'First Reviewer',
                 itemName: approvalItemName,
                 docLink: approvalDocLink,
                 mainLogUrl,
+                myCharactersLink: displayData?.myCharactersLink || '',
+                upgradesLink: displayData?.upgradesLink || '',
               }),
             });
           } catch (workLogErr) {
@@ -4270,31 +4287,7 @@ export default function App() {
 
       await reviewPendingJutsu(id, profile.id);
 
-      if (item && item.operation === 'insert' && profile?.work_thread_id) {
-        try {
-          const actionType = 'First Check';
-          const docLink = display?.link || 'N/A';
-          const mainLogUrl = '';
-
-          const sess = await getCurrentSession();
-          const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-          await fetch('/.netlify/functions/reviewer-work-log', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHdr },
-            body: JSON.stringify({
-              threadId: profile.work_thread_id,
-              reviewerId: profile.discord_id,
-              reviewerName: profile.username,
-              actionType,
-              itemName,
-              docLink,
-              mainLogUrl,
-            }),
-          });
-        } catch (workLogErr) {
-          console.warn('[NARP] Reviewer work log failed:', workLogErr);
-        }
-      }
+      // No work log embed at first-check time — the single combined embed is sent at approval.
 
       getCurrentSession().then(sess => {
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
@@ -4501,6 +4494,27 @@ export default function App() {
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
             <Icon n="Book" size={18} className="text-indigo-400" />
             <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
+            {!appInstalled && (
+              installPrompt ? (
+                <button
+                  onClick={async () => {
+                    installPrompt.prompt();
+                    const { outcome } = await installPrompt.userChoice;
+                    if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); }
+                  }}
+                  title="Install App"
+                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
+                  <Icon n="Download" size={11} /> Install
+                </button>
+              ) : /iphone|ipad|ipod/i.test(navigator.userAgent) ? (
+                <button
+                  onClick={() => setModals(m => ({ ...m, iosInstall: true }))}
+                  title="Install App"
+                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
+                  <Icon n="Download" size={11} /> Install
+                </button>
+              ) : null
+            )}
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
@@ -4941,6 +4955,44 @@ export default function App() {
                 <p className="text-[10px] font-bold uppercase text-slate-400">Credits</p>
                 <p className="font-semibold">Hexagon &amp; A Road Sign</p>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modals.iosInstall && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-end sm:items-center justify-center p-4 animate-in fade-in" onClick={() => setModals(m => ({ ...m, iosInstall: false }))}>
+          <div className="bg-white rounded-3xl max-w-sm w-full overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="bg-slate-900 text-white p-5 flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Icon n="Download" size={18} className="text-indigo-400" />
+                <h3 className="font-bold text-base">Install on iPhone / iPad</h3>
+              </div>
+              <button onClick={() => setModals(m => ({ ...m, iosInstall: false }))} className="text-slate-400 hover:text-white"><Icon n="X" size={18} /></button>
+            </div>
+            <div className="p-6 space-y-4 text-sm text-slate-700">
+              <p className="font-semibold text-slate-800">Add NARP Database to your home screen in 3 steps:</p>
+              <ol className="space-y-3">
+                <li className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">1</span>
+                  <span>Tap the <strong>Share</strong> button at the bottom of Safari (the square with an arrow pointing up).</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">2</span>
+                  <span>Scroll down and tap <strong>"Add to Home Screen"</strong>.</span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">3</span>
+                  <span>Tap <strong>"Add"</strong> in the top-right corner. The app will appear on your home screen.</span>
+                </li>
+              </ol>
+              <p className="text-xs text-slate-400 pt-1">Note: This feature requires Safari on iOS 16.4 or later.</p>
+            </div>
+            <div className="px-6 pb-6">
+              <button onClick={() => setModals(m => ({ ...m, iosInstall: false }))}
+                      className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors">
+                Got it
+              </button>
             </div>
           </div>
         </div>
