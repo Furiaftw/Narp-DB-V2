@@ -528,6 +528,7 @@ export function PendingJutsuCard({
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
           {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
           {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Spec:</span> {display.spec.join(', ')}</div>}
+          {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
       )}
       {op === 'delete' && (

@@ -152,10 +152,11 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
 
   if (isCharacter) {
     threadId = config.discord_oc_thread_id || import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+  } else if (itemData?.type === 'Summon') {
+    threadId = config.discord_summon_thread_id || import.meta.env.VITE_DISCORD_SUMMON_THREAD_ID;
+  } else if (itemData?.type === 'Custom Item') {
+    threadId = config.discord_custom_item_thread_id || import.meta.env.VITE_DISCORD_CUSTOM_ITEM_THREAD_ID;
   }
-
-  const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
-  const webhookUrl = baseWebhookUrl.includes('?') ? `${baseWebhookUrl}&wait=true` : `${baseWebhookUrl}?wait=true`;
 
   // Format a profile into a Discord mention, falling back to plain @username.
   const ping = (profile) => {
@@ -185,6 +186,8 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
   const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
   const approvalDate = new Date().toLocaleString();
 
+  const isSummonOrItem = itemData?.type === 'Summon' || itemData?.type === 'Custom Item';
+
   let description;
   if (isCharacter) {
     const characterDesc = [
@@ -211,6 +214,22 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
       `Approval Date: ${approvalDate}`
     );
     description = characterDesc.join('\n');
+  } else if (isSummonOrItem) {
+    description = [
+      `**Entry Creator:** ${creatorPing}`,
+      `**Reviewer:** ${reviewerPing}`,
+      `**2nd Pair of Eyes:** ${secondEyes}`,
+      '',
+      `**Decision:** ${decision}`,
+      '',
+      `**Type:** ${itemData.type}`,
+      `**Link to sheet:**`,
+      `${linkVal}`,
+      '',
+      '**Dates:**',
+      `Submission Date: ${creationDate}`,
+      `Approval Date: ${approvalDate}`,
+    ].join('\n');
   } else {
     description = [
       `**Name Entry Creator:** ${creatorPing}`,
@@ -235,45 +254,40 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     ].join('\n');
   }
 
+  const embedTitle = isSummonOrItem ? itemData.type : (isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'));
+
   const payload = {
     embeds: [{
-      title: isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'),
+      title: embedTitle,
       description,
       color,
     }],
   };
 
-  let body;
-  const headers = {};
-
-  if (chatTranscript) {
-    const nameSlug = (itemData?.name || 'entry')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const fileName = `transcript-${nameSlug || 'entry'}.txt`;
-
-    const blob = new Blob([chatTranscript], { type: 'text/plain' });
-    const formData = new FormData();
-    formData.append('file', blob, fileName);
-    formData.append('payload_json', JSON.stringify(payload));
-    body = formData;
-  } else {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(payload);
-  }
+  const nameSlug = (itemData?.name || 'entry')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '');
 
   try {
-    const response = await fetch(webhookUrl, {
+    const sess = await getCurrentSession();
+    const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+
+    const res = await fetch('/.netlify/functions/send-discord-log', {
       method: 'POST',
-      headers,
-      body,
+      headers: { 'Content-Type': 'application/json', ...authHdr },
+      body: JSON.stringify({
+        threadId,
+        payload,
+        docUrl: itemData?.link || '',
+        docName: nameSlug || 'entry',
+        chatTranscript: chatTranscript || null,
+      }),
     });
-    if (!response.ok) {
-      throw new Error(`Discord webhook returned status ${response.status}`);
-    }
-    const data = await response.json();
-    return { messageId: data?.id, threadId: threadId };
+
+    if (!res.ok) throw new Error(`Discord log function returned ${res.status}`);
+    const data = await res.json();
+    return { messageId: data.messageId, threadId: data.threadId ?? threadId };
   } catch (err) {
     // Never let a logging failure block the underlying database action.
     console.warn('[NARP] Discord log failed:', err);
@@ -1323,17 +1337,17 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     </button>
                     <button
                       type="button"
-                      disabled
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
+                      onClick={() => { setAddDdOpen(false); setStatelessType('Summon'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
-                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon (Under Development)
+                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
                     </button>
                     <button
                       type="button"
-                      disabled
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
+                      onClick={() => { setAddDdOpen(false); setStatelessType('Custom Item'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
-                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item (Under Development)
+                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
                     </button>
                   </div>
                 )}
@@ -3189,6 +3203,7 @@ function PendingJutsuCard({
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
           {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
           {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Spec:</span> {display.spec.join(', ')}</div>}
+          {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
       )}
       {op === 'delete' && (
@@ -4165,20 +4180,24 @@ export default function App() {
           }
         }
 
+        const isSummonOrItem = item.data?.type === 'Summon' || item.data?.type === 'Custom Item';
+
         // DM submitter — approved
         if (item?.submitter?.discord_id) {
+          const approvedMsg = (isCharacter || isSummonOrItem)
+            ? `🎉 Your submission **${approvalItemName}** has been **approved**!`
+            : `🎉 Your submission **${approvalItemName}** has been **approved**! It's now live in the database.`;
           fetch('/.netlify/functions/discord-dm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHdr },
             body: JSON.stringify({
               discordUserId: item.submitter.discord_id,
-              message: `🎉 Your submission **${approvalItemName}** has been **approved**! It's now live in the database.`,
+              message: approvedMsg,
             }),
           }).catch(err => console.warn('[NARP] Approval DM failed:', err));
         }
-
-        if (isCharacter) {
-          await cancelPendingJutsu(id); // Deletes from the pending list directly
+        if (isCharacter || isSummonOrItem) {
+          await cancelPendingJutsu(id); // No DB table write — remove from pending only
         } else {
           await approvePendingJutsu(id); // Standard database merge RPC
         }
