@@ -565,6 +565,7 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
   const [fSub, setFSub] = useState('All');
   const [str,  setStr]  = useState('');
   const triggerRef = useRef(null);
+  const panelRef = useRef(null);
   const [panelStyle, setPanelStyle] = useState({});
 
   const handleToggle = useCallback(() => {
@@ -574,7 +575,10 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
 
   useEffect(() => {
     if (!isOpen) return;
-    const close = () => onToggle();
+    const close = (e) => {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      onToggle();
+    };
     window.addEventListener('scroll', close, { capture: true, passive: true });
     return () => window.removeEventListener('scroll', close, { capture: true });
   }, [isOpen, onToggle]);
@@ -619,7 +623,7 @@ function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen
       </button>
 
       {isOpen && (
-        <div style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+        <div ref={panelRef} style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
              className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 flex flex-col gap-3 shrink-0">
             <div className="flex flex-wrap gap-1.5">
@@ -706,6 +710,7 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
   const arr = sel || [];
   const filtered = str ? opts.filter(o => (o.label || o).toLowerCase().includes(str.toLowerCase())) : opts;
   const toggle = (v) => onChange(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+  const panelRef = useRef(null);
 
   const handleToggle = useCallback(() => {
     if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 288));
@@ -714,7 +719,10 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
 
   useEffect(() => {
     if (!isOpen) return;
-    const close = () => onToggle();
+    const close = (e) => {
+      if (panelRef.current && panelRef.current.contains(e.target)) return;
+      onToggle();
+    };
     window.addEventListener('scroll', close, { capture: true, passive: true });
     return () => window.removeEventListener('scroll', close, { capture: true });
   }, [isOpen, onToggle]);
@@ -732,7 +740,7 @@ function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle
       </button>
 
       {isOpen && (
-        <div style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+        <div ref={panelRef} style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
              className="bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col overflow-hidden">
           <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 relative">
             <Icon n="Search" size={14} className="absolute left-6 top-6 text-slate-400"/>
