@@ -1337,14 +1337,14 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAddDdOpen(false); setStatelessType('Summon'); }}
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
                       className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
                       <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
                     </button>
                     <button
                       type="button"
-                      onClick={() => { setAddDdOpen(false); setStatelessType('Custom Item'); }}
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
                       className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
                       <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
