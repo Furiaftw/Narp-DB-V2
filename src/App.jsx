@@ -1498,7 +1498,7 @@ function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
 /* ============================================================================
    MODAL: StatelessSubmissionModal
    ============================================================================ */
-function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpload }) {
+function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpload, onAfterSubmit }) {
   const [link, setLink] = useState('');
   const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1535,6 +1535,7 @@ function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpl
         console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
       });
 
+      if (onAfterSubmit) onAfterSubmit();
       onClose();
     } catch (err) {
       console.error('[NARP] Failed to submit log:', err);
@@ -3698,6 +3699,7 @@ export default function App() {
   const isOwner = role === 'owner';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
+  const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [pendingHasNew, setPendingHasNew] = useState(false);
@@ -3922,13 +3924,19 @@ export default function App() {
   const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
-    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setPendingLoaded(false); return; }
+    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
-      // Staff see all submissions EXCEPT their own (those go to My Submissions only)
+
+      // Own submissions always tracked separately so staff can see them in My Submissions
+      const own = list.filter(p => p.submitted_by === profile?.id)
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+      setMyOwnSubmissions(own);
+
+      // Staff see all submissions EXCEPT their own in the Pending review tab
       const filtered = isStaff
         ? list.filter(p => p.submitted_by !== profile?.id)
-        : list.filter(p => p.submitted_by === profile?.id);
+        : [];
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
@@ -3998,20 +4006,27 @@ export default function App() {
   useEffect(() => {
     if (!supabaseReady || !profile) return;
     let channel = null;
-    let debounceTimer = null;
+    let pendingDebounce = null;
+    let catalogDebounce = null;
     try {
-      channel = subscribeToDatabaseChanges(() => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          refreshDB();
-          if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
-        }, 500);
+      channel = subscribeToDatabaseChanges((payload) => {
+        const table = payload?.table;
+        if (table === 'pending_jutsus') {
+          clearTimeout(pendingDebounce);
+          pendingDebounce = setTimeout(() => refreshPending(), 300);
+        } else if (table === 'jutsus' || table === 'bloodlines') {
+          clearTimeout(catalogDebounce);
+          catalogDebounce = setTimeout(() => refreshDB(), 500);
+        }
+        // pending_chats: handled per-card in PendingCard — no global refresh needed
+        if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
     } catch (err) {
       console.warn('[NARP] Failed to subscribe to database changes:', err);
     }
     return () => {
-      clearTimeout(debounceTimer);
+      clearTimeout(pendingDebounce);
+      clearTimeout(catalogDebounce);
       if (channel) {
         try {
           supabase.removeChannel(channel);
@@ -4020,7 +4035,7 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB, isStaff]);
+  }, [supabaseReady, profile, refreshDB, refreshPending, isStaff]);
 
   // 30-second polling to catch submissions missed by realtime
   useEffect(() => {
@@ -4127,6 +4142,8 @@ export default function App() {
 
   const handleApprovePending = async (id) => {
     try {
+      // Optimistic: remove immediately so the UI doesn't hang
+      setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the approval to Discord before committing it. The submitter is the
       // staff member who queued the entry; the current user is the reviewer
       // (the "2nd pair of eyes" in the double-approver workflow).
@@ -4287,6 +4304,8 @@ export default function App() {
 
   const handleCancelPending = async (id) => {
     try {
+      // Optimistic: remove immediately so the UI doesn't hang
+      setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
@@ -4379,6 +4398,11 @@ export default function App() {
       const itemName = display.name || 'Unknown Jutsu';
       const itemType = 'Jutsu';
 
+      // Optimistic: update status immediately so re-ordering happens at once
+      setPendingJutsus(prev => prev.map(p =>
+        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile } : p
+      ));
+
       await reviewPendingJutsu(id, profile.id);
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
@@ -4415,6 +4439,10 @@ export default function App() {
   const handleClaimPending = async (id) => {
     try {
       if (!profile?.id) return;
+      // Optimistic: show as claimed immediately
+      setPendingJutsus(prev => prev.map(p =>
+        p.id === id ? { ...p, assigned_to: profile.id, assignee: profile } : p
+      ));
       await claimPendingSubmission(id, profile.id);
 
       // DM the submitter to let them know their entry was claimed
@@ -4547,10 +4575,6 @@ export default function App() {
     ).sort(sortByJutsu);
   }, [db.jutsus, f, sortByJutsu]);
 
-  const myPending = useMemo(() => {
-    if (!profile?.id) return [];
-    return pendingJutsus.filter(p => p.submitted_by === profile.id);
-  }, [pendingJutsus, profile?.id]);
 
   if (loading) {
     return (
@@ -4565,7 +4589,7 @@ export default function App() {
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
-    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length, hasNew: mySubsHasNew }] : []),
+    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
@@ -4776,16 +4800,16 @@ export default function App() {
           <div className="max-w-6xl mx-auto">
             {!pendingLoaded ? (
               <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading your submissions...</div>
-            ) : myPending.length === 0 ? (
+            ) : myOwnSubmissions.length === 0 ? (
               <div className="text-center py-16">
                 <Icon n="CheckCir" size={40} className="text-emerald-300 mx-auto mb-3" />
                 <p className="text-slate-500 font-semibold">You have no pending submissions</p>
               </div>
             ) : (
               <>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myPending.length} Submissions</div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myOwnSubmissions.length} Submissions</div>
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
-                  {myPending.map(p => {
+                  {myOwnSubmissions.map(p => {
                     const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
                     return (
                       <PendingJutsuCard
@@ -5101,6 +5125,7 @@ export default function App() {
           onClose={() => setStatelessType(null)}
           isAdmin={isAdmin}
           onDirectUpload={handleDirectSummonItemUpload}
+          onAfterSubmit={refreshPending}
         />
       )}
 
