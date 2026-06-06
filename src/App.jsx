@@ -1278,7 +1278,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 
   return (
     <>
-      <div className="bg-slate-900 text-white p-4 shadow-md z-30 shrink-0">
+      <div className="bg-black text-white p-4 shadow-md z-30 shrink-0">
         <div className="max-w-6xl mx-auto flex flex-col gap-3">
           <div className="flex gap-2">
             <div className="relative flex-1 min-w-0">
@@ -4672,7 +4672,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
+      <div className="w-full h-screen bg-black flex flex-col items-center justify-center gap-4">
         <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
         <p className="text-slate-400 text-sm font-semibold">Loading...</p>
       </div>
@@ -4702,7 +4702,7 @@ export default function App() {
       {/* HEADER AND FILTER BAR STICKY WRAPPER */}
       <div ref={headerRef} className="sticky top-0 z-40 shrink-0 flex flex-col shadow-lg">
         {/* HEADER */}
-        <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+        <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
             <Icon n="Book" size={18} className="text-indigo-400" />
             <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
@@ -4871,7 +4871,7 @@ export default function App() {
                         isMySubmissionsView={false}
                         currentUserProfile={profile}
                         refreshPending={refreshPending}
-                        isApproving={approvingIds.has(pending.id)} />
+                        isApproving={approvingIds.has(p.id)} />
                     );
                   })}
                 </div>
@@ -4913,7 +4913,7 @@ export default function App() {
                         isMySubmissionsView={true}
                         currentUserProfile={profile}
                         refreshPending={refreshPending}
-                        isApproving={approvingIds.has(pending.id)} />
+                        isApproving={approvingIds.has(p.id)} />
                     );
                   })}
                 </div>
@@ -5028,7 +5028,7 @@ export default function App() {
       </div>
 
       {/* FOOTER */}
-      <div className="bg-slate-900 text-center py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest shrink-0 flex items-center justify-center gap-2 relative z-30">
+      <div className="bg-black text-center py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest shrink-0 flex items-center justify-center gap-2 relative z-30">
         <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300 flex items-center gap-1.5">
           <Icon n="Info" size={11} /> Hexagon &amp; A Road Sign
         </button>
