@@ -152,10 +152,11 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
 
   if (isCharacter) {
     threadId = config.discord_oc_thread_id || import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+  } else if (itemData?.type === 'Summon') {
+    threadId = config.discord_summon_thread_id || import.meta.env.VITE_DISCORD_SUMMON_THREAD_ID;
+  } else if (itemData?.type === 'Custom Item') {
+    threadId = config.discord_custom_item_thread_id || import.meta.env.VITE_DISCORD_CUSTOM_ITEM_THREAD_ID;
   }
-
-  const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
-  const webhookUrl = baseWebhookUrl.includes('?') ? `${baseWebhookUrl}&wait=true` : `${baseWebhookUrl}?wait=true`;
 
   // Format a profile into a Discord mention, falling back to plain @username.
   const ping = (profile) => {
@@ -185,6 +186,8 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
   const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
   const approvalDate = new Date().toLocaleString();
 
+  const isSummonOrItem = itemData?.type === 'Summon' || itemData?.type === 'Custom Item';
+
   let description;
   if (isCharacter) {
     const characterDesc = [
@@ -211,6 +214,23 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
       `Approval Date: ${approvalDate}`
     );
     description = characterDesc.join('\n');
+  } else if (isSummonOrItem) {
+    const entryLabel = itemData.type === 'Summon' ? 'Summon Contract Names' : 'Item Names';
+    description = [
+      `**Name Entry Creator:** ${creatorPing}`,
+      `**${entryLabel}:** ${itemData?.name || 'N/A'}`,
+      `**Name Reviewer:** ${reviewerPing}`,
+      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
+      '',
+      `**Decision:** ${decision}`,
+      '',
+      '**Link to sheet:**',
+      `${linkVal}`,
+      '',
+      '**Dates:**',
+      `Creation Date: ${creationDate}`,
+      `Approval Date: ${approvalDate}`,
+    ].join('\n');
   } else {
     description = [
       `**Name Entry Creator:** ${creatorPing}`,
@@ -235,9 +255,13 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     ].join('\n');
   }
 
+  const embedTitle = isSummonOrItem
+    ? `${itemData.type}${itemData?.name ? `: ${itemData.name}` : ''}`
+    : (isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'));
+
   const payload = {
     embeds: [{
-      title: isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'),
+      title: embedTitle,
       description,
       color,
     }],
@@ -1316,17 +1340,17 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     </button>
                     <button
                       type="button"
-                      disabled
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
-                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon (Under Development)
+                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
                     </button>
                     <button
                       type="button"
-                      disabled
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
+                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
+                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
                     >
-                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item (Under Development)
+                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
                     </button>
                   </div>
                 )}
@@ -1474,12 +1498,18 @@ function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
 /* ============================================================================
    MODAL: StatelessSubmissionModal
    ============================================================================ */
-function StatelessSubmissionModal({ type, profile, onClose }) {
+function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpload, onAfterSubmit }) {
   const [link, setLink] = useState('');
+  const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const isCharacter = type === 'Character';
-  const submitDisabled = !link.trim() || submitting;
+  const nameLabel = type === 'Summon' ? 'Summon Contract Name' : type === 'Custom Item' ? 'Item Name' : 'Entry Name';
+  const submitDisabled = !link.trim() || (!isCharacter && !name.trim()) || submitting;
+
+  const buildData = () => isCharacter
+    ? { type: 'Character', link, name: 'OC Submission' }
+    : { type, name: name.trim(), link: link.trim() };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1487,64 +1517,43 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
 
     setSubmitting(true);
     try {
-      if (isCharacter) {
-        // Character submissions are sent to the database queue as pending items
-        await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
+      const data = buildData();
+      await submitPendingJutsu('insert', null, data, 'pending_review');
 
-        // Trigger a reviewer ping for creation
-        const sess1 = await getCurrentSession();
-        const authHdr1 = sess1?.access_token ? { Authorization: `Bearer ${sess1.access_token}` } : {};
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr1 },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: 'OC Submission',
-            itemType: 'Character',
-            submitterName: profile?.username || 'Unknown',
-          }),
-        }).catch((pingErr) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-        });
-      } else {
-        // Other types (Summon, Custom Item) remain stateless quick logs
-        const logRes = await fetch('/.netlify/functions/send-quick-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            link,
-            reviewerId: profile?.discord_id || '',
-          }),
-        });
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      await fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHdr },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: data.name,
+          itemType: isCharacter ? 'Character' : type,
+          submitterName: profile?.username || 'Unknown',
+        }),
+      }).catch((pingErr) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+      });
 
-        if (!logRes.ok) {
-          throw new Error('Quick log function failed: ' + logRes.statusText);
-        }
-
-        const sess2 = await getCurrentSession();
-        const authHdr2 = sess2?.access_token ? { Authorization: `Bearer ${sess2.access_token}` } : {};
-        const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr2 },
-          body: JSON.stringify({
-            threadId: profile?.work_thread_id || '',
-            reviewerName: profile?.username || '',
-            actionType: 'Approved',
-            itemName: `New ${type} Submission`,
-            docLink: link,
-          }),
-        });
-
-        if (!workLogRes.ok) {
-          throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
-        }
-      }
-
+      if (onAfterSubmit) onAfterSubmit();
       onClose();
     } catch (err) {
       console.error('[NARP] Failed to submit log:', err);
       alert('Submission failed: ' + (err.message || err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDirectUpload = async () => {
+    if (submitDisabled || !onDirectUpload) return;
+    setSubmitting(true);
+    try {
+      await onDirectUpload(buildData());
+      onClose();
+    } catch (err) {
+      console.error('[NARP] Direct upload failed:', err);
+      alert('Direct upload failed: ' + (err.message || err));
     } finally {
       setSubmitting(false);
     }
@@ -1556,7 +1565,7 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Icon n="PlusCir" size={18} className="text-indigo-400 shrink-0" />
-            <h2 className="font-serif font-bold text-base truncate">Log New {type}</h2>
+            <h2 className="font-serif font-bold text-base truncate">Submit {type}</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <Icon n="X" size={18} />
@@ -1564,6 +1573,19 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+          {!isCharacter && (
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">{nameLabel} (Mandatory)</label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder={type === 'Summon' ? 'e.g. Shadow Wolves' : 'e.g. Chakra Blade'}
+                className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Document Link (Mandatory)</label>
             <input
@@ -1584,12 +1606,23 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
             >
               Cancel
             </button>
+            {isAdmin && !isCharacter && onDirectUpload && (
+              <button
+                type="button"
+                onClick={handleDirectUpload}
+                disabled={submitDisabled}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Log & approve immediately without pending review"
+              >
+                {submitting ? 'Uploading...' : 'Direct Upload'}
+              </button>
+            )}
             <button
               type="submit"
               disabled={submitDisabled}
               className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? 'Submitting...' : 'Submit'}
+              {submitting ? 'Submitting...' : 'Submit for Review'}
             </button>
           </div>
         </form>
@@ -2545,6 +2578,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     { key: 'discord_jutsu_thread_id',     label: 'Jutsu Thread',         placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_battlemode_thread_id',label: 'Battlemode Thread',    placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_summon_thread_id',    label: 'Summon Thread',        placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_custom_item_thread_id',label:'Custom Item Thread',   placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
@@ -2730,18 +2765,20 @@ function MemberWorkThreadInput({ member, onSave }) {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate }) {
+function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onSetDevRole, roleOverride, onSetRoleOverride, onProfileUpdate }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
-  const activeProfile = supabaseReady ? profile : {
-    id: 'dev-user-id',
-    username: 'Dev Administrator',
-    email: 'dev@example.com',
-    avatar_url: null,
-    role: devRole,
-    work_thread_id: profile?.work_thread_id || '',
-  };
+  const activeProfile = supabaseReady
+    ? (profile ? { ...profile, role: roleOverride || profile.role } : null)
+    : {
+        id: 'dev-user-id',
+        username: 'Dev Administrator',
+        email: 'dev@example.com',
+        avatar_url: null,
+        role: devRole,
+        work_thread_id: profile?.work_thread_id || '',
+      };
 
   useEffect(() => {
     if (!open) return;
@@ -2821,12 +2858,36 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {!supabaseReady && (
-            <button onClick={onToggleDevRole}
-                    type="button"
-                    className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-t border-slate-100">
-              <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole === 'staff' ? 'Reviewer' : devRole})
-            </button>
+          {(!supabaseReady || profile?.role === 'owner') && (
+            <div className="border-t border-slate-100 p-3 bg-slate-50">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role Override {supabaseReady ? '(per tab)' : ''}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {['guest', 'user', 'staff', 'admin', 'owner'].map(r => {
+                  const active = supabaseReady ? roleOverride === r : devRole === r;
+                  return (
+                    <button key={r} type="button"
+                      onClick={() => {
+                        if (supabaseReady) onSetRoleOverride(active ? '' : r);
+                        else onSetDevRole(r);
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                        active
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
+                      }`}>
+                      {r === 'staff' ? 'reviewer' : r}
+                    </button>
+                  );
+                })}
+              </div>
+              {supabaseReady && roleOverride && (
+                <div className="text-[10px] text-amber-600 font-semibold mt-1.5">
+                  ⚠ Overriding real role ({profile?.role}) → {roleOverride}
+                </div>
+              )}
+            </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
                   type="button"
@@ -3182,6 +3243,7 @@ function PendingJutsuCard({
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
           {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
           {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Spec:</span> {display.spec.join(', ')}</div>}
+          {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
       )}
       {op === 'delete' && (
@@ -3625,14 +3687,19 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
+  const [roleOverride, setRoleOverride] = useState(() => {
+    try { return sessionStorage.getItem('narp_role_override') || ''; } catch { return ''; }
+  });
   const supabaseReady = isSupabaseConfigured();
 
-  const role    = supabaseReady ? (profile?.role || 'guest') : devRole;
+  const realRole = supabaseReady ? (profile?.role || 'guest') : devRole;
+  const role     = roleOverride || realRole;
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
+  const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [pendingHasNew, setPendingHasNew] = useState(false);
@@ -3733,6 +3800,12 @@ export default function App() {
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
+  useEffect(() => {
+    try {
+      if (roleOverride) sessionStorage.setItem('narp_role_override', roleOverride);
+      else sessionStorage.removeItem('narp_role_override');
+    } catch {}
+  }, [roleOverride]);
   useEffect(() => { LS.set(STORAGE.CART, cart); }, [cart]);
 
   useEffect(() => {
@@ -3851,13 +3924,19 @@ export default function App() {
   const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
-    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setPendingLoaded(false); return; }
+    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
-      // Staff see all submissions EXCEPT their own (those go to My Submissions only)
+
+      // Own submissions always tracked separately so staff can see them in My Submissions
+      const own = list.filter(p => p.submitted_by === profile?.id)
+        .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
+      setMyOwnSubmissions(own);
+
+      // Staff see all submissions EXCEPT their own in the Pending review tab
       const filtered = isStaff
         ? list.filter(p => p.submitted_by !== profile?.id)
-        : list.filter(p => p.submitted_by === profile?.id);
+        : [];
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
@@ -3927,22 +4006,27 @@ export default function App() {
   useEffect(() => {
     if (!supabaseReady || !profile) return;
     let channel = null;
-    let debounceTimer = null;
+    let pendingDebounce = null;
+    let catalogDebounce = null;
     try {
-      channel = subscribeToDatabaseChanges(() => {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => {
-          refreshDB();
-          // Flag badges when realtime fires and user is elsewhere
-          if (isStaff && tabRef.current !== 'pending') setPendingHasNew(true);
-          if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
-        }, 500);
+      channel = subscribeToDatabaseChanges((payload) => {
+        const table = payload?.table;
+        if (table === 'pending_jutsus') {
+          clearTimeout(pendingDebounce);
+          pendingDebounce = setTimeout(() => refreshPending(), 300);
+        } else if (table === 'jutsus' || table === 'bloodlines') {
+          clearTimeout(catalogDebounce);
+          catalogDebounce = setTimeout(() => refreshDB(), 500);
+        }
+        // pending_chats: handled per-card in PendingCard — no global refresh needed
+        if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
     } catch (err) {
       console.warn('[NARP] Failed to subscribe to database changes:', err);
     }
     return () => {
-      clearTimeout(debounceTimer);
+      clearTimeout(pendingDebounce);
+      clearTimeout(catalogDebounce);
       if (channel) {
         try {
           supabase.removeChannel(channel);
@@ -3951,7 +4035,7 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB, isStaff]);
+  }, [supabaseReady, profile, refreshDB, refreshPending, isStaff]);
 
   // 30-second polling to catch submissions missed by realtime
   useEffect(() => {
@@ -4058,6 +4142,8 @@ export default function App() {
 
   const handleApprovePending = async (id) => {
     try {
+      // Optimistic: remove immediately so the UI doesn't hang
+      setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the approval to Discord before committing it. The submitter is the
       // staff member who queued the entry; the current user is the reviewer
       // (the "2nd pair of eyes" in the double-approver workflow).
@@ -4158,20 +4244,24 @@ export default function App() {
           }
         }
 
+        const isSummonOrItem = item.data?.type === 'Summon' || item.data?.type === 'Custom Item';
+
         // DM submitter — approved
         if (item?.submitter?.discord_id) {
+          const approvedMsg = (isCharacter || isSummonOrItem)
+            ? `🎉 Your submission **${approvalItemName}** has been **approved**!`
+            : `🎉 Your submission **${approvalItemName}** has been **approved**! It's now live in the database.`;
           fetch('/.netlify/functions/discord-dm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHdr },
             body: JSON.stringify({
               discordUserId: item.submitter.discord_id,
-              message: `🎉 Your submission **${approvalItemName}** has been **approved**! It's now live in the database.`,
+              message: approvedMsg,
             }),
           }).catch(err => console.warn('[NARP] Approval DM failed:', err));
         }
-
-        if (isCharacter) {
-          await cancelPendingJutsu(id); // Deletes from the pending list directly
+        if (isCharacter || isSummonOrItem) {
+          await cancelPendingJutsu(id); // No DB table write — remove from pending only
         } else {
           await approvePendingJutsu(id); // Standard database merge RPC
         }
@@ -4184,8 +4274,38 @@ export default function App() {
     }
   };
 
+  const handleDirectSummonItemUpload = useCallback(async (data) => {
+    const entryData = { ...data, _createdAt: new Date().toISOString() };
+    const logData = await sendDiscordLog(entryData, 'Approved', profile, null, profile, null, webhookConfig);
+
+    if (profile?.work_thread_id) {
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      const mainLogUrl = logData
+        ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
+        : '';
+      await fetch('/.netlify/functions/reviewer-work-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHdr },
+        body: JSON.stringify({
+          threadId: profile.work_thread_id,
+          reviewerId: profile.discord_id,
+          reviewerName: profile.username,
+          actionType: 'Direct Upload',
+          itemName: data.name || `${data.type} Submission`,
+          docLink: data.link || 'N/A',
+          mainLogUrl,
+          myCharactersLink: '',
+          upgradesLink: '',
+        }),
+      }).catch(err => console.warn('[NARP] Direct upload work log failed:', err));
+    }
+  }, [profile, webhookConfig]);
+
   const handleCancelPending = async (id) => {
     try {
+      // Optimistic: remove immediately so the UI doesn't hang
+      setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
@@ -4278,6 +4398,11 @@ export default function App() {
       const itemName = display.name || 'Unknown Jutsu';
       const itemType = 'Jutsu';
 
+      // Optimistic: update status immediately so re-ordering happens at once
+      setPendingJutsus(prev => prev.map(p =>
+        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile } : p
+      ));
+
       await reviewPendingJutsu(id, profile.id);
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
@@ -4314,6 +4439,10 @@ export default function App() {
   const handleClaimPending = async (id) => {
     try {
       if (!profile?.id) return;
+      // Optimistic: show as claimed immediately
+      setPendingJutsus(prev => prev.map(p =>
+        p.id === id ? { ...p, assigned_to: profile.id, assignee: profile } : p
+      ));
       await claimPendingSubmission(id, profile.id);
 
       // DM the submitter to let them know their entry was claimed
@@ -4446,10 +4575,6 @@ export default function App() {
     ).sort(sortByJutsu);
   }, [db.jutsus, f, sortByJutsu]);
 
-  const myPending = useMemo(() => {
-    if (!profile?.id) return [];
-    return pendingJutsus.filter(p => p.submitted_by === profile.id);
-  }, [pendingJutsus, profile?.id]);
 
   if (loading) {
     return (
@@ -4464,7 +4589,7 @@ export default function App() {
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
-    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myPending.length, hasNew: mySubsHasNew }] : []),
+    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
   ];
 
@@ -4529,7 +4654,9 @@ export default function App() {
               profile={profile}
               supabaseReady={supabaseReady}
               devRole={devRole}
-              onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
+              onSetDevRole={setDevRole}
+              roleOverride={roleOverride}
+              onSetRoleOverride={setRoleOverride}
               onSignIn={handleSignIn}
               onDevSignIn={handleDevSignIn}
               onSignOut={handleSignOut}
@@ -4673,16 +4800,16 @@ export default function App() {
           <div className="max-w-6xl mx-auto">
             {!pendingLoaded ? (
               <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading your submissions...</div>
-            ) : myPending.length === 0 ? (
+            ) : myOwnSubmissions.length === 0 ? (
               <div className="text-center py-16">
                 <Icon n="CheckCir" size={40} className="text-emerald-300 mx-auto mb-3" />
                 <p className="text-slate-500 font-semibold">You have no pending submissions</p>
               </div>
             ) : (
               <>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myPending.length} Submissions</div>
+                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myOwnSubmissions.length} Submissions</div>
                 <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
-                  {myPending.map(p => {
+                  {myOwnSubmissions.map(p => {
                     const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
                     return (
                       <PendingJutsuCard
@@ -4996,6 +5123,9 @@ export default function App() {
           type={statelessType}
           profile={profile}
           onClose={() => setStatelessType(null)}
+          isAdmin={isAdmin}
+          onDirectUpload={handleDirectSummonItemUpload}
+          onAfterSubmit={refreshPending}
         />
       )}
 
