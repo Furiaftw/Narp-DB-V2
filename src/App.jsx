@@ -2740,18 +2740,20 @@ function MemberWorkThreadInput({ member, onSave }) {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate }) {
+function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onSetDevRole, roleOverride, onSetRoleOverride, onProfileUpdate }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
-  const activeProfile = supabaseReady ? profile : {
-    id: 'dev-user-id',
-    username: 'Dev Administrator',
-    email: 'dev@example.com',
-    avatar_url: null,
-    role: devRole,
-    work_thread_id: profile?.work_thread_id || '',
-  };
+  const activeProfile = supabaseReady
+    ? (profile ? { ...profile, role: roleOverride || profile.role } : null)
+    : {
+        id: 'dev-user-id',
+        username: 'Dev Administrator',
+        email: 'dev@example.com',
+        avatar_url: null,
+        role: devRole,
+        work_thread_id: profile?.work_thread_id || '',
+      };
 
   useEffect(() => {
     if (!open) return;
@@ -2831,12 +2833,36 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {!supabaseReady && (
-            <button onClick={onToggleDevRole}
-                    type="button"
-                    className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-t border-slate-100">
-              <Icon n="Key" size={14} className="text-indigo-500"/> Toggle Dev Role (is: {devRole === 'staff' ? 'Reviewer' : devRole})
-            </button>
+          {(!supabaseReady || profile?.role === 'owner') && (
+            <div className="border-t border-slate-100 p-3 bg-slate-50">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role Override {supabaseReady ? '(per tab)' : ''}
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {['guest', 'user', 'staff', 'admin', 'owner'].map(r => {
+                  const active = supabaseReady ? roleOverride === r : devRole === r;
+                  return (
+                    <button key={r} type="button"
+                      onClick={() => {
+                        if (supabaseReady) onSetRoleOverride(active ? '' : r);
+                        else onSetDevRole(r);
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                        active
+                          ? 'bg-indigo-600 text-white border-indigo-600'
+                          : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
+                      }`}>
+                      {r === 'staff' ? 'reviewer' : r}
+                    </button>
+                  );
+                })}
+              </div>
+              {supabaseReady && roleOverride && (
+                <div className="text-[10px] text-amber-600 font-semibold mt-1.5">
+                  ⚠ Overriding real role ({profile?.role}) → {roleOverride}
+                </div>
+              )}
+            </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
                   type="button"
@@ -3636,9 +3662,13 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
+  const [roleOverride, setRoleOverride] = useState(() => {
+    try { return sessionStorage.getItem('narp_role_override') || ''; } catch { return ''; }
+  });
   const supabaseReady = isSupabaseConfigured();
 
-  const role    = supabaseReady ? (profile?.role || 'guest') : devRole;
+  const realRole = supabaseReady ? (profile?.role || 'guest') : devRole;
+  const role     = roleOverride || realRole;
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -3744,6 +3774,12 @@ export default function App() {
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
+  useEffect(() => {
+    try {
+      if (roleOverride) sessionStorage.setItem('narp_role_override', roleOverride);
+      else sessionStorage.removeItem('narp_role_override');
+    } catch {}
+  }, [roleOverride]);
   useEffect(() => { LS.set(STORAGE.CART, cart); }, [cart]);
 
   useEffect(() => {
@@ -4544,7 +4580,9 @@ export default function App() {
               profile={profile}
               supabaseReady={supabaseReady}
               devRole={devRole}
-              onToggleDevRole={() => setDevRole(r => r === 'admin' ? 'user' : 'admin')}
+              onSetDevRole={setDevRole}
+              roleOverride={roleOverride}
+              onSetRoleOverride={setRoleOverride}
               onSignIn={handleSignIn}
               onDevSignIn={handleDevSignIn}
               onSignOut={handleSignOut}
