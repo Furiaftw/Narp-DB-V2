@@ -3980,8 +3980,6 @@ export default function App() {
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
           refreshDB();
-          // Flag badges when realtime fires and user is elsewhere
-          if (isStaff && tabRef.current !== 'pending') setPendingHasNew(true);
           if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
         }, 500);
       });
