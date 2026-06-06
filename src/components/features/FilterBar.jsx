@@ -104,15 +104,15 @@ export function FilterBar({ tab, f, setF, activeFilterCount, clearF, isAdmin, on
                   </button>
                   <button type="button" disabled
                           className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60">
-                    <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission (Under Development)
+                    <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission — Coming Soon
                   </button>
                   <button type="button" disabled
                           className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60">
-                    <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon (Under Development)
+                    <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon — Coming Soon
                   </button>
                   <button type="button" disabled
                           className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60">
-                    <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item (Under Development)
+                    <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item — Coming Soon
                   </button>
                 </div>
               )}

@@ -55,11 +55,11 @@ Character Doc: [Link your approved character's google doc here]`;
       return;
     }
     if (!myLink.includes('1473338902264676424')) {
-      setError('Invalid My-Characters Link. Must contain 1473338902264676424.');
+      setError('Invalid link — paste a link from the #my-characters forum on the server.');
       return;
     }
     if (!upgLink.includes('1473338902264676425')) {
-      setError('Invalid Character-Upgrades Link. Must contain 1473338902264676425.');
+      setError('Invalid link — paste a link from the #character-upgrades forum on the server.');
       return;
     }
 
@@ -80,7 +80,7 @@ Character Doc: [Link your approved character's google doc here]`;
 
   const handleNudge = async () => {
     if (!pending?.data?.second_reviewer_discord_id) {
-      alert('Reviewer Discord ID is not available. Try activating the final step again.');
+      alert('Reviewer info couldn\'t be found. Please refresh the page and try again.');
       return;
     }
     setNudging(true);
@@ -100,11 +100,12 @@ Character Doc: [Link your approved character's google doc here]`;
       if (res.ok) {
         setNudged(true);
       } else {
-        const errText = await res.text();
-        alert('Nudge failed: ' + errText);
+        await res.text();
+        alert('Couldn\'t send the nudge. Please try again in a moment.');
       }
     } catch (err) {
-      alert('Nudge error: ' + err.message);
+      console.error('[NARP] Nudge error:', err);
+      alert('Couldn\'t send the nudge. Please try again in a moment.');
     } finally {
       setNudging(false);
     }
@@ -132,7 +133,7 @@ Character Doc: [Link your approved character's google doc here]`;
             ◈ character-upgrades — your character upgrades log area
           </a>
         </div>
-        <p className="mt-2">Use the template below for both threads. Once done, your character will be added to the rosters!</p>
+        <p className="mt-2">Use the template below for both threads. Once you submit both links, you're all set!</p>
       </div>
 
       <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
@@ -460,7 +461,7 @@ export function PendingJutsuCard({
         setChatMessages(freshMsgs);
       }
     } catch (err) {
-      alert('Error activating final step: ' + err.message);
+      alert('Couldn\'t start the OC approval flow. Refresh the page and try again.');
     }
   };
 
@@ -527,7 +528,7 @@ export function PendingJutsuCard({
           {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
           {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
-          {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Spec:</span> {display.spec.join(', ')}</div>}
+          {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Specialization:</span> {display.spec.join(', ')}</div>}
           {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
       )}
@@ -550,7 +551,7 @@ export function PendingJutsuCard({
               {['admin', 'owner'].includes(currentUser.role) && (
                 <button onClick={() => onApprove(pending.id)}
                         className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Approve Direct
+                  <Icon n="Check" size={14}/> Admin Approve
                 </button>
               )}
             </>
@@ -579,7 +580,7 @@ export function PendingJutsuCard({
         {hasStaffPrivileges && (
           <button onClick={() => onCancel(pending.id)}
                   className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-            <Icon n="X" size={14}/> Cancel
+            <Icon n="X" size={14}/> Cancel Submission
           </button>
         )}
         {!isClaimed && hasStaffPrivileges && (
@@ -589,7 +590,7 @@ export function PendingJutsuCard({
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
             </svg>
-            Claim Review
+            Assign to Me
           </button>
         )}
         {(isReviewerOrAdmin || isMine) && (
@@ -680,7 +681,7 @@ export function PendingJutsuCard({
                         <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
                         <path d="M7 11V7a5 5 0 0 1 10 0v4" />
                       </svg>
-                      Staff Sync (Private)
+                      Reviewer Notes (Private)
                     </button>
                     )}
                   </div>
@@ -690,7 +691,7 @@ export function PendingJutsuCard({
                 {pending?.data?.type === 'Character' && isStaff && currentUserId !== pending.submitted_by && !finalStepActivated && (
                   <div className="p-4 bg-amber-50 border-b border-amber-200 flex flex-col gap-2 items-center text-center shrink-0">
                     <p className="text-xs text-amber-800 font-semibold">
-                      You are the reviewer. Activate the final step for this Character submission to provide thread link boxes and template.
+                      Activate the final approval step to send the player their forum thread instructions and template.
                     </p>
                     <button
                       type="button"
@@ -701,7 +702,7 @@ export function PendingJutsuCard({
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      Activate Final Step
+                      Send Thread Instructions
                     </button>
                   </div>
                 )}
@@ -713,11 +714,9 @@ export function PendingJutsuCard({
                       <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                       </svg>
-                      <p className="text-sm font-semibold">
-                        {activeTab === 'staff' ? 'No messages in this submission yet.' : 'No messages here yet.'}
-                      </p>
+                      <p className="text-sm font-semibold">No messages yet.</p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {activeTab === 'staff' ? 'Both public player discussion and private staff sync comments will appear here.' : 'Discuss the submission with the player.'}
+                        {activeTab === 'staff' ? 'All messages — including private reviewer notes — appear here.' : 'Discuss the submission with the player.'}
                       </p>
                     </div>
                   ) : (

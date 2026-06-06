@@ -24,7 +24,7 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
     ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
-    j.limited &&  showAskStaff     && { l: 'Ask Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
+    j.limited &&  showAskStaff     && { l: 'Ask a Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
     j.limited && !showAskStaff     && { l: 'Limited',  ic: 'Alert', c: 'bg-rose-100 text-rose-800 border-rose-200' },
     j.limited && j.slots           && { l: remaining > 0 ? `${remaining} open` : 'Full',
                                         c: remaining > 0 ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-red-100 text-red-800 border-red-200' },
@@ -60,7 +60,7 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
         </div>
         <div className="flex items-center shrink-0 pl-4">
           {j.limited && showAskStaff
-            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask Reviewer</span>
+            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask a Reviewer</span>
             : (j.limited && <span className="text-[10px] font-bold uppercase text-red-500 bg-red-50 px-1.5 py-0.5 rounded hidden sm:inline mr-3">Limited</span>)}
           <Icon n="Down" size={18} className="text-slate-300"/>
         </div>
@@ -208,7 +208,7 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
                 <Icon n="ExtLink" size={16}/> Doc
               </a>
             ) : (
-              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Doc</span>
+              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Link</span>
             )}
             
             {j.limited && (

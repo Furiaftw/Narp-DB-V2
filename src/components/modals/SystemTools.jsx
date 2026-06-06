@@ -315,11 +315,11 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Refresh" size={20} className="text-indigo-500" /> Synchronization
               </h3>
-              <p className="text-xs text-slate-500 mb-6">Re-fetch the latest catalog and pending list from the database. Use after another admin made changes you want to see locally.</p>
+              <p className="text-xs text-slate-500 mb-6">Pull the latest data from the server. Use this if another admin has made changes you haven't seen yet.</p>
               <button onClick={handleSync} disabled={refreshing}
                       className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-indigo-700 shadow-md disabled:opacity-50">
                 <Icon n="Refresh" size={16} className={refreshing ? 'animate-spin' : ''}/>
-                {refreshing ? 'Syncing...' : 'Sync data'}
+                {refreshing ? 'Syncing...' : 'Refresh Data'}
               </button>
             </div>
 
@@ -331,7 +331,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <p className="text-xs text-slate-500 mb-6">View the history of role changes — who promoted or demoted whom, and when.</p>
               <button onClick={onOpenAuditLog}
                       className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
-                <Icon n="Eye" size={16}/> View log
+                <Icon n="Eye" size={16}/> View Log
               </button>
             </div>
 
@@ -340,7 +340,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Book" size={20} className="text-purple-500" /> Bloodlines
               </h3>
-              <p className="text-xs text-slate-500 mb-6">Add, edit, and remove bloodlines. These populate the bloodline filter dropdown but no longer have a public browse tab.</p>
+              <p className="text-xs text-slate-500 mb-6">Add, edit, or remove bloodlines from the database.</p>
               <button onClick={onManageBL}
                       className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-purple-700">
                 <Icon n="Edit" size={16}/> Manage Bloodlines ({(db.bloodlines || []).length})
@@ -358,7 +358,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                         className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
                   <Icon n="Download" size={16}/> JSON
                 </button>
-                <button onClick={() => setMsg('CSV export is currently under construction.')}
+                <button onClick={() => setMsg('CSV export coming soon.')}
                         className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-emerald-700">
                   <Icon n="Download" size={16}/> CSV
                 </button>
@@ -370,7 +370,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Tag" size={20} className="text-indigo-500" /> Manage Specializations
               </h3>
-              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the global Specializations list used when creating new Jutsus.</p>
+              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the Specializations list.</p>
               <div className="flex flex-wrap gap-2 mb-4">
                 {(db.specializations || []).map(s => (
                   <span key={s} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-2 shadow-sm">

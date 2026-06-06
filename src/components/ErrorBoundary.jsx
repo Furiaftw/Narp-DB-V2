@@ -19,7 +19,7 @@ export class ErrorBoundary extends Component {
             <div className="text-4xl mb-4">⚠️</div>
             <h1 className="text-xl font-bold text-white mb-2">Something went wrong</h1>
             <p className="text-slate-400 text-sm mb-6">
-              The app encountered an unexpected error. Reloading usually fixes it.
+              The app hit an unexpected error. Reloading the page will fix it.
             </p>
             <p className="text-slate-500 text-xs font-mono bg-slate-900 rounded-lg p-3 mb-6 text-left break-all">
               {this.state.error?.message || String(this.state.error)}
@@ -28,7 +28,7 @@ export class ErrorBoundary extends Component {
               onClick={() => window.location.reload()}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 py-2.5 rounded-lg transition-colors"
             >
-              Reload page
+              Reload Page
             </button>
           </div>
         </div>
