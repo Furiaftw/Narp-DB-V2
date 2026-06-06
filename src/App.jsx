@@ -4704,7 +4704,7 @@ export default function App() {
         {/* HEADER */}
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-            <Icon n="Book" size={18} className="text-indigo-400" />
+            <Icon n="Book" size={18} className="text-red-500" />
             <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
@@ -5163,7 +5163,7 @@ export default function App() {
                 <p className="text-[10px] font-bold uppercase text-slate-400">Credits</p>
                 <p className="font-semibold">Hexagon &amp; A Road Sign</p>
               </div>
-              {!appInstalled && (
+              {!appInstalled && (installPrompt || /iphone|ipad|ipod/i.test(navigator.userAgent)) && (
                 <div className="border-t pt-4">
                   <p className="text-[10px] font-bold uppercase text-slate-400 mb-3">Install App</p>
                   {installPrompt ? (
@@ -5176,13 +5176,13 @@ export default function App() {
                       className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
                       <Icon n="Download" size={14} /> Install NARP Database
                     </button>
-                  ) : /iphone|ipad|ipod/i.test(navigator.userAgent) ? (
+                  ) : (
                     <button
                       onClick={() => { setModals(m => ({ ...m, credits: false, iosInstall: true })); }}
                       className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
                       <Icon n="Download" size={14} /> Install on iPhone / iPad
                     </button>
-                  ) : null}
+                  )}
                 </div>
               )}
             </div>
