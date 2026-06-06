@@ -1321,7 +1321,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
             {isAdmin && (
               <div className="relative shrink-0" ref={addDdRef}>
                 <button onClick={() => setAddDdOpen(!addDdOpen)}
-                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg">
+                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-slate-800 text-white hover:bg-slate-700 shadow-lg">
                   <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span> <Icon n="Down" size={12} className="text-white opacity-80" />
                 </button>
                 {addDdOpen && (
@@ -2526,19 +2526,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Sync */}
-            <div className="bg-slate-50 rounded-2xl border p-6">
-              <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Refresh" size={20} className="text-indigo-500" /> Synchronization
-              </h3>
-              <p className="text-xs text-slate-500 mb-6">Re-fetch the latest catalog and pending list from the database. Use after another admin made changes you want to see locally.</p>
-              <button onClick={handleSync} disabled={refreshing}
-                      className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-indigo-700 shadow-md disabled:opacity-50">
-                <Icon n="Refresh" size={16} className={refreshing ? 'animate-spin' : ''}/>
-                {refreshing ? 'Syncing...' : 'Sync data'}
-              </button>
-            </div>
-
             {/* Audit Log */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
@@ -2554,11 +2541,11 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
             {/* Manage Bloodlines */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Book" size={20} className="text-purple-500" /> Bloodlines
+                <Icon n="Book" size={20} className="text-red-600" /> Bloodlines
               </h3>
               <p className="text-xs text-slate-500 mb-6">Add, edit, and remove bloodlines. These populate the bloodline filter dropdown but no longer have a public browse tab.</p>
               <button onClick={onManageBL}
-                      className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-purple-700">
+                      className="w-full bg-red-700 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-red-800">
                 <Icon n="Edit" size={16}/> Manage Bloodlines ({(db.bloodlines || []).length})
               </button>
             </div>
@@ -2591,13 +2578,13 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {[
-                    { key: 'jutsu_paused',      label: 'Jutsu / Battlemode', color: 'indigo' },
-                    { key: 'custom_item_paused', label: 'Custom Item',        color: 'purple' },
-                    { key: 'summon_paused',      label: 'Summon',             color: 'amber'  },
+                    { key: 'jutsu_paused',      label: 'Jutsu / Battlemode', color: 'slate' },
+                    { key: 'custom_item_paused', label: 'Custom Item',        color: 'red'   },
+                    { key: 'summon_paused',      label: 'Summon',             color: 'amber' },
                   ].map(({ key, label, color }) => {
                     const paused  = !!(submissionControls?.[key]);
                     const pending = !!togglePending[key];
-                    const trackOn  = { indigo: 'bg-indigo-600', purple: 'bg-purple-600', amber: 'bg-amber-500' }[color];
+                    const trackOn  = { slate: 'bg-slate-700', red: 'bg-red-700', amber: 'bg-amber-500' }[color];
                     return (
                       <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
                         <div>
@@ -2610,7 +2597,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                           onClick={() => handleToggle(key)}
                           disabled={pending}
                           title={paused ? 'Reopen submissions' : 'Pause submissions'}
-                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : `${trackOn} focus:ring-indigo-300`} disabled:opacity-50 shrink-0`}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : `${trackOn} focus:ring-slate-400`} disabled:opacity-50 shrink-0`}
                         >
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
                         </button>
@@ -3027,7 +3014,8 @@ function PendingJutsuCard({
   onClaim,
   isMySubmissionsView = false,
   currentUserProfile = null,
-  refreshPending = null
+  refreshPending = null,
+  isApproving = false,
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -3276,7 +3264,7 @@ function PendingJutsuCard({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3">
+    <div className={`bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3 transition-all duration-500 ${isApproving ? 'opacity-40 scale-95 pointer-events-none' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -3339,92 +3327,107 @@ function PendingJutsuCard({
       )}
 
       <div className="flex gap-2 mt-1 flex-wrap">
-        {pending.status === 'pending_review' ? (
-          hasStaffPrivileges ? (
-            <>
-              {/* Review (Step 1): admins always see it; non-admin staff only after claiming */}
-              {(['admin', 'owner'].includes(currentUser.role) || isClaimed) && (
-                <button onClick={() => onReview(pending.id)}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Review (Step 1)
-                </button>
-              )}
-              {['admin', 'owner'].includes(currentUser.role) && (
+        {isClaimed ? (
+          <>
+            {/* ── All action buttons — only visible once the entry is claimed ── */}
+            {pending.status === 'pending_review' ? (
+              hasStaffPrivileges ? (
+                <>
+                  <button onClick={() => onReview(pending.id)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                    <Icon n="Check" size={14}/> Review (Step 1)
+                  </button>
+                  {['admin', 'owner'].includes(currentUser.role) && (
+                    <button onClick={() => onApprove(pending.id)}
+                            disabled={isApproving}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                      {isApproving
+                        ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                        : <><Icon n="Check" size={14}/> Admin Approve</>}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {isMine && !hasStaffPrivileges && (
+                    <button onClick={() => onSubmitterCancel(pending.id)}
+                            className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                      <Icon n="X" size={14}/> Cancel Submission
+                    </button>
+                  )}
+                  {isStrictSubmitter && (
+                    <div className="text-[10px] text-slate-400 italic self-center">
+                      Another Reviewer must perform Review (Step 1)
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
                 <button onClick={() => onApprove(pending.id)}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Admin Approve
+                        disabled={isApproving}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                  {isApproving
+                    ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                    : <><Icon n="Check" size={14}/> Approve</>}
                 </button>
-              )}
-            </>
-          ) : (
-            <>
-              {!isClaimed && isMine && !hasStaffPrivileges && (
-                <button onClick={() => onSubmitterCancel(pending.id)}
-                        className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="X" size={14}/> Cancel Submission
-                </button>
-              )}
-              {isStrictSubmitter && (
-                <div className="text-[10px] text-slate-400 italic self-center">
-                  Another Reviewer must perform Review (Step 1)
-                </div>
-              )}
-            </>
-          )
+              )
+            )}
+            {onEdit && (!isStrictSubmitter || !isClaimed) && (
+              <button onClick={() => onEdit(pending)}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                      title="Edit pending payload">
+                <Icon n="Edit" size={14}/> Edit
+              </button>
+            )}
+            {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || hasSubmitterChatted) && (
+              <button onClick={() => onCancel(pending.id)}
+                      className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
+                <Icon n="X" size={14}/> Cancel Submission
+              </button>
+            )}
+            {(isReviewerOrAdmin || isMine) && (
+              <button
+                onClick={() => setIsChatOpen(true)}
+                className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                title="Open Chat"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Review Chat
+              </button>
+            )}
+            {isStrictSubmitter && pending.status === 'pending_approval' && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                Another Reviewer must approve
+              </div>
+            )}
+            {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                You reviewed this. Another Reviewer must approve.
+              </div>
+            )}
+          </>
         ) : (
-          hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-            <button onClick={() => onApprove(pending.id)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-              <Icon n="Check" size={14}/> Approve
-            </button>
-          )
-        )}
-        {/* Edit: staff can always edit others' submissions; submitter can only edit their own while unclaimed */}
-        {onEdit && (!isStrictSubmitter || !isClaimed) && (
-          <button onClick={() => onEdit(pending)}
-                  className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Edit pending payload">
-            <Icon n="Edit" size={14}/> Edit
-          </button>
-        )}
-        {/* Cancel: admins always; non-admin staff only after claim + submitter has chatted */}
-        {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || (isClaimed && hasSubmitterChatted)) && (
-          <button onClick={() => onCancel(pending.id)}
-                  className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-            <Icon n="X" size={14}/> Cancel Submission
-          </button>
-        )}
-        {!isClaimed && hasStaffPrivileges && (
-          <button onClick={() => onClaim(pending.id)}
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Assign to Me">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-            </svg>
-            Assign to Me
-          </button>
-        )}
-        {(isReviewerOrAdmin || isMine) && (
-          <button
-            onClick={() => setIsChatOpen(true)}
-            className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-            title="Open Chat"
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            Review Chat
-          </button>
-        )}
-        {isStrictSubmitter && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            Another Reviewer must approve
-          </div>
-        )}
-        {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            You reviewed this. Another Reviewer must approve.
-          </div>
+          <>
+            {/* ── Unclaimed: only show "Assign to Me" for staff, and info text ── */}
+            {hasStaffPrivileges && (
+              <button onClick={() => onClaim(pending.id)}
+                      className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                      title="Assign to Me">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                </svg>
+                Assign to Me
+              </button>
+            )}
+            {isStrictSubmitter && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                Waiting for a Reviewer to claim this entry.
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -3787,6 +3790,7 @@ export default function App() {
   const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [approvingIds, setApprovingIds] = useState(new Set());
   const [pendingHasNew, setPendingHasNew] = useState(false);
   const [mySubsHasNew, setMySubsHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
@@ -4227,6 +4231,8 @@ export default function App() {
   };
 
   const handleApprovePending = async (id) => {
+    if (approvingIds.has(id)) return;
+    setApprovingIds(prev => new Set([...prev, id]));
     try {
       // Optimistic: remove immediately so the UI doesn't hang
       setPendingJutsus(prev => prev.filter(p => p.id !== id));
@@ -4357,6 +4363,8 @@ export default function App() {
       await refreshDB();
     } catch (e) {
       alert('Approve failed: ' + e.message);
+    } finally {
+      setApprovingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   };
 
@@ -4698,30 +4706,18 @@ export default function App() {
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
             <Icon n="Book" size={18} className="text-indigo-400" />
             <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
-            {!appInstalled && (
-              installPrompt ? (
-                <button
-                  onClick={async () => {
-                    installPrompt.prompt();
-                    const { outcome } = await installPrompt.userChoice;
-                    if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); }
-                  }}
-                  title="Install App"
-                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
-                  <Icon n="Download" size={11} /> Install
-                </button>
-              ) : /iphone|ipad|ipod/i.test(navigator.userAgent) ? (
-                <button
-                  onClick={() => setModals(m => ({ ...m, iosInstall: true }))}
-                  title="Install App"
-                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
-                  <Icon n="Download" size={11} /> Install
-                </button>
-              ) : null
-            )}
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
+              {isStaff && (
+                <button
+                  onClick={refreshDB}
+                  disabled={refreshing}
+                  title="Refresh Data"
+                  className="p-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0">
+                  <Icon n="Refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
+                </button>
+              )}
               {isAdmin && (
                 <button onClick={() => setModals(m => ({ ...m, system: true }))}
                         className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
@@ -4731,8 +4727,8 @@ export default function App() {
               )}
               {tab === 'jutsus' && (
                 <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
-                  <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
-                  <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
+                  <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
+                  <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-slate-700 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
                 </div>
               )}
             </div>
@@ -4874,7 +4870,8 @@ export default function App() {
                         onClaim={handleClaimPending}
                         isMySubmissionsView={false}
                         currentUserProfile={profile}
-                        refreshPending={refreshPending} />
+                        refreshPending={refreshPending}
+                        isApproving={approvingIds.has(pending.id)} />
                     );
                   })}
                 </div>
@@ -4915,7 +4912,8 @@ export default function App() {
                         onClaim={handleClaimPending}
                         isMySubmissionsView={true}
                         currentUserProfile={profile}
-                        refreshPending={refreshPending} />
+                        refreshPending={refreshPending}
+                        isApproving={approvingIds.has(pending.id)} />
                     );
                   })}
                 </div>
@@ -5165,6 +5163,28 @@ export default function App() {
                 <p className="text-[10px] font-bold uppercase text-slate-400">Credits</p>
                 <p className="font-semibold">Hexagon &amp; A Road Sign</p>
               </div>
+              {!appInstalled && (
+                <div className="border-t pt-4">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-3">Install App</p>
+                  {installPrompt ? (
+                    <button
+                      onClick={async () => {
+                        installPrompt.prompt();
+                        const { outcome } = await installPrompt.userChoice;
+                        if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); setModals(m => ({ ...m, credits: false })); }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+                      <Icon n="Download" size={14} /> Install NARP Database
+                    </button>
+                  ) : /iphone|ipad|ipod/i.test(navigator.userAgent) ? (
+                    <button
+                      onClick={() => { setModals(m => ({ ...m, credits: false, iosInstall: true })); }}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+                      <Icon n="Download" size={14} /> Install on iPhone / iPad
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           </div>
         </div>
