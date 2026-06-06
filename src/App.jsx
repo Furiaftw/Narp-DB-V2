@@ -1528,38 +1528,27 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
           console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
         });
       } else {
-        // Other types (Summon, Custom Item) remain stateless quick logs
-        const logRes = await fetch('/.netlify/functions/send-quick-log', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type,
-            link,
-            reviewerId: profile?.discord_id || '',
-          }),
-        });
-
-        if (!logRes.ok) {
-          throw new Error('Quick log function failed: ' + logRes.statusText);
-        }
+        // Summon and Custom Item go through the pending review queue (no DB write on approval)
+        await submitPendingJutsu('insert', null, {
+          type,
+          name: `${type} Submission`,
+          link: link.trim(),
+        }, 'pending_review');
 
         const sess2 = await getCurrentSession();
         const authHdr2 = sess2?.access_token ? { Authorization: `Bearer ${sess2.access_token}` } : {};
-        const workLogRes = await fetch('/.netlify/functions/reviewer-work-log', {
+        await fetch('/.netlify/functions/reviewer-ping', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...authHdr2 },
           body: JSON.stringify({
-            threadId: profile?.work_thread_id || '',
-            reviewerName: profile?.username || '',
-            actionType: 'Approved',
-            itemName: `New ${type} Submission`,
-            docLink: link,
+            triggerType: 'creation',
+            itemName: `${type} Submission`,
+            itemType: type,
+            submitterName: profile?.username || 'Unknown',
           }),
+        }).catch((pingErr) => {
+          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
         });
-
-        if (!workLogRes.ok) {
-          throw new Error('Reviewer work log function failed: ' + workLogRes.statusText);
-        }
       }
 
       onClose();
@@ -1577,7 +1566,7 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Icon n="PlusCir" size={18} className="text-indigo-400 shrink-0" />
-            <h2 className="font-serif font-bold text-base truncate">Log New {type}</h2>
+            <h2 className="font-serif font-bold text-base truncate">Submit {type}</h2>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
             <Icon n="X" size={18} />
