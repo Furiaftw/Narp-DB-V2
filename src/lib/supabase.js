@@ -223,8 +223,10 @@ export const saveWebhookConfig = async (key, value) => {
   const session = await getCurrentSession();
   const { error } = await supabase
     .from('webhook_config')
-    .update({ config_value: value, updated_at: new Date().toISOString(), updated_by: session?.user?.id || null })
-    .eq('config_key', key);
+    .upsert(
+      { config_key: key, config_value: value, updated_at: new Date().toISOString(), updated_by: session?.user?.id || null },
+      { onConflict: 'config_key' }
+    );
   if (error) throw error;
 };
 
