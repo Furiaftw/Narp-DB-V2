@@ -70,7 +70,7 @@ export default async (req) => {
 
     const color = 3066993;
 
-    let description = `**Entry Name:** ${actionType}\n**Document Link:** ${docLink}`;
+    let description = `**Entry Name:** ${itemName}\n**Document Link:** ${docLink}`;
 
     if (myCharactersLink) {
       description += `\n**My-Characters Thread:** [My-Characters Thread](${myCharactersLink})`;

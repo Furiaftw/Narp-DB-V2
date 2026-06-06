@@ -215,19 +215,20 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     );
     description = characterDesc.join('\n');
   } else if (isSummonOrItem) {
+    const entryLabel = itemData.type === 'Summon' ? 'Summon Contract Names' : 'Item Names';
     description = [
-      `**Entry Creator:** ${creatorPing}`,
-      `**Reviewer:** ${reviewerPing}`,
-      `**2nd Pair of Eyes:** ${secondEyes}`,
+      `**Name Entry Creator:** ${creatorPing}`,
+      `**${entryLabel}:** ${itemData?.name || 'N/A'}`,
+      `**Name Reviewer:** ${reviewerPing}`,
+      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
       '',
       `**Decision:** ${decision}`,
       '',
-      `**Type:** ${itemData.type}`,
-      `**Link to sheet:**`,
+      '**Link to sheet:**',
       `${linkVal}`,
       '',
       '**Dates:**',
-      `Submission Date: ${creationDate}`,
+      `Creation Date: ${creationDate}`,
       `Approval Date: ${approvalDate}`,
     ].join('\n');
   } else {
@@ -254,7 +255,9 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     ].join('\n');
   }
 
-  const embedTitle = isSummonOrItem ? itemData.type : (isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'));
+  const embedTitle = isSummonOrItem
+    ? `${itemData.type}${itemData?.name ? `: ${itemData.name}` : ''}`
+    : (isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'));
 
   const payload = {
     embeds: [{
@@ -1495,12 +1498,18 @@ function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
 /* ============================================================================
    MODAL: StatelessSubmissionModal
    ============================================================================ */
-function StatelessSubmissionModal({ type, profile, onClose }) {
+function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpload }) {
   const [link, setLink] = useState('');
+  const [name, setName] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   const isCharacter = type === 'Character';
-  const submitDisabled = !link.trim() || submitting;
+  const nameLabel = type === 'Summon' ? 'Summon Contract Name' : type === 'Custom Item' ? 'Item Name' : 'Entry Name';
+  const submitDisabled = !link.trim() || (!isCharacter && !name.trim()) || submitting;
+
+  const buildData = () => isCharacter
+    ? { type: 'Character', link, name: 'OC Submission' }
+    : { type, name: name.trim(), link: link.trim() };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -1508,53 +1517,42 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
 
     setSubmitting(true);
     try {
-      if (isCharacter) {
-        // Character submissions are sent to the database queue as pending items
-        await submitPendingJutsu('insert', null, { type: 'Character', link: link, name: 'OC Submission' }, 'pending_review');
+      const data = buildData();
+      await submitPendingJutsu('insert', null, data, 'pending_review');
 
-        // Trigger a reviewer ping for creation
-        const sess1 = await getCurrentSession();
-        const authHdr1 = sess1?.access_token ? { Authorization: `Bearer ${sess1.access_token}` } : {};
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr1 },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: 'OC Submission',
-            itemType: 'Character',
-            submitterName: profile?.username || 'Unknown',
-          }),
-        }).catch((pingErr) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-        });
-      } else {
-        // Summon and Custom Item go through the pending review queue (no DB write on approval)
-        await submitPendingJutsu('insert', null, {
-          type,
-          name: `${type} Submission`,
-          link: link.trim(),
-        }, 'pending_review');
-
-        const sess2 = await getCurrentSession();
-        const authHdr2 = sess2?.access_token ? { Authorization: `Bearer ${sess2.access_token}` } : {};
-        await fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr2 },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: `${type} Submission`,
-            itemType: type,
-            submitterName: profile?.username || 'Unknown',
-          }),
-        }).catch((pingErr) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-        });
-      }
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      await fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHdr },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: data.name,
+          itemType: isCharacter ? 'Character' : type,
+          submitterName: profile?.username || 'Unknown',
+        }),
+      }).catch((pingErr) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+      });
 
       onClose();
     } catch (err) {
       console.error('[NARP] Failed to submit log:', err);
       alert('Submission failed: ' + (err.message || err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDirectUpload = async () => {
+    if (submitDisabled || !onDirectUpload) return;
+    setSubmitting(true);
+    try {
+      await onDirectUpload(buildData());
+      onClose();
+    } catch (err) {
+      console.error('[NARP] Direct upload failed:', err);
+      alert('Direct upload failed: ' + (err.message || err));
     } finally {
       setSubmitting(false);
     }
@@ -1574,6 +1572,19 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4">
+          {!isCharacter && (
+            <div>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">{nameLabel} (Mandatory)</label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder={type === 'Summon' ? 'e.g. Shadow Wolves' : 'e.g. Chakra Blade'}
+                className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+          )}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Document Link (Mandatory)</label>
             <input
@@ -1594,12 +1605,23 @@ function StatelessSubmissionModal({ type, profile, onClose }) {
             >
               Cancel
             </button>
+            {isAdmin && !isCharacter && onDirectUpload && (
+              <button
+                type="button"
+                onClick={handleDirectUpload}
+                disabled={submitDisabled}
+                className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Log & approve immediately without pending review"
+              >
+                {submitting ? 'Uploading...' : 'Direct Upload'}
+              </button>
+            )}
             <button
               type="submit"
               disabled={submitDisabled}
               className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {submitting ? 'Submitting...' : 'Submit'}
+              {submitting ? 'Submitting...' : 'Submit for Review'}
             </button>
           </div>
         </form>
@@ -2555,6 +2577,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     { key: 'discord_jutsu_thread_id',     label: 'Jutsu Thread',         placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_battlemode_thread_id',label: 'Battlemode Thread',    placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_summon_thread_id',    label: 'Summon Thread',        placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_custom_item_thread_id',label:'Custom Item Thread',   placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
@@ -4233,6 +4257,34 @@ export default function App() {
     }
   };
 
+  const handleDirectSummonItemUpload = useCallback(async (data) => {
+    const entryData = { ...data, _createdAt: new Date().toISOString() };
+    const logData = await sendDiscordLog(entryData, 'Approved', profile, null, profile, null, webhookConfig);
+
+    if (profile?.work_thread_id) {
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      const mainLogUrl = logData
+        ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
+        : '';
+      await fetch('/.netlify/functions/reviewer-work-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHdr },
+        body: JSON.stringify({
+          threadId: profile.work_thread_id,
+          reviewerId: profile.discord_id,
+          reviewerName: profile.username,
+          actionType: 'Direct Upload',
+          itemName: data.name || `${data.type} Submission`,
+          docLink: data.link || 'N/A',
+          mainLogUrl,
+          myCharactersLink: '',
+          upgradesLink: '',
+        }),
+      }).catch(err => console.warn('[NARP] Direct upload work log failed:', err));
+    }
+  }, [profile, webhookConfig]);
+
   const handleCancelPending = async (id) => {
     try {
       // Log the denial to Discord before removing the pending entry.
@@ -5047,6 +5099,8 @@ export default function App() {
           type={statelessType}
           profile={profile}
           onClose={() => setStatelessType(null)}
+          isAdmin={isAdmin}
+          onDirectUpload={handleDirectSummonItemUpload}
         />
       )}
 
