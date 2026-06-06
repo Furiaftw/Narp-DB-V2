@@ -4,6 +4,7 @@ import { toArray, getSlotStatus, maskEmail } from '../../utils/helpers';
 import {
   fetchRoleChangeLog,
   saveSpecializationsToSupabase,
+  updateSubmissionControl,
   isSupabaseConfigured
 } from '../../lib/supabase';
 
@@ -243,10 +244,26 @@ export function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDe
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner }) {
+export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, submissionControls, onToggleSubmission, currentUserId }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [togglePending, setTogglePending] = useState({});
+
+  const handleToggle = async (key) => {
+    if (!isOwner || !isSupabaseConfigured()) return;
+    const newVal = !(submissionControls?.[key]);
+    setTogglePending(p => ({ ...p, [key]: true }));
+    try {
+      await updateSubmissionControl(key, newVal, currentUserId);
+      onToggleSubmission(key, newVal);
+      setMsg(`${key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon'} submissions ${newVal ? 'paused' : 'reopened'}.`);
+    } catch (e) {
+      setMsg('Failed to update: ' + (e.message || 'unknown error'));
+    } finally {
+      setTogglePending(p => ({ ...p, [key]: false }));
+    }
+  };
 
   const addSpec = () => {
     const v = newSpec.trim();
@@ -364,6 +381,46 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                 </button>
               </div>
             </div>
+
+            {/* Submission Gates — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">Pause or reopen submission creation for each entry type. Paused types show a notice to users and block form access.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { key: 'jutsu_paused',       label: 'Jutsu / Battlemode', color: 'indigo'  },
+                    { key: 'custom_item_paused',  label: 'Custom Item',        color: 'purple'  },
+                    { key: 'summon_paused',       label: 'Summon',             color: 'amber'   },
+                  ].map(({ key, label, color }) => {
+                    const paused  = !!(submissionControls?.[key]);
+                    const pending = !!togglePending[key];
+                    const ringCls = { indigo: 'ring-indigo-300', purple: 'ring-purple-300', amber: 'ring-amber-300' }[color];
+                    const bgOn    = { indigo: 'bg-indigo-600', purple: 'bg-purple-600', amber: 'bg-amber-500' }[color];
+                    return (
+                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">{label}</div>
+                          <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {paused ? 'Paused' : 'Open'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleToggle(key)}
+                          disabled={pending}
+                          title={paused ? 'Reopen submissions' : 'Pause submissions'}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 ${ringCls} ${paused ? 'bg-rose-500' : bgOn} disabled:opacity-50`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Manage Specializations */}
             <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">

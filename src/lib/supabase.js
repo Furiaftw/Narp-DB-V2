@@ -606,3 +606,22 @@ export const setSpecializations = async (names) => {
   const { error } = await supabase.from('specializations').insert(names.map(name => ({ name })));
   if (error) throw error;
 };
+
+/* --- Submission controls -------------------------------------------------- */
+
+export const fetchSubmissionControls = async () => {
+  if (!supabase) return { jutsu_paused: false, custom_item_paused: false, summon_paused: false };
+  const { data, error } = await supabase.from('submission_controls').select('*').eq('id', 1).single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateSubmissionControl = async (key, value, userId) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('submission_controls').update({
+    [key]: value,
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+  }).eq('id', 1);
+  if (error) throw error;
+};

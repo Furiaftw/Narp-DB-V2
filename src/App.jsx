@@ -37,6 +37,8 @@ import {
   claimPendingSubmission,
   fetchWebhookConfig,
   saveWebhookConfig,
+  fetchSubmissionControls,
+  updateSubmissionControl,
 } from './lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 
@@ -1222,7 +1224,7 @@ const HIDE_ONLY = [
   { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
-function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission }) {
+function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission, submissionControls }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
@@ -1323,14 +1325,21 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                   <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span> <Icon n="Down" size={12} className="text-white opacity-80" />
                 </button>
                 {addDdOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onAdd(); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
-                    </button>
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+                    {submissionControls?.jutsu_paused ? (
+                      <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none">
+                        <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                        <span>Jutsu / Battlemode <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAddDdOpen(false); onAdd(); }}
+                        className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled
@@ -1338,20 +1347,38 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                     >
                       <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission — Coming Soon
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
-                    </button>
+                    <div className="border-t border-slate-100">
+                      {submissionControls?.summon_paused ? (
+                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                          <span>Summon <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
+                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                        >
+                          <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
+                        </button>
+                      )}
+                    </div>
+                    <div className="border-t border-slate-100">
+                      {submissionControls?.custom_item_paused ? (
+                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                          <span>Custom Item <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
+                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                        >
+                          <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2415,10 +2442,27 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, webhookConfig = {}, onWebhookConfigSave }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [togglePending, setTogglePending] = useState({});
+
+  const handleToggle = async (key) => {
+    if (!isOwner || !isSupabaseConfigured()) return;
+    const newVal = !(submissionControls?.[key]);
+    setTogglePending(p => ({ ...p, [key]: true }));
+    try {
+      await updateSubmissionControl(key, newVal, currentUserId);
+      onToggleSubmission(key, newVal);
+      const label = key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon';
+      setMsg(`${label} submissions ${newVal ? 'paused' : 'reopened'}.`);
+    } catch (e) {
+      setMsg('Failed to update: ' + (e.message || 'unknown error'));
+    } finally {
+      setTogglePending(p => ({ ...p, [key]: false }));
+    }
+  };
 
   const addSpec = () => {
     const v = newSpec.trim();
@@ -2536,6 +2580,46 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 </button>
               </div>
             </div>
+
+            {/* Submission Gates — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { key: 'jutsu_paused',      label: 'Jutsu / Battlemode', color: 'indigo' },
+                    { key: 'custom_item_paused', label: 'Custom Item',        color: 'purple' },
+                    { key: 'summon_paused',      label: 'Summon',             color: 'amber'  },
+                  ].map(({ key, label, color }) => {
+                    const paused  = !!(submissionControls?.[key]);
+                    const pending = !!togglePending[key];
+                    const trackOn  = { indigo: 'bg-indigo-600', purple: 'bg-purple-600', amber: 'bg-amber-500' }[color];
+                    return (
+                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">{label}</div>
+                          <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {paused ? 'Paused' : 'Open'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleToggle(key)}
+                          disabled={pending}
+                          title={paused ? 'Reopen submissions' : 'Pause submissions'}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : `${trackOn} focus:ring-indigo-300`} disabled:opacity-50 shrink-0`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {/* Manage Specializations */}
             <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
@@ -3690,6 +3774,7 @@ export default function App() {
   const [roleOverride, setRoleOverride] = useState(() => {
     try { return sessionStorage.getItem('narp_role_override') || ''; } catch { return ''; }
   });
+  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
   const realRole = supabaseReady ? (profile?.role || 'guest') : devRole;
@@ -3907,6 +3992,7 @@ export default function App() {
           if (p.role === 'owner' || p.role === 'admin') {
             fetchWebhookConfig().then(setWebhookConfig).catch(() => {});
           }
+          fetchSubmissionControls().then(setSubmissionControls).catch(() => {});
         }
       } catch (e) {
         console.warn('[NARP] profile fetch failed:', e);
@@ -4672,7 +4758,8 @@ export default function App() {
           clearF={clearF}
           isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
           onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-          onOpenStatelessSubmission={setStatelessType} />
+          onOpenStatelessSubmission={setStatelessType}
+          submissionControls={submissionControls} />
       </div>
 
       {/* FILTER PANEL — outside sticky header, in normal document flow */}
@@ -4982,7 +5069,10 @@ export default function App() {
             }).catch(e => console.warn('[NARP] webhook config save failed:', e));
           }}
           onOpenAuditLog={() => setModals(m => ({ ...m, audit: true }))}
-          onManageBL={() => setModals(m => ({ ...m, manageBL: true }))} />
+          onManageBL={() => setModals(m => ({ ...m, manageBL: true }))}
+          submissionControls={submissionControls}
+          onToggleSubmission={(key, value) => setSubmissionControls(prev => ({ ...prev, [key]: value }))}
+          currentUserId={profile?.id} />
       )}
       {modals.audit && isAdmin && (
         <AuditLogModal onClose={() => setModals(m => ({ ...m, audit: false }))} />
