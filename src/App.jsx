@@ -2451,19 +2451,27 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
   const [pendingDel, setPendingDel] = useState(null);
   const [togglePending, setTogglePending] = useState({});
 
-  const [wlJutsu,      setWlJutsu]      = useState(profile?.work_thread_id || '');
-  const [wlCustom,     setWlCustom]     = useState(profile?.custom_item_thread_id || '');
-  const [wlSummon,     setWlSummon]     = useState(profile?.summon_thread_id || '');
-  const [wlSaving,     setWlSaving]     = useState({ jutsu: false, custom: false, summon: false });
+  const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
+  const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
+  const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
+  const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
+  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, custom: false, summon: false });
 
   const saveWorkLog = async (type) => {
-    const map = { jutsu: [wlJutsu, updateMyWorkThreadId], custom: [wlCustom, updateMyCustomItemThreadId], summon: [wlSummon, updateMySummonThreadId] };
-    const [val, fn] = map[type];
     setWlSaving(s => ({ ...s, [type]: true }));
     try {
-      const updated = await fn(val);
-      onProfileUpdate(updated);
-      setMsg('Work log thread ID saved.');
+      if (type === 'jutsu') {
+        onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
+      } else if (type === 'battle') {
+        onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
+      } else if (type === 'custom') {
+        const updated = await updateMyCustomItemThreadId(wlCustom);
+        onProfileUpdate(updated);
+      } else if (type === 'summon') {
+        const updated = await updateMySummonThreadId(wlSummon);
+        onProfileUpdate(updated);
+      }
+      setMsg('Log thread ID saved.');
     } catch (e) {
       setMsg('Failed to save: ' + (e.message || e));
     } finally {
@@ -2591,35 +2599,40 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               </div>
             </div>
 
-            {/* Work Log Thread IDs — staff+ */}
+            {/* Log Thread IDs — staff+ */}
             {isStaff && isSupabaseConfigured() && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
-                  <Icon n="MessageSquare" size={20} className="text-sky-500" /> Work Log Thread IDs
+                  <Icon n="MessageSquare" size={20} className="text-sky-500" /> Log Thread IDs
                   <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded">Staff+</span>
                 </h3>
-                <p className="text-xs text-slate-500 mb-4">Your personal Discord thread IDs where reviewer work logs are posted when you approve entries.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
-                    { label: 'Jutsu / Battlemode', val: wlJutsu, set: setWlJutsu, type: 'jutsu' },
-                    { label: 'Custom Item',         val: wlCustom, set: setWlCustom, type: 'custom' },
-                    { label: 'Summon',              val: wlSummon, set: setWlSummon, type: 'summon' },
-                  ].map(({ label, val, set, type }) => (
+                    { label: 'Jutsu',        val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
+                    { label: 'Battlemode',   val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
+                    { label: 'Custom Item',  val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
+                    { label: 'Summon',       val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
+                  ].map(({ label, val, set, type, ownerOnly }) => (
                     <div key={type}>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">{label}</label>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
+                        {label}
+                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Owner</span>}
+                      </label>
                       <div className="flex gap-2">
                         <input
                           type="text"
                           value={val}
                           onChange={e => set(e.target.value)}
                           placeholder="Thread ID"
-                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400"
+                          disabled={ownerOnly && !isOwner}
+                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400 disabled:bg-slate-100 disabled:text-slate-400"
                         />
                         <button
                           type="button"
                           onClick={() => saveWorkLog(type)}
-                          disabled={wlSaving[type]}
-                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-50 transition-colors shrink-0"
+                          disabled={wlSaving[type] || (ownerOnly && !isOwner)}
+                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-30 transition-colors shrink-0"
                         >
                           {wlSaving[type] ? '...' : 'Save'}
                         </button>
@@ -2708,8 +2721,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <div className="space-y-3">
                   {[
                     { key: 'discord_guild_id',            label: 'Guild ID',             placeholder: '12345678901234567' },
-                    { key: 'discord_jutsu_thread_id',     label: 'Jutsu Thread',         placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_battlemode_thread_id',label: 'Battlemode Thread',    placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_summon_thread_id',    label: 'Summon Thread',        placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_custom_item_thread_id',label:'Custom Item Thread',   placeholder: 'Thread ID (17-20 digits)' },
