@@ -16,6 +16,9 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
+  updateMyWorkThreadId,
+  updateMyCustomItemThreadId,
+  updateMySummonThreadId,
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
@@ -2849,7 +2852,22 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
         avatar_url: null,
         role: devRole,
         work_thread_id: profile?.work_thread_id || '',
+        custom_item_thread_id: profile?.custom_item_thread_id || '',
+        summon_thread_id: profile?.summon_thread_id || '',
       };
+
+  const [workThreadId, setWorkThreadId] = useState(activeProfile?.work_thread_id || '');
+  const [savingWorkThread, setSavingWorkThread] = useState(false);
+  const [customItemThreadId, setCustomItemThreadId] = useState(activeProfile?.custom_item_thread_id || '');
+  const [savingCustomItemThread, setSavingCustomItemThread] = useState(false);
+  const [summonThreadId, setSummonThreadId] = useState(activeProfile?.summon_thread_id || '');
+  const [savingSummonThread, setSavingSummonThread] = useState(false);
+
+  useEffect(() => {
+    setWorkThreadId(activeProfile?.work_thread_id || '');
+    setCustomItemThreadId(activeProfile?.custom_item_thread_id || '');
+    setSummonThreadId(activeProfile?.summon_thread_id || '');
+  }, [activeProfile?.work_thread_id, activeProfile?.custom_item_thread_id, activeProfile?.summon_thread_id]);
 
   useEffect(() => {
     if (!open) return;
@@ -2909,6 +2927,53 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
+  const handleSaveWorkThread = async () => {
+    setSavingWorkThread(true);
+    try {
+      if (supabaseReady) {
+        const updated = await updateMyWorkThreadId(workThreadId);
+        onProfileUpdate(updated);
+      } else {
+        onProfileUpdate({ ...profile, work_thread_id: workThreadId });
+      }
+    } catch (err) {
+      console.error('[NARP] Failed to update work thread ID:', err);
+      alert('Failed to update work thread ID: ' + (err.message || err));
+    } finally {
+      setSavingWorkThread(false);
+    }
+  };
+
+  const handleSaveCustomItemThread = async () => {
+    setSavingCustomItemThread(true);
+    try {
+      if (supabaseReady) {
+        const updated = await updateMyCustomItemThreadId(customItemThreadId);
+        onProfileUpdate(updated);
+      }
+    } catch (err) {
+      console.error('[NARP] Failed to update custom item thread ID:', err);
+      alert('Failed to update custom item thread ID: ' + (err.message || err));
+    } finally {
+      setSavingCustomItemThread(false);
+    }
+  };
+
+  const handleSaveSummonThread = async () => {
+    setSavingSummonThread(true);
+    try {
+      if (supabaseReady) {
+        const updated = await updateMySummonThreadId(summonThreadId);
+        onProfileUpdate(updated);
+      }
+    } catch (err) {
+      console.error('[NARP] Failed to update summon thread ID:', err);
+      alert('Failed to update summon thread ID: ' + (err.message || err));
+    } finally {
+      setSavingSummonThread(false);
+    }
+  };
+
   return (
     <div className="relative shrink-0" ref={menuRef}>
       <button onClick={() => setOpen(!open)}
@@ -2922,13 +2987,77 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center gap-3">
             <ProfileAvatar profile={activeProfile} className="w-10 h-10 rounded-lg" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
+          {supabaseReady && ['staff', 'admin', 'owner'].includes(activeProfile?.role) && (
+            <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Jutsu Work Log Thread ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={workThreadId}
+                    onChange={(e) => setWorkThreadId(e.target.value)}
+                    placeholder="Thread ID"
+                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveWorkThread}
+                    disabled={savingWorkThread}
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {savingWorkThread ? '...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Custom Item Work Log Thread ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={customItemThreadId}
+                    onChange={(e) => setCustomItemThreadId(e.target.value)}
+                    placeholder="Thread ID"
+                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveCustomItemThread}
+                    disabled={savingCustomItemThread}
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {savingCustomItemThread ? '...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Summon Work Log Thread ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={summonThreadId}
+                    onChange={(e) => setSummonThreadId(e.target.value)}
+                    placeholder="Thread ID"
+                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveSummonThread}
+                    disabled={savingSummonThread}
+                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
+                  >
+                    {savingSummonThread ? '...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
           {(!supabaseReady || profile?.role === 'owner') && (
             <div className="border-t border-slate-100 p-3 bg-slate-50">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">

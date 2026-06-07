@@ -102,7 +102,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -162,7 +162,41 @@ export const updateMyWorkThreadId = async (threadId) => {
     .from('profiles')
     .update({ work_thread_id: clean || null })
     .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateMyCustomItemThreadId = async (threadId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
+
+  const clean = (threadId || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ custom_item_thread_id: clean || null })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateMySummonThreadId = async (threadId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
+
+  const clean = (threadId || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ summon_thread_id: clean || null })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .single();
 
   if (error) throw error;
@@ -183,7 +217,7 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
@@ -278,7 +312,7 @@ export const fetchPendingJutsus = async () => {
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role, discord_id, work_thread_id')
+    .select('id, username, email, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
