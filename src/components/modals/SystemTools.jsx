@@ -4,6 +4,7 @@ import { toArray, getSlotStatus, maskEmail } from '../../utils/helpers';
 import {
   fetchRoleChangeLog,
   saveSpecializationsToSupabase,
+  updateSubmissionControl,
   isSupabaseConfigured
 } from '../../lib/supabase';
 
@@ -243,10 +244,26 @@ export function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDe
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner }) {
+export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, submissionControls, onToggleSubmission, currentUserId }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [togglePending, setTogglePending] = useState({});
+
+  const handleToggle = async (key) => {
+    if (!isOwner || !isSupabaseConfigured()) return;
+    const newVal = !(submissionControls?.[key]);
+    setTogglePending(p => ({ ...p, [key]: true }));
+    try {
+      await updateSubmissionControl(key, newVal, currentUserId);
+      onToggleSubmission(key, newVal);
+      setMsg(`${key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon'} submissions ${newVal ? 'paused' : 'reopened'}.`);
+    } catch (e) {
+      setMsg('Failed to update: ' + (e.message || 'unknown error'));
+    } finally {
+      setTogglePending(p => ({ ...p, [key]: false }));
+    }
+  };
 
   const addSpec = () => {
     const v = newSpec.trim();
@@ -315,11 +332,11 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Refresh" size={20} className="text-indigo-500" /> Synchronization
               </h3>
-              <p className="text-xs text-slate-500 mb-6">Re-fetch the latest catalog and pending list from the database. Use after another admin made changes you want to see locally.</p>
+              <p className="text-xs text-slate-500 mb-6">Pull the latest data from the server. Use this if another admin has made changes you haven't seen yet.</p>
               <button onClick={handleSync} disabled={refreshing}
                       className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-indigo-700 shadow-md disabled:opacity-50">
                 <Icon n="Refresh" size={16} className={refreshing ? 'animate-spin' : ''}/>
-                {refreshing ? 'Syncing...' : 'Sync data'}
+                {refreshing ? 'Syncing...' : 'Refresh Data'}
               </button>
             </div>
 
@@ -331,7 +348,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <p className="text-xs text-slate-500 mb-6">View the history of role changes — who promoted or demoted whom, and when.</p>
               <button onClick={onOpenAuditLog}
                       className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
-                <Icon n="Eye" size={16}/> View log
+                <Icon n="Eye" size={16}/> View Log
               </button>
             </div>
 
@@ -340,7 +357,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Book" size={20} className="text-purple-500" /> Bloodlines
               </h3>
-              <p className="text-xs text-slate-500 mb-6">Add, edit, and remove bloodlines. These populate the bloodline filter dropdown but no longer have a public browse tab.</p>
+              <p className="text-xs text-slate-500 mb-6">Add, edit, or remove bloodlines from the database.</p>
               <button onClick={onManageBL}
                       className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-purple-700">
                 <Icon n="Edit" size={16}/> Manage Bloodlines ({(db.bloodlines || []).length})
@@ -358,19 +375,59 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                         className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
                   <Icon n="Download" size={16}/> JSON
                 </button>
-                <button onClick={() => setMsg('CSV export is currently under construction.')}
+                <button onClick={() => setMsg('CSV export coming soon.')}
                         className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-emerald-700">
                   <Icon n="Download" size={16}/> CSV
                 </button>
               </div>
             </div>
 
+            {/* Submission Gates — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">Pause or reopen submission creation for each entry type. Paused types show a notice to users and block form access.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { key: 'jutsu_paused',       label: 'Jutsu / Battlemode', color: 'indigo'  },
+                    { key: 'custom_item_paused',  label: 'Custom Item',        color: 'purple'  },
+                    { key: 'summon_paused',       label: 'Summon',             color: 'amber'   },
+                  ].map(({ key, label, color }) => {
+                    const paused  = !!(submissionControls?.[key]);
+                    const pending = !!togglePending[key];
+                    const ringCls = { indigo: 'ring-indigo-300', purple: 'ring-purple-300', amber: 'ring-amber-300' }[color];
+                    const bgOn    = { indigo: 'bg-indigo-600', purple: 'bg-purple-600', amber: 'bg-amber-500' }[color];
+                    return (
+                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">{label}</div>
+                          <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {paused ? 'Paused' : 'Open'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleToggle(key)}
+                          disabled={pending}
+                          title={paused ? 'Reopen submissions' : 'Pause submissions'}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 ${ringCls} ${paused ? 'bg-rose-500' : bgOn} disabled:opacity-50`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Manage Specializations */}
             <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Tag" size={20} className="text-indigo-500" /> Manage Specializations
               </h3>
-              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the global Specializations list used when creating new Jutsus.</p>
+              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the Specializations list.</p>
               <div className="flex flex-wrap gap-2 mb-4">
                 {(db.specializations || []).map(s => (
                   <span key={s} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-2 shadow-sm">

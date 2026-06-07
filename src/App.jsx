@@ -16,6 +16,9 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
+  updateMyWorkThreadId,
+  updateMyCustomItemThreadId,
+  updateMySummonThreadId,
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
@@ -37,6 +40,8 @@ import {
   claimPendingSubmission,
   fetchWebhookConfig,
   saveWebhookConfig,
+  fetchSubmissionControls,
+  updateSubmissionControl,
 } from './lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 
@@ -855,7 +860,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
     ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
-    j.limited &&  showAskStaff     && { l: 'Ask Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
+    j.limited &&  showAskStaff     && { l: 'Ask a Reviewer',        c: 'bg-amber-100 text-amber-800 border-amber-300' },
     j.limited && !showAskStaff     && { l: 'Limited',  ic: 'Alert', c: 'bg-rose-100 text-rose-800 border-rose-200' },
     j.limited && j.slots           && { l: remaining > 0 ? `${remaining} open` : 'Full',
                                         c: remaining > 0 ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-red-100 text-red-800 border-red-200' },
@@ -891,7 +896,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
         </div>
         <div className="flex items-center shrink-0 pl-4">
           {j.limited && showAskStaff
-            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask Reviewer</span>
+            ? <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 hidden sm:inline mr-3">Ask a Reviewer</span>
             : (j.limited && <span className="text-[10px] font-bold uppercase text-red-500 bg-red-50 px-1.5 py-0.5 rounded hidden sm:inline mr-3">Limited</span>)}
           <Icon n="Down" size={18} className="text-slate-300"/>
         </div>
@@ -1039,7 +1044,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
                 <Icon n="ExtLink" size={16}/> Doc
               </a>
             ) : (
-              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Doc</span>
+              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Link</span>
             )}
             
             {j.limited && (
@@ -1222,7 +1227,7 @@ const HIDE_ONLY = [
   { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
-function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission }) {
+function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission, submissionControls }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
@@ -1276,7 +1281,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 
   return (
     <>
-      <div className="bg-slate-900 text-white p-4 shadow-md z-30 shrink-0">
+      <div className="bg-black text-white p-4 shadow-md z-30 shrink-0">
         <div className="max-w-6xl mx-auto flex flex-col gap-3">
           <div className="flex gap-2">
             <div className="relative flex-1 min-w-0">
@@ -1319,39 +1324,64 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
             {isAdmin && (
               <div className="relative shrink-0" ref={addDdRef}>
                 <button onClick={() => setAddDdOpen(!addDdOpen)}
-                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg">
+                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-slate-800 text-white hover:bg-slate-700 shadow-lg">
                   <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span> <Icon n="Down" size={12} className="text-white opacity-80" />
                 </button>
                 {addDdOpen && (
-                  <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onAdd(); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
-                    </button>
+                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+                    {submissionControls?.jutsu_paused ? (
+                      <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none">
+                        <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                        <span>Jutsu / Battlemode <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => { setAddDdOpen(false); onAdd(); }}
+                        className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                      >
+                        <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
+                      </button>
+                    )}
                     <button
                       type="button"
                       disabled
                       className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
                     >
-                      <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission (Under Development)
+                      <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission — Coming Soon
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2 border-t border-slate-100"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
-                    </button>
+                    <div className="border-t border-slate-100">
+                      {submissionControls?.summon_paused ? (
+                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                          <span>Summon <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
+                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                        >
+                          <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
+                        </button>
+                      )}
+                    </div>
+                    <div className="border-t border-slate-100">
+                      {submissionControls?.custom_item_paused ? (
+                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                          <span>Custom Item <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
+                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                        >
+                          <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -1674,11 +1704,11 @@ Character Doc: [Link your approved character's google doc here]`;
       return;
     }
     if (!myLink.includes('1473338902264676424')) {
-      setError('Invalid My-Characters Link. Must contain 1473338902264676424.');
+      setError('Invalid link — paste a link from the #my-characters forum on the server.');
       return;
     }
     if (!upgLink.includes('1473338902264676425')) {
-      setError('Invalid Character-Upgrades Link. Must contain 1473338902264676425.');
+      setError('Invalid link — paste a link from the #character-upgrades forum on the server.');
       return;
     }
 
@@ -1699,7 +1729,7 @@ Character Doc: [Link your approved character's google doc here]`;
 
   const handleNudge = async () => {
     if (!pending?.data?.second_reviewer_discord_id) {
-      alert('Reviewer Discord ID is not available. Try activating the final step again.');
+      alert('Reviewer info couldn\'t be found. Please refresh the page and try again.');
       return;
     }
     setNudging(true);
@@ -1943,7 +1973,7 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
       badgeLabel = 'Full';
     } else if (hasSlots && remaining <= 2) {
       badgeClass = 'bg-amber-100 text-amber-800 border-amber-200';
-      badgeLabel = 'Ask Staff';
+      badgeLabel = 'Ask a Reviewer';
     } else {
       badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
       badgeLabel = `Open · ${effectiveMax - filledCount} left`;
@@ -2313,7 +2343,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
             <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-bold text-slate-800">Request Second Approval</p>
-                <p className="text-xs text-slate-500">Submit this change to the pending queue to require another staff member or admin's review.</p>
+                <p className="text-xs text-slate-500">Submit this change for review by another Reviewer or Admin before it goes live.</p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer shrink-0">
                 <input
@@ -2415,10 +2445,58 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, webhookConfig = {}, onWebhookConfigSave }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [togglePending, setTogglePending] = useState({});
+
+  const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
+  const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
+  const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
+  const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
+  const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
+  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
+
+  const saveWorkLog = async (type) => {
+    setWlSaving(s => ({ ...s, [type]: true }));
+    try {
+      if (type === 'jutsu') {
+        onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
+      } else if (type === 'battle') {
+        onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
+      } else if (type === 'oc') {
+        onWebhookConfigSave('discord_oc_thread_id', wlOC);
+      } else if (type === 'custom') {
+        const updated = await updateMyCustomItemThreadId(wlCustom);
+        onProfileUpdate(updated);
+      } else if (type === 'summon') {
+        const updated = await updateMySummonThreadId(wlSummon);
+        onProfileUpdate(updated);
+      }
+      setMsg('Log thread ID saved.');
+    } catch (e) {
+      setMsg('Failed to save: ' + (e.message || e));
+    } finally {
+      setWlSaving(s => ({ ...s, [type]: false }));
+    }
+  };
+
+  const handleToggle = async (key) => {
+    if (!isOwner || !isSupabaseConfigured()) return;
+    const newVal = !(submissionControls?.[key]);
+    setTogglePending(p => ({ ...p, [key]: true }));
+    try {
+      await updateSubmissionControl(key, newVal, currentUserId);
+      onToggleSubmission(key, newVal);
+      const label = key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon';
+      setMsg(`${label} submissions ${newVal ? 'paused' : 'reopened'}.`);
+    } catch (e) {
+      setMsg('Failed to update: ' + (e.message || 'unknown error'));
+    } finally {
+      setTogglePending(p => ({ ...p, [key]: false }));
+    }
+  };
 
   const addSpec = () => {
     const v = newSpec.trim();
@@ -2482,19 +2560,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Sync */}
-            <div className="bg-slate-50 rounded-2xl border p-6">
-              <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Refresh" size={20} className="text-indigo-500" /> Synchronization
-              </h3>
-              <p className="text-xs text-slate-500 mb-6">Re-fetch the latest catalog and pending list from the database. Use after another admin made changes you want to see locally.</p>
-              <button onClick={handleSync} disabled={refreshing}
-                      className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-indigo-700 shadow-md disabled:opacity-50">
-                <Icon n="Refresh" size={16} className={refreshing ? 'animate-spin' : ''}/>
-                {refreshing ? 'Syncing...' : 'Sync data'}
-              </button>
-            </div>
-
             {/* Audit Log */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
@@ -2510,11 +2575,11 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
             {/* Manage Bloodlines */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Book" size={20} className="text-purple-500" /> Bloodlines
+                <Icon n="Book" size={20} className="text-red-600" /> Bloodlines
               </h3>
               <p className="text-xs text-slate-500 mb-6">Add, edit, and remove bloodlines. These populate the bloodline filter dropdown but no longer have a public browse tab.</p>
               <button onClick={onManageBL}
-                      className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-purple-700">
+                      className="w-full bg-red-700 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-red-800">
                 <Icon n="Edit" size={16}/> Manage Bloodlines ({(db.bloodlines || []).length})
               </button>
             </div>
@@ -2530,19 +2595,104 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                         className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
                   <Icon n="Download" size={16}/> JSON
                 </button>
-                <button onClick={() => setMsg('CSV export is currently under construction.')}
+                <button onClick={() => setMsg('CSV export coming soon.')}
                         className="flex-1 bg-emerald-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-emerald-700">
                   <Icon n="Download" size={16}/> CSV
                 </button>
               </div>
             </div>
 
+            {/* Log Thread IDs — admin+ */}
+            {isAdmin && isSupabaseConfigured() && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="MessageSquare" size={20} className="text-sky-500" /> Log Thread IDs
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 border border-indigo-300 px-2 py-0.5 rounded">Admin+</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { label: 'Jutsu',        val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
+                    { label: 'Battlemode',   val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
+                    { label: 'OC / Character', val: wlOC,   set: setWlOC,     type: 'oc',     ownerOnly: true },
+                    { label: 'Custom Item',  val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
+                    { label: 'Summon',       val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
+                  ].map(({ label, val, set, type, ownerOnly }) => (
+                    <div key={type}>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
+                        {label}
+                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Owner</span>}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={e => set(e.target.value)}
+                          placeholder="Thread ID"
+                          disabled={ownerOnly && !isOwner}
+                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400 disabled:bg-slate-100 disabled:text-slate-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => saveWorkLog(type)}
+                          disabled={wlSaving[type] || (ownerOnly && !isOwner)}
+                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-30 transition-colors shrink-0"
+                        >
+                          {wlSaving[type] ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Submission Gates — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { key: 'jutsu_paused',      label: 'Jutsu / Battlemode', color: 'slate' },
+                    { key: 'custom_item_paused', label: 'Custom Item',        color: 'red'   },
+                    { key: 'summon_paused',      label: 'Summon',             color: 'amber' },
+                  ].map(({ key, label, color }) => {
+                    const paused  = !!(submissionControls?.[key]);
+                    const pending = !!togglePending[key];
+                    const trackOn  = { slate: 'bg-slate-700', red: 'bg-red-700', amber: 'bg-amber-500' }[color];
+                    return (
+                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                        <div>
+                          <div className="text-sm font-bold text-slate-800">{label}</div>
+                          <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {paused ? 'Paused' : 'Open'}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleToggle(key)}
+                          disabled={pending}
+                          title={paused ? 'Reopen submissions' : 'Pause submissions'}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : `${trackOn} focus:ring-slate-400`} disabled:opacity-50 shrink-0`}
+                        >
+                          <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Manage Specializations */}
             <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Tag" size={20} className="text-indigo-500" /> Manage Specializations
               </h3>
-              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the global Specializations list used when creating new Jutsus.</p>
+              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the Specializations list.</p>
               <div className="flex flex-wrap gap-2 mb-4">
                 {(db.specializations || []).map(s => (
                   <span key={s} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-2 shadow-sm">
@@ -2575,11 +2725,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <div className="space-y-3">
                   {[
                     { key: 'discord_guild_id',            label: 'Guild ID',             placeholder: '12345678901234567' },
-                    { key: 'discord_jutsu_thread_id',     label: 'Jutsu Thread',         placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_battlemode_thread_id',label: 'Battlemode Thread',    placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_summon_thread_id',    label: 'Summon Thread',        placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_custom_item_thread_id',label:'Custom Item Thread',   placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
@@ -2765,20 +2910,17 @@ function MemberWorkThreadInput({ member, onSave }) {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onSetDevRole, roleOverride, onSetRoleOverride, onProfileUpdate }) {
+function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate, viewAsRole, onSetViewAsRole }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
-  const activeProfile = supabaseReady
-    ? (profile ? { ...profile, role: roleOverride || profile.role } : null)
-    : {
-        id: 'dev-user-id',
-        username: 'Dev Administrator',
-        email: 'dev@example.com',
-        avatar_url: null,
-        role: devRole,
-        work_thread_id: profile?.work_thread_id || '',
-      };
+  const activeProfile = supabaseReady ? profile : {
+    id: 'dev-user-id',
+    username: 'Dev Administrator',
+    email: 'dev@example.com',
+    avatar_url: null,
+    role: devRole,
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -2851,42 +2993,46 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
+        <div className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border border-slate-200 z-40 overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center gap-3">
             <ProfileAvatar profile={activeProfile} className="w-10 h-10 rounded-lg" />
             <div className="flex-1 min-w-0">
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {(!supabaseReady || profile?.role === 'owner') && (
+          {profile?.role === 'owner' && (
+            <div className="px-4 py-3 border-b border-slate-100 bg-amber-50">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Preview as</label>
+              <select
+                value={viewAsRole || profile.role}
+                onChange={e => onSetViewAsRole(e.target.value === profile.role ? null : e.target.value)}
+                className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-amber-400"
+              >
+                <option value="owner">Owner (default)</option>
+                <option value="admin">Admin</option>
+                <option value="staff">Reviewer</option>
+                <option value="user">User</option>
+              </select>
+            </div>
+          )}
+          {!supabaseReady && (
             <div className="border-t border-slate-100 p-3 bg-slate-50">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role Override {supabaseReady ? '(per tab)' : ''}
+                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['guest', 'user', 'staff', 'admin', 'owner'].map(r => {
-                  const active = supabaseReady ? roleOverride === r : devRole === r;
-                  return (
-                    <button key={r} type="button"
-                      onClick={() => {
-                        if (supabaseReady) onSetRoleOverride(active ? '' : r);
-                        else onSetDevRole(r);
-                      }}
-                      className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
-                        active
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
-                      }`}>
-                      {r === 'staff' ? 'reviewer' : r}
-                    </button>
-                  );
-                })}
+                {['user', 'staff', 'admin', 'owner'].map(r => (
+                  <button key={r} type="button"
+                    onClick={() => onToggleDevRole(r)}
+                    className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                      devRole === r
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
+                    }`}>
+                    {r === 'staff' ? 'reviewer' : r}
+                  </button>
+                ))}
               </div>
-              {supabaseReady && roleOverride && (
-                <div className="text-[10px] text-amber-600 font-semibold mt-1.5">
-                  ⚠ Overriding real role ({profile?.role}) → {roleOverride}
-                </div>
-              )}
             </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
@@ -2943,7 +3089,8 @@ function PendingJutsuCard({
   onClaim,
   isMySubmissionsView = false,
   currentUserProfile = null,
-  refreshPending = null
+  refreshPending = null,
+  isApproving = false,
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -3141,7 +3288,7 @@ function PendingJutsuCard({
         setChatMessages(freshMsgs);
       }
     } catch (err) {
-      alert('Error activating final step: ' + err.message);
+      alert('Couldn\'t start the OC approval flow. Refresh the page and try again.');
     }
   };
 
@@ -3169,8 +3316,8 @@ function PendingJutsuCard({
           message: `⏰ Reminder from **${submitterName}**: Still waiting on your review for **${name}**. Please check the Review Chat when you get a chance!`,
         }),
       });
-      if (!res.ok) alert('Nudge failed: ' + await res.text());
-    } catch (err) { alert('Nudge error: ' + err.message); }
+      if (!res.ok) { await res.text(); alert('Couldn\'t send the nudge. Please try again in a moment.'); }
+    } catch (err) { console.error('[NARP] Nudge error:', err); alert('Couldn\'t send the nudge. Please try again in a moment.'); }
   };
 
   const handleNudgeSubmitter = async () => {
@@ -3187,12 +3334,12 @@ function PendingJutsuCard({
           message: `👋 Hey **${submitterName}**! The review team needs your attention on **${name}**. Please open the Review Chat and respond.`,
         }),
       });
-      if (!res.ok) alert('Nudge failed: ' + await res.text());
-    } catch (err) { alert('Nudge error: ' + err.message); }
+      if (!res.ok) { await res.text(); alert('Couldn\'t send the nudge. Please try again in a moment.'); }
+    } catch (err) { console.error('[NARP] Nudge error:', err); alert('Couldn\'t send the nudge. Please try again in a moment.'); }
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3">
+    <div className={`bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3 transition-all duration-500 ${isApproving ? 'opacity-40 scale-95 pointer-events-none' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -3242,7 +3389,7 @@ function PendingJutsuCard({
           {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
           {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
-          {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Spec:</span> {display.spec.join(', ')}</div>}
+          {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Specialization:</span> {display.spec.join(', ')}</div>}
           {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
       )}
@@ -3255,92 +3402,107 @@ function PendingJutsuCard({
       )}
 
       <div className="flex gap-2 mt-1 flex-wrap">
-        {pending.status === 'pending_review' ? (
-          hasStaffPrivileges ? (
-            <>
-              {/* Review (Step 1): admins always see it; non-admin staff only after claiming */}
-              {(['admin', 'owner'].includes(currentUser.role) || isClaimed) && (
-                <button onClick={() => onReview(pending.id)}
-                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Review (Step 1)
-                </button>
-              )}
-              {['admin', 'owner'].includes(currentUser.role) && (
+        {isClaimed ? (
+          <>
+            {/* ── All action buttons — only visible once the entry is claimed ── */}
+            {pending.status === 'pending_review' ? (
+              hasStaffPrivileges ? (
+                <>
+                  <button onClick={() => onReview(pending.id)}
+                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                    <Icon n="Check" size={14}/> Review (Step 1)
+                  </button>
+                  {['admin', 'owner'].includes(currentUser.role) && (
+                    <button onClick={() => onApprove(pending.id)}
+                            disabled={isApproving}
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                      {isApproving
+                        ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                        : <><Icon n="Check" size={14}/> Admin Approve</>}
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {isMine && !hasStaffPrivileges && (
+                    <button onClick={() => onSubmitterCancel(pending.id)}
+                            className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                      <Icon n="X" size={14}/> Cancel Submission
+                    </button>
+                  )}
+                  {isStrictSubmitter && (
+                    <div className="text-[10px] text-slate-400 italic self-center">
+                      Another Reviewer must perform Review (Step 1)
+                    </div>
+                  )}
+                </>
+              )
+            ) : (
+              hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
                 <button onClick={() => onApprove(pending.id)}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Approve Direct
+                        disabled={isApproving}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                  {isApproving
+                    ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                    : <><Icon n="Check" size={14}/> Approve</>}
                 </button>
-              )}
-            </>
-          ) : (
-            <>
-              {!isClaimed && isMine && !hasStaffPrivileges && (
-                <button onClick={() => onSubmitterCancel(pending.id)}
-                        className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="X" size={14}/> Cancel Submission
-                </button>
-              )}
-              {isStrictSubmitter && (
-                <div className="text-[10px] text-slate-400 italic self-center">
-                  Another Reviewer must perform Review (Step 1)
-                </div>
-              )}
-            </>
-          )
+              )
+            )}
+            {onEdit && (!isStrictSubmitter || !isClaimed) && (
+              <button onClick={() => onEdit(pending)}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                      title="Edit pending payload">
+                <Icon n="Edit" size={14}/> Edit
+              </button>
+            )}
+            {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || hasSubmitterChatted) && (
+              <button onClick={() => onCancel(pending.id)}
+                      className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
+                <Icon n="X" size={14}/> Cancel Submission
+              </button>
+            )}
+            {(isReviewerOrAdmin || isMine) && (
+              <button
+                onClick={() => setIsChatOpen(true)}
+                className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                title="Open Chat"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                Review Chat
+              </button>
+            )}
+            {isStrictSubmitter && pending.status === 'pending_approval' && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                Another Reviewer must approve
+              </div>
+            )}
+            {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                You reviewed this. Another Reviewer must approve.
+              </div>
+            )}
+          </>
         ) : (
-          hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-            <button onClick={() => onApprove(pending.id)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-              <Icon n="Check" size={14}/> Approve
-            </button>
-          )
-        )}
-        {/* Edit: staff can always edit others' submissions; submitter can only edit their own while unclaimed */}
-        {onEdit && (!isStrictSubmitter || !isClaimed) && (
-          <button onClick={() => onEdit(pending)}
-                  className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Edit pending payload">
-            <Icon n="Edit" size={14}/> Edit
-          </button>
-        )}
-        {/* Cancel: admins always; non-admin staff only after claim + submitter has chatted */}
-        {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || (isClaimed && hasSubmitterChatted)) && (
-          <button onClick={() => onCancel(pending.id)}
-                  className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-            <Icon n="X" size={14}/> Cancel
-          </button>
-        )}
-        {!isClaimed && hasStaffPrivileges && (
-          <button onClick={() => onClaim(pending.id)}
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Claim Review">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-            </svg>
-            Claim Review
-          </button>
-        )}
-        {(isReviewerOrAdmin || isMine) && (
-          <button
-            onClick={() => setIsChatOpen(true)}
-            className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-            title="Open Chat"
-          >
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            Review Chat
-          </button>
-        )}
-        {isStrictSubmitter && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            Another Reviewer must approve
-          </div>
-        )}
-        {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            You reviewed this. Another Reviewer must approve.
-          </div>
+          <>
+            {/* ── Unclaimed: only show "Assign to Me" for staff, and info text ── */}
+            {hasStaffPrivileges && (
+              <button onClick={() => onClaim(pending.id)}
+                      className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                      title="Assign to Me">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                </svg>
+                Assign to Me
+              </button>
+            )}
+            {isStrictSubmitter && (
+              <div className="text-[10px] text-slate-400 italic self-center">
+                Waiting for a Reviewer to claim this entry.
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -3380,7 +3542,7 @@ function PendingJutsuCard({
                 {pending?.data?.type === 'Character' && isStaff && currentUserId !== pending.submitted_by && !finalStepActivated && (
                   <div className="p-4 bg-amber-50 border-b border-amber-200 flex flex-col gap-2 items-center text-center shrink-0">
                     <p className="text-xs text-amber-800 font-semibold">
-                      You are the reviewer. Activate the final step for this Character submission to provide thread link boxes and template.
+                      Activate the final approval step to send the player their forum thread instructions and template.
                     </p>
                     <button
                       type="button"
@@ -3391,7 +3553,7 @@ function PendingJutsuCard({
                         <line x1="12" y1="5" x2="12" y2="19" />
                         <line x1="5" y1="12" x2="19" y2="12" />
                       </svg>
-                      Activate Final Step
+                      Send Thread Instructions
                     </button>
                   </div>
                 )}
@@ -3403,7 +3565,7 @@ function PendingJutsuCard({
                       <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
                         <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                       </svg>
-                      <p className="text-sm font-semibold">No messages here yet.</p>
+                      <p className="text-sm font-semibold">No messages yet.</p>
                       <p className="text-xs text-slate-400 mt-1">
                         {isStaff ? 'Discuss the submission with the player.' : 'The reviewer will respond here soon.'}
                       </p>
@@ -3516,7 +3678,7 @@ function PendingJutsuCard({
                           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                           </svg>
-                          {nudgeReviewerLocked ? 'Nudge locked (24h cooldown)' : 'Nudge Reviewer'}
+                          {nudgeReviewerLocked ? 'Nudge available in 24 hours' : 'Nudge Reviewer'}
                         </button>
                       )}
                       {hasStaffPrivileges && (
@@ -3687,13 +3849,11 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
-  const [roleOverride, setRoleOverride] = useState(() => {
-    try { return sessionStorage.getItem('narp_role_override') || ''; } catch { return ''; }
-  });
+  const [viewAsRole, setViewAsRole] = useState(null);
+  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
-  const realRole = supabaseReady ? (profile?.role || 'guest') : devRole;
-  const role     = roleOverride || realRole;
+  const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -3702,6 +3862,7 @@ export default function App() {
   const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [approvingIds, setApprovingIds] = useState(new Set());
   const [pendingHasNew, setPendingHasNew] = useState(false);
   const [mySubsHasNew, setMySubsHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
@@ -3800,12 +3961,6 @@ export default function App() {
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
-  useEffect(() => {
-    try {
-      if (roleOverride) sessionStorage.setItem('narp_role_override', roleOverride);
-      else sessionStorage.removeItem('narp_role_override');
-    } catch {}
-  }, [roleOverride]);
   useEffect(() => { LS.set(STORAGE.CART, cart); }, [cart]);
 
   useEffect(() => {
@@ -3907,6 +4062,7 @@ export default function App() {
           if (p.role === 'owner' || p.role === 'admin') {
             fetchWebhookConfig().then(setWebhookConfig).catch(() => {});
           }
+          fetchSubmissionControls().then(setSubmissionControls).catch(() => {});
         }
       } catch (e) {
         console.warn('[NARP] profile fetch failed:', e);
@@ -3921,7 +4077,7 @@ export default function App() {
 
   const handleSignIn    = async () => { try { await signInWithDiscord(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
   const handleDevSignIn = async () => { await signInWithDevAccess(); };
-  const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
+  const handleSignOut = async () => { try { await signOut(); setProfile(null); setViewAsRole(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
     if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
@@ -4141,6 +4297,8 @@ export default function App() {
   };
 
   const handleApprovePending = async (id) => {
+    if (approvingIds.has(id)) return;
+    setApprovingIds(prev => new Set([...prev, id]));
     try {
       // Optimistic: remove immediately so the UI doesn't hang
       setPendingJutsus(prev => prev.filter(p => p.id !== id));
@@ -4271,6 +4429,8 @@ export default function App() {
       await refreshDB();
     } catch (e) {
       alert('Approve failed: ' + e.message);
+    } finally {
+      setApprovingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
   };
 
@@ -4578,7 +4738,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="w-full h-screen bg-slate-900 flex flex-col items-center justify-center gap-4">
+      <div className="w-full h-screen bg-black flex flex-col items-center justify-center gap-4">
         <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
         <p className="text-slate-400 text-sm font-semibold">Loading...</p>
       </div>
@@ -4608,35 +4768,23 @@ export default function App() {
       {/* HEADER AND FILTER BAR STICKY WRAPPER */}
       <div ref={headerRef} className="sticky top-0 z-40 shrink-0 flex flex-col shadow-lg">
         {/* HEADER */}
-        <div className="bg-slate-900 text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
+        <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-            <Icon n="Book" size={18} className="text-indigo-400" />
+            <Icon n="Book" size={18} className="text-red-500" />
             <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
-            {!appInstalled && (
-              installPrompt ? (
-                <button
-                  onClick={async () => {
-                    installPrompt.prompt();
-                    const { outcome } = await installPrompt.userChoice;
-                    if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); }
-                  }}
-                  title="Install App"
-                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
-                  <Icon n="Download" size={11} /> Install
-                </button>
-              ) : /iphone|ipad|ipod/i.test(navigator.userAgent) ? (
-                <button
-                  onClick={() => setModals(m => ({ ...m, iosInstall: true }))}
-                  title="Install App"
-                  className="ml-1 flex items-center gap-1 text-[10px] font-bold text-indigo-300 hover:text-white border border-indigo-700 hover:border-indigo-400 bg-indigo-900/50 hover:bg-indigo-800/60 px-2 py-1 rounded-lg transition-colors shrink-0">
-                  <Icon n="Download" size={11} /> Install
-                </button>
-              ) : null
-            )}
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
-              {isAdmin && (
+              {isStaff && (
+                <button
+                  onClick={refreshDB}
+                  disabled={refreshing}
+                  title="Refresh Data"
+                  className="p-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 hover:bg-slate-700 disabled:opacity-40 transition-colors shrink-0">
+                  <Icon n="Refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
+                </button>
+              )}
+              {isStaff && (
                 <button onClick={() => setModals(m => ({ ...m, system: true }))}
                         className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
                   <Icon n="Settings" size={14}/>
@@ -4645,22 +4793,27 @@ export default function App() {
               )}
               {tab === 'jutsus' && (
                 <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
-                  <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
-                  <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-indigo-600 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
+                  <button onClick={() => setViewMode('card')} className={`p-1.5 rounded-md ${viewMode === 'card' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}><Icon n="Grid" size={14}/></button>
+                  <button onClick={() => setViewMode('row')}  className={`p-1.5 rounded-md ${viewMode === 'row'  ? 'bg-slate-700 text-white' : 'text-slate-400'}`}><Icon n="List" size={14}/></button>
                 </div>
               )}
             </div>
+            {viewAsRole && (
+              <span className="text-[10px] font-bold px-2 py-1 bg-amber-500 text-white rounded-full shrink-0">
+                Previewing as {viewAsRole === 'staff' ? 'Reviewer' : viewAsRole}
+              </span>
+            )}
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
               devRole={devRole}
-              onSetDevRole={setDevRole}
-              roleOverride={roleOverride}
-              onSetRoleOverride={setRoleOverride}
+              onToggleDevRole={setDevRole}
               onSignIn={handleSignIn}
               onDevSignIn={handleDevSignIn}
               onSignOut={handleSignOut}
               onProfileUpdate={setProfile}
+              viewAsRole={viewAsRole}
+              onSetViewAsRole={setViewAsRole}
             />
           </div>
         </div>
@@ -4672,7 +4825,8 @@ export default function App() {
           clearF={clearF}
           isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
           onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-          onOpenStatelessSubmission={setStatelessType} />
+          onOpenStatelessSubmission={setStatelessType}
+          submissionControls={submissionControls} />
       </div>
 
       {/* FILTER PANEL — outside sticky header, in normal document flow */}
@@ -4787,7 +4941,8 @@ export default function App() {
                         onClaim={handleClaimPending}
                         isMySubmissionsView={false}
                         currentUserProfile={profile}
-                        refreshPending={refreshPending} />
+                        refreshPending={refreshPending}
+                        isApproving={approvingIds.has(p.id)} />
                     );
                   })}
                 </div>
@@ -4828,7 +4983,8 @@ export default function App() {
                         onClaim={handleClaimPending}
                         isMySubmissionsView={true}
                         currentUserProfile={profile}
-                        refreshPending={refreshPending} />
+                        refreshPending={refreshPending}
+                        isApproving={approvingIds.has(p.id)} />
                     );
                   })}
                 </div>
@@ -4925,7 +5081,7 @@ export default function App() {
                                   className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer transition-all"
                                 >
                                   <option value="user">User</option>
-                                  <option value="staff">Reviewer (staff)</option>
+                                  <option value="staff">Reviewer</option>
                                   <option value="admin">Admin</option>
                                 </select>
                               </td>
@@ -4943,7 +5099,7 @@ export default function App() {
       </div>
 
       {/* FOOTER */}
-      <div className="bg-slate-900 text-center py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest shrink-0 flex items-center justify-center gap-2 relative z-30">
+      <div className="bg-black text-center py-3 text-[10px] font-bold text-slate-500 uppercase tracking-widest shrink-0 flex items-center justify-center gap-2 relative z-30">
         <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300 flex items-center gap-1.5">
           <Icon n="Info" size={11} /> Hexagon &amp; A Road Sign
         </button>
@@ -4975,6 +5131,8 @@ export default function App() {
           onRefresh={refreshDB}
           refreshing={refreshing}
           isOwner={isOwner}
+          isAdmin={isAdmin}
+          isStaff={isStaff}
           webhookConfig={webhookConfig}
           onWebhookConfigSave={(key, value) => {
             saveWebhookConfig(key, value).then(() => {
@@ -4982,7 +5140,12 @@ export default function App() {
             }).catch(e => console.warn('[NARP] webhook config save failed:', e));
           }}
           onOpenAuditLog={() => setModals(m => ({ ...m, audit: true }))}
-          onManageBL={() => setModals(m => ({ ...m, manageBL: true }))} />
+          onManageBL={() => setModals(m => ({ ...m, manageBL: true }))}
+          submissionControls={submissionControls}
+          onToggleSubmission={(key, value) => setSubmissionControls(prev => ({ ...prev, [key]: value }))}
+          currentUserId={profile?.id}
+          profile={profile}
+          onProfileUpdate={setProfile} />
       )}
       {modals.audit && isAdmin && (
         <AuditLogModal onClose={() => setModals(m => ({ ...m, audit: false }))} />
@@ -5075,6 +5238,28 @@ export default function App() {
                 <p className="text-[10px] font-bold uppercase text-slate-400">Credits</p>
                 <p className="font-semibold">Hexagon &amp; A Road Sign</p>
               </div>
+              {!appInstalled && (installPrompt || /iphone|ipad|ipod/i.test(navigator.userAgent)) && (
+                <div className="border-t pt-4">
+                  <p className="text-[10px] font-bold uppercase text-slate-400 mb-3">Install App</p>
+                  {installPrompt ? (
+                    <button
+                      onClick={async () => {
+                        installPrompt.prompt();
+                        const { outcome } = await installPrompt.userChoice;
+                        if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); setModals(m => ({ ...m, credits: false })); }
+                      }}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+                      <Icon n="Download" size={14} /> Install NARP Database
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setModals(m => ({ ...m, credits: false, iosInstall: true })); }}
+                      className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
+                      <Icon n="Download" size={14} /> Install on iPhone / iPad
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -102,7 +102,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -162,7 +162,41 @@ export const updateMyWorkThreadId = async (threadId) => {
     .from('profiles')
     .update({ work_thread_id: clean || null })
     .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateMyCustomItemThreadId = async (threadId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
+
+  const clean = (threadId || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ custom_item_thread_id: clean || null })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .single();
+
+  if (error) throw error;
+  return data;
+};
+
+export const updateMySummonThreadId = async (threadId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
+
+  const clean = (threadId || '').trim();
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ summon_thread_id: clean || null })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .single();
 
   if (error) throw error;
@@ -183,7 +217,7 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
@@ -223,8 +257,10 @@ export const saveWebhookConfig = async (key, value) => {
   const session = await getCurrentSession();
   const { error } = await supabase
     .from('webhook_config')
-    .update({ config_value: value, updated_at: new Date().toISOString(), updated_by: session?.user?.id || null })
-    .eq('config_key', key);
+    .upsert(
+      { config_key: key, config_value: value, updated_at: new Date().toISOString(), updated_by: session?.user?.id || null },
+      { onConflict: 'config_key' }
+    );
   if (error) throw error;
 };
 
@@ -276,7 +312,7 @@ export const fetchPendingJutsus = async () => {
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role, discord_id, work_thread_id')
+    .select('id, username, email, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
@@ -602,5 +638,24 @@ export const setSpecializations = async (names) => {
   if (delError) throw delError;
   if (names.length === 0) return;
   const { error } = await supabase.from('specializations').insert(names.map(name => ({ name })));
+  if (error) throw error;
+};
+
+/* --- Submission controls -------------------------------------------------- */
+
+export const fetchSubmissionControls = async () => {
+  if (!supabase) return { jutsu_paused: false, custom_item_paused: false, summon_paused: false };
+  const { data, error } = await supabase.from('submission_controls').select('*').eq('id', 1).single();
+  if (error) throw error;
+  return data;
+};
+
+export const updateSubmissionControl = async (key, value, userId) => {
+  if (!supabase) return;
+  const { error } = await supabase.from('submission_controls').update({
+    [key]: value,
+    updated_by: userId,
+    updated_at: new Date().toISOString(),
+  }).eq('id', 1);
   if (error) throw error;
 };
