@@ -2445,11 +2445,31 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
   const [togglePending, setTogglePending] = useState({});
+
+  const [wlJutsu,      setWlJutsu]      = useState(profile?.work_thread_id || '');
+  const [wlCustom,     setWlCustom]     = useState(profile?.custom_item_thread_id || '');
+  const [wlSummon,     setWlSummon]     = useState(profile?.summon_thread_id || '');
+  const [wlSaving,     setWlSaving]     = useState({ jutsu: false, custom: false, summon: false });
+
+  const saveWorkLog = async (type) => {
+    const map = { jutsu: [wlJutsu, updateMyWorkThreadId], custom: [wlCustom, updateMyCustomItemThreadId], summon: [wlSummon, updateMySummonThreadId] };
+    const [val, fn] = map[type];
+    setWlSaving(s => ({ ...s, [type]: true }));
+    try {
+      const updated = await fn(val);
+      onProfileUpdate(updated);
+      setMsg('Work log thread ID saved.');
+    } catch (e) {
+      setMsg('Failed to save: ' + (e.message || e));
+    } finally {
+      setWlSaving(s => ({ ...s, [type]: false }));
+    }
+  };
 
   const handleToggle = async (key) => {
     if (!isOwner || !isSupabaseConfigured()) return;
@@ -2570,6 +2590,45 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 </button>
               </div>
             </div>
+
+            {/* Work Log Thread IDs — staff+ */}
+            {isStaff && isSupabaseConfigured() && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="MessageSquare" size={20} className="text-sky-500" /> Work Log Thread IDs
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded">Staff+</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">Your personal Discord thread IDs where reviewer work logs are posted when you approve entries.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {[
+                    { label: 'Jutsu / Battlemode', val: wlJutsu, set: setWlJutsu, type: 'jutsu' },
+                    { label: 'Custom Item',         val: wlCustom, set: setWlCustom, type: 'custom' },
+                    { label: 'Summon',              val: wlSummon, set: setWlSummon, type: 'summon' },
+                  ].map(({ label, val, set, type }) => (
+                    <div key={type}>
+                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">{label}</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="text"
+                          value={val}
+                          onChange={e => set(e.target.value)}
+                          placeholder="Thread ID"
+                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => saveWorkLog(type)}
+                          disabled={wlSaving[type]}
+                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-50 transition-colors shrink-0"
+                        >
+                          {wlSaving[type] ? '...' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Submission Gates — owner only */}
             {isOwner && (
@@ -2839,35 +2898,17 @@ function MemberWorkThreadInput({ member, onSave }) {
 /* ============================================================================
    COMPONENT: UserMenu
    ============================================================================ */
-function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onSetDevRole, roleOverride, onSetRoleOverride, onProfileUpdate }) {
+function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate, viewAsRole, onSetViewAsRole }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
 
-  const activeProfile = supabaseReady
-    ? (profile ? { ...profile, role: roleOverride || profile.role } : null)
-    : {
-        id: 'dev-user-id',
-        username: 'Dev Administrator',
-        email: 'dev@example.com',
-        avatar_url: null,
-        role: devRole,
-        work_thread_id: profile?.work_thread_id || '',
-        custom_item_thread_id: profile?.custom_item_thread_id || '',
-        summon_thread_id: profile?.summon_thread_id || '',
-      };
-
-  const [workThreadId, setWorkThreadId] = useState(activeProfile?.work_thread_id || '');
-  const [savingWorkThread, setSavingWorkThread] = useState(false);
-  const [customItemThreadId, setCustomItemThreadId] = useState(activeProfile?.custom_item_thread_id || '');
-  const [savingCustomItemThread, setSavingCustomItemThread] = useState(false);
-  const [summonThreadId, setSummonThreadId] = useState(activeProfile?.summon_thread_id || '');
-  const [savingSummonThread, setSavingSummonThread] = useState(false);
-
-  useEffect(() => {
-    setWorkThreadId(activeProfile?.work_thread_id || '');
-    setCustomItemThreadId(activeProfile?.custom_item_thread_id || '');
-    setSummonThreadId(activeProfile?.summon_thread_id || '');
-  }, [activeProfile?.work_thread_id, activeProfile?.custom_item_thread_id, activeProfile?.summon_thread_id]);
+  const activeProfile = supabaseReady ? profile : {
+    id: 'dev-user-id',
+    username: 'Dev Administrator',
+    email: 'dev@example.com',
+    avatar_url: null,
+    role: devRole,
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -2927,53 +2968,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
-  const handleSaveWorkThread = async () => {
-    setSavingWorkThread(true);
-    try {
-      if (supabaseReady) {
-        const updated = await updateMyWorkThreadId(workThreadId);
-        onProfileUpdate(updated);
-      } else {
-        onProfileUpdate({ ...profile, work_thread_id: workThreadId });
-      }
-    } catch (err) {
-      console.error('[NARP] Failed to update work thread ID:', err);
-      alert('Failed to update work thread ID: ' + (err.message || err));
-    } finally {
-      setSavingWorkThread(false);
-    }
-  };
-
-  const handleSaveCustomItemThread = async () => {
-    setSavingCustomItemThread(true);
-    try {
-      if (supabaseReady) {
-        const updated = await updateMyCustomItemThreadId(customItemThreadId);
-        onProfileUpdate(updated);
-      }
-    } catch (err) {
-      console.error('[NARP] Failed to update custom item thread ID:', err);
-      alert('Failed to update custom item thread ID: ' + (err.message || err));
-    } finally {
-      setSavingCustomItemThread(false);
-    }
-  };
-
-  const handleSaveSummonThread = async () => {
-    setSavingSummonThread(true);
-    try {
-      if (supabaseReady) {
-        const updated = await updateMySummonThreadId(summonThreadId);
-        onProfileUpdate(updated);
-      }
-    } catch (err) {
-      console.error('[NARP] Failed to update summon thread ID:', err);
-      alert('Failed to update summon thread ID: ' + (err.message || err));
-    } finally {
-      setSavingSummonThread(false);
-    }
-  };
-
   return (
     <div className="relative shrink-0" ref={menuRef}>
       <button onClick={() => setOpen(!open)}
@@ -2994,68 +2988,19 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
             </div>
           </div>
-          {supabaseReady && ['staff', 'admin', 'owner'].includes(activeProfile?.role) && (
-            <div className="p-4 border-b border-slate-100 bg-slate-50 flex flex-col gap-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Jutsu Work Log Thread ID</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={workThreadId}
-                    onChange={(e) => setWorkThreadId(e.target.value)}
-                    placeholder="Thread ID"
-                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveWorkThread}
-                    disabled={savingWorkThread}
-                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
-                  >
-                    {savingWorkThread ? '...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Custom Item Work Log Thread ID</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={customItemThreadId}
-                    onChange={(e) => setCustomItemThreadId(e.target.value)}
-                    placeholder="Thread ID"
-                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveCustomItemThread}
-                    disabled={savingCustomItemThread}
-                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
-                  >
-                    {savingCustomItemThread ? '...' : 'Save'}
-                  </button>
-                </div>
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">Summon Work Log Thread ID</label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={summonThreadId}
-                    onChange={(e) => setSummonThreadId(e.target.value)}
-                    placeholder="Thread ID"
-                    className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-indigo-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleSaveSummonThread}
-                    disabled={savingSummonThread}
-                    className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded disabled:opacity-50 transition-colors shrink-0"
-                  >
-                    {savingSummonThread ? '...' : 'Save'}
-                  </button>
-                </div>
-              </div>
+          {profile?.role === 'owner' && (
+            <div className="px-4 py-3 border-b border-slate-100 bg-amber-50">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Preview as</label>
+              <select
+                value={viewAsRole || profile.role}
+                onChange={e => onSetViewAsRole(e.target.value === profile.role ? null : e.target.value)}
+                className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-amber-400"
+              >
+                <option value="owner">Owner (default)</option>
+                <option value="admin">Admin</option>
+                <option value="staff">Reviewer</option>
+                <option value="user">User</option>
+              </select>
             </div>
           )}
           {(!supabaseReady || profile?.role === 'owner') && (
@@ -3903,14 +3848,11 @@ export default function App() {
   const [profile, setProfile] = useState(null);
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
-  const [roleOverride, setRoleOverride] = useState(() => {
-    try { return sessionStorage.getItem('narp_role_override') || ''; } catch { return ''; }
-  });
+  const [viewAsRole, setViewAsRole] = useState(null);
   const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
-  const realRole = supabaseReady ? (profile?.role || 'guest') : devRole;
-  const role     = roleOverride || realRole;
+  const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
@@ -4140,7 +4082,7 @@ export default function App() {
 
   const handleSignIn    = async () => { try { await signInWithDiscord(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
   const handleDevSignIn = async () => { await signInWithDevAccess(); };
-  const handleSignOut = async () => { try { await signOut(); setProfile(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
+  const handleSignOut = async () => { try { await signOut(); setProfile(null); setViewAsRole(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
     if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
@@ -4847,7 +4789,7 @@ export default function App() {
                   <Icon n="Refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
                 </button>
               )}
-              {isAdmin && (
+              {isStaff && (
                 <button onClick={() => setModals(m => ({ ...m, system: true }))}
                         className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
                   <Icon n="Settings" size={14}/>
@@ -4861,6 +4803,11 @@ export default function App() {
                 </div>
               )}
             </div>
+            {viewAsRole && (
+              <span className="text-[10px] font-bold px-2 py-1 bg-amber-500 text-white rounded-full shrink-0">
+                Previewing as {viewAsRole === 'staff' ? 'Reviewer' : viewAsRole}
+              </span>
+            )}
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
@@ -4872,6 +4819,8 @@ export default function App() {
               onDevSignIn={handleDevSignIn}
               onSignOut={handleSignOut}
               onProfileUpdate={setProfile}
+              viewAsRole={viewAsRole}
+              onSetViewAsRole={setViewAsRole}
             />
           </div>
         </div>
@@ -5189,6 +5138,7 @@ export default function App() {
           onRefresh={refreshDB}
           refreshing={refreshing}
           isOwner={isOwner}
+          isStaff={isStaff}
           webhookConfig={webhookConfig}
           onWebhookConfigSave={(key, value) => {
             saveWebhookConfig(key, value).then(() => {
@@ -5199,7 +5149,9 @@ export default function App() {
           onManageBL={() => setModals(m => ({ ...m, manageBL: true }))}
           submissionControls={submissionControls}
           onToggleSubmission={(key, value) => setSubmissionControls(prev => ({ ...prev, [key]: value }))}
-          currentUserId={profile?.id} />
+          currentUserId={profile?.id}
+          profile={profile}
+          onProfileUpdate={setProfile} />
       )}
       {modals.audit && isAdmin && (
         <AuditLogModal onClose={() => setModals(m => ({ ...m, audit: false }))} />
