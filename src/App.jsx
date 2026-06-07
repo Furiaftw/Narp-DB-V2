@@ -2453,9 +2453,10 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
 
   const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
   const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
+  const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
   const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
   const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
-  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, custom: false, summon: false });
+  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
 
   const saveWorkLog = async (type) => {
     setWlSaving(s => ({ ...s, [type]: true }));
@@ -2464,6 +2465,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
         onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
       } else if (type === 'battle') {
         onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
+      } else if (type === 'oc') {
+        onWebhookConfigSave('discord_oc_thread_id', wlOC);
       } else if (type === 'custom') {
         const updated = await updateMyCustomItemThreadId(wlCustom);
         onProfileUpdate(updated);
@@ -2599,18 +2602,19 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               </div>
             </div>
 
-            {/* Log Thread IDs — staff+ */}
-            {isStaff && isSupabaseConfigured() && (
+            {/* Log Thread IDs — admin+ */}
+            {isAdmin && isSupabaseConfigured() && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="MessageSquare" size={20} className="text-sky-500" /> Log Thread IDs
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-300 px-2 py-0.5 rounded">Staff+</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 border border-indigo-300 px-2 py-0.5 rounded">Admin+</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
                     { label: 'Jutsu',        val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
                     { label: 'Battlemode',   val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
+                    { label: 'OC / Character', val: wlOC,   set: setWlOC,     type: 'oc',     ownerOnly: true },
                     { label: 'Custom Item',  val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
                     { label: 'Summon',       val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
                   ].map(({ label, val, set, type, ownerOnly }) => (
@@ -2721,9 +2725,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <div className="space-y-3">
                   {[
                     { key: 'discord_guild_id',            label: 'Guild ID',             placeholder: '12345678901234567' },
-                    { key: 'discord_oc_thread_id',        label: 'OC Thread',            placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_summon_thread_id',    label: 'Summon Thread',        placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_custom_item_thread_id',label:'Custom Item Thread',   placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
