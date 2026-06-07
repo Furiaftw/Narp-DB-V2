@@ -2445,7 +2445,7 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
@@ -5150,6 +5150,7 @@ export default function App() {
           onRefresh={refreshDB}
           refreshing={refreshing}
           isOwner={isOwner}
+          isAdmin={isAdmin}
           isStaff={isStaff}
           webhookConfig={webhookConfig}
           onWebhookConfigSave={(key, value) => {
