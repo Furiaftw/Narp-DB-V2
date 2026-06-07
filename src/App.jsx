@@ -1550,11 +1550,9 @@ function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpl
       const data = buildData();
       await submitPendingJutsu('insert', null, data, 'pending_review');
 
-      const sess = await getCurrentSession();
-      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-      await fetch('/.netlify/functions/reviewer-ping', {
+      fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHdr },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: data.name,
@@ -4237,20 +4235,17 @@ export default function App() {
       await submitPendingJutsu(operation, targetId, payload, status);
 
       const tab = t;
-      getCurrentSession().then(sess => {
-        const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-        fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: entity?.name || 'Unknown',
-            itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
-            submitterName: profile?.username || 'Unknown',
-          }),
-        }).catch((err) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', err);
-        });
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: entity?.name || 'Unknown',
+          itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
+          submitterName: profile?.username || 'Unknown',
+        }),
+      }).catch((err) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', err);
       });
 
       await refreshPending();
@@ -4567,18 +4562,18 @@ export default function App() {
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
 
-      getCurrentSession().then(sess => {
-        const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-        fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr },
-          body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType }),
-        }).catch((pingErr) => {
-          console.warn('Failed to send reviewer second approval ping:', pingErr);
-        });
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType }),
+      }).catch((pingErr) => {
+        console.warn('Failed to send reviewer second approval ping:', pingErr);
+      });
 
-        // DM submitter — their entry passed first check
-        if (item?.submitter?.discord_id) {
+      // DM submitter — their entry passed first check
+      if (item?.submitter?.discord_id) {
+        getCurrentSession().then(sess => {
+          const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
           fetch('/.netlify/functions/discord-dm', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4587,8 +4582,8 @@ export default function App() {
               message: `✅ Your submission **${itemName}** passed its first review check! It's now awaiting final approval from a second reviewer.`,
             }),
           }).catch(err => console.warn('[NARP] First check DM failed:', err));
-        }
-      });
+        });
+      }
 
       await refreshPending();
     } catch (e) {
@@ -4635,14 +4630,11 @@ export default function App() {
       const itemType = 'Jutsu';
 
       // Post a plain retraction notice to the Discord log channel — no work log
-      getCurrentSession().then(sess => {
-        const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-        fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHdr },
-          body: JSON.stringify({ triggerType: 'retracted', itemName, itemType }),
-        }).catch(err => console.warn('[NARP] Retraction ping failed:', err));
-      });
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ triggerType: 'retracted', itemName, itemType }),
+      }).catch(err => console.warn('[NARP] Retraction ping failed:', err));
 
       await cancelPendingJutsu(id);
       await refreshPending();
