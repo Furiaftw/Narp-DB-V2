@@ -3015,35 +3015,24 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               </select>
             </div>
           )}
-          {(!supabaseReady || profile?.role === 'owner') && (
+          {!supabaseReady && (
             <div className="border-t border-slate-100 p-3 bg-slate-50">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role Override {supabaseReady ? '(per tab)' : ''}
+                <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['guest', 'user', 'staff', 'admin', 'owner'].map(r => {
-                  const active = supabaseReady ? roleOverride === r : devRole === r;
-                  return (
-                    <button key={r} type="button"
-                      onClick={() => {
-                        if (supabaseReady) onSetRoleOverride(active ? '' : r);
-                        else onSetDevRole(r);
-                      }}
-                      className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
-                        active
-                          ? 'bg-indigo-600 text-white border-indigo-600'
-                          : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
-                      }`}>
-                      {r === 'staff' ? 'reviewer' : r}
-                    </button>
-                  );
-                })}
+                {['user', 'staff', 'admin', 'owner'].map(r => (
+                  <button key={r} type="button"
+                    onClick={() => onToggleDevRole(r)}
+                    className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                      devRole === r
+                        ? 'bg-indigo-600 text-white border-indigo-600'
+                        : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
+                    }`}>
+                    {r === 'staff' ? 'reviewer' : r}
+                  </button>
+                ))}
               </div>
-              {supabaseReady && roleOverride && (
-                <div className="text-[10px] text-amber-600 font-semibold mt-1.5">
-                  ⚠ Overriding real role ({profile?.role}) → {roleOverride}
-                </div>
-              )}
             </div>
           )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
@@ -3972,12 +3961,6 @@ export default function App() {
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
   useEffect(() => { LS.set(STORAGE.ROLE, devRole); }, [devRole]);
-  useEffect(() => {
-    try {
-      if (roleOverride) sessionStorage.setItem('narp_role_override', roleOverride);
-      else sessionStorage.removeItem('narp_role_override');
-    } catch {}
-  }, [roleOverride]);
   useEffect(() => { LS.set(STORAGE.CART, cart); }, [cart]);
 
   useEffect(() => {
@@ -4824,9 +4807,7 @@ export default function App() {
               profile={profile}
               supabaseReady={supabaseReady}
               devRole={devRole}
-              onSetDevRole={setDevRole}
-              roleOverride={roleOverride}
-              onSetRoleOverride={setRoleOverride}
+              onToggleDevRole={setDevRole}
               onSignIn={handleSignIn}
               onDevSignIn={handleDevSignIn}
               onSignOut={handleSignOut}
