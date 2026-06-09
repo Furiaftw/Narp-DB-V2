@@ -2609,7 +2609,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     <div key={type}>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
                         {label}
-                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Owner</span>}
+                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Operator</span>}
                       </label>
                       <div className="flex gap-2">
                         <input
@@ -2640,7 +2640,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2707,7 +2707,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="MessageSquare" size={20} className="text-violet-500" /> Discord Notification Config
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">Configure where Discord notifications are sent. Webhook URLs remain in Netlify env vars (they contain auth tokens).</p>
                 <div className="space-y-3">
@@ -2975,7 +2975,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role}
+          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -2996,7 +2996,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 onChange={e => onSetViewAsRole(e.target.value === profile.role ? null : e.target.value)}
                 className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-amber-400"
               >
-                <option value="owner">Owner (default)</option>
+                <option value="owner">Operator (default)</option>
                 <option value="admin">Admin</option>
                 <option value="staff">Reviewer</option>
                 <option value="user">User</option>
@@ -3017,7 +3017,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
                     }`}>
-                    {r === 'staff' ? 'reviewer' : r}
+                    {r === 'staff' ? 'Reviewer' : r === 'owner' ? 'Operator' : r}
                   </button>
                 ))}
               </div>
@@ -4733,7 +4733,7 @@ export default function App() {
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
     ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
-    ...(isAdmin ? [{ id: 'roster',  label: 'Roster' }] : []),
+    { id: 'roster', label: 'Roster' },
   ];
 
   const switchTab = (tabId) => {
@@ -5084,7 +5084,7 @@ export default function App() {
           </div>
         )}
 
-        {tab === 'roster' && isAdmin && (
+        {tab === 'roster' && (
           <RosterPage userRole={role} userId={profile?.id} />
         )}
       </div>

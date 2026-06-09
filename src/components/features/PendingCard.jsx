@@ -771,18 +771,20 @@ export function PendingJutsuCard({
                               {senderName}
                             </span>
                             {msg.profiles?.role && (() => {
-                              const senderRole = msg.profiles.role === 'owner' ? 'admin' : msg.profiles.role;
+                              const senderRole = msg.profiles.role;
                               return (
                                 <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
-                                  isMe 
+                                  isMe
                                     ? isPrivate ? 'bg-amber-500/30 text-amber-50' : 'bg-indigo-500/30 text-indigo-50'
-                                    : senderRole === 'admin'
-                                      ? 'bg-indigo-100 text-indigo-700'
-                                      : senderRole === 'staff'
-                                        ? 'bg-emerald-100 text-emerald-700'
-                                        : 'bg-slate-100 text-slate-600'
+                                    : senderRole === 'owner'
+                                      ? 'bg-amber-100 text-amber-700'
+                                      : senderRole === 'admin'
+                                        ? 'bg-indigo-100 text-indigo-700'
+                                        : senderRole === 'staff'
+                                          ? 'bg-emerald-100 text-emerald-700'
+                                          : 'bg-slate-100 text-slate-600'
                                 }`}>
-                                  {senderRole === 'staff' ? 'Reviewer' : senderRole}
+                                  {senderRole === 'staff' ? 'Reviewer' : senderRole === 'owner' ? 'Operator' : senderRole}
                                 </span>
                               );
                             })()}
