@@ -99,9 +99,9 @@ export function AuditLogModal({ onClose }) {
     const colors = { user: 'text-slate-500', staff: 'text-emerald-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
     return (
       <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{from === 'staff' ? 'Reviewer' : (from || '∅')}</span>
+        <span className={colors[from] || ''}>{from === 'staff' ? 'Reviewer' : from === 'owner' ? 'Operator' : (from || '∅')}</span>
         <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{to === 'staff' ? 'Reviewer' : (to || '∅')}</span>
+        <span className={colors[to] || ''}>{to === 'staff' ? 'Reviewer' : to === 'owner' ? 'Operator' : (to || '∅')}</span>
       </span>
     );
   };

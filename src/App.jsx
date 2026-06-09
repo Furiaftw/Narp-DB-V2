@@ -44,6 +44,7 @@ import {
   updateSubmissionControl,
 } from './lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
+import RosterPage from './pages/RosterPage';
 
 
 /* ============================================================================
@@ -1343,13 +1344,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                         <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
                       </button>
                     )}
-                    <button
-                      type="button"
-                      disabled
-                      className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-400 flex items-center gap-2 border-t border-slate-100 cursor-not-allowed opacity-60"
-                    >
-                      <Icon n="PlusCir" size={14} className="text-emerald-400" /> OC Submission — Coming Soon
-                    </button>
                     <div className="border-t border-slate-100">
                       {submissionControls?.summon_paused ? (
                         <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
@@ -2451,10 +2445,9 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
 
   const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
   const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
-  const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
   const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
   const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
-  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
+  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, custom: false, summon: false });
 
   const saveWorkLog = async (type) => {
     setWlSaving(s => ({ ...s, [type]: true }));
@@ -2463,8 +2456,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
         onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
       } else if (type === 'battle') {
         onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
-      } else if (type === 'oc') {
-        onWebhookConfigSave('discord_oc_thread_id', wlOC);
       } else if (type === 'custom') {
         const updated = await updateMyCustomItemThreadId(wlCustom);
         onProfileUpdate(updated);
@@ -2610,16 +2601,15 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
-                    { label: 'Jutsu',        val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
-                    { label: 'Battlemode',   val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
-                    { label: 'OC / Character', val: wlOC,   set: setWlOC,     type: 'oc',     ownerOnly: true },
-                    { label: 'Custom Item',  val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
-                    { label: 'Summon',       val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
+                    { label: 'Jutsu',       val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
+                    { label: 'Battlemode',  val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
+                    { label: 'Custom Item', val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
+                    { label: 'Summon',      val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
                   ].map(({ label, val, set, type, ownerOnly }) => (
                     <div key={type}>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
                         {label}
-                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Owner</span>}
+                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Operator</span>}
                       </label>
                       <div className="flex gap-2">
                         <input
@@ -2650,7 +2640,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -2717,7 +2707,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="MessageSquare" size={20} className="text-violet-500" /> Discord Notification Config
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Owner only</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">Configure where Discord notifications are sent. Webhook URLs remain in Netlify env vars (they contain auth tokens).</p>
                 <div className="space-y-3">
@@ -2985,7 +2975,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role}
+          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -3006,7 +2996,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 onChange={e => onSetViewAsRole(e.target.value === profile.role ? null : e.target.value)}
                 className="w-full text-xs border border-slate-300 bg-white rounded px-2 py-1 text-slate-800 focus:outline-none focus:border-amber-400"
               >
-                <option value="owner">Owner (default)</option>
+                <option value="owner">Operator (default)</option>
                 <option value="admin">Admin</option>
                 <option value="staff">Reviewer</option>
                 <option value="user">User</option>
@@ -3027,7 +3017,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
                     }`}>
-                    {r === 'staff' ? 'reviewer' : r}
+                    {r === 'staff' ? 'Reviewer' : r === 'owner' ? 'Operator' : r}
                   </button>
                 ))}
               </div>
@@ -4743,6 +4733,7 @@ export default function App() {
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
     ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
+    { id: 'roster', label: 'Roster' },
   ];
 
   const switchTab = (tabId) => {
@@ -4810,22 +4801,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* FILTER BAR */}
-        <FilterBar
-          tab={tab} f={f} setF={setF}
-          activeFilterCount={fCount}
-          clearF={clearF}
-          isAdmin={tab === 'jutsus' ? (role !== 'guest') : isAdmin}
-          onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-          onOpenStatelessSubmission={setStatelessType}
-          submissionControls={submissionControls} />
+        {/* FILTER BAR — jutsu tab only */}
+        {tab === 'jutsus' && (
+          <FilterBar
+            tab={tab} f={f} setF={setF}
+            activeFilterCount={fCount}
+            clearF={clearF}
+            isAdmin={role !== 'guest'}
+            onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+            onOpenStatelessSubmission={setStatelessType}
+            submissionControls={submissionControls} />
+        )}
       </div>
 
       {/* FILTER PANEL — outside sticky header, in normal document flow */}
-      <FilterBarPanel
-        tab={tab} f={f} setF={setF}
-        bloodlinesDb={sortedBloodlines}
-        specOptions={sortedSpecs} />
+      {tab === 'jutsus' && (
+        <FilterBarPanel
+          tab={tab} f={f} setF={setF}
+          bloodlinesDb={sortedBloodlines}
+          specOptions={sortedSpecs} />
+      )}
 
       {/* TAB BAR */}
       {TABS.length > 1 && (
@@ -4850,7 +4845,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20">
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5087,6 +5082,10 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {tab === 'roster' && (
+          <RosterPage userRole={role} userId={profile?.id} />
         )}
       </div>
 
