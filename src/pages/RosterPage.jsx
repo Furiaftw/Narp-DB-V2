@@ -254,20 +254,52 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
   );
 }
 
+// ─── NEW SQUAD MODAL ─────────────────────────────────────────────────────────
+// Lets the admin pick a squad number before creating a new squad
+
+function NewSquadModal({ squadType, suggestedNumber, onConfirm, onClose }) {
+  const [numStr, setNumStr] = useState(String(suggestedNumber));
+  const parsed = parseInt(numStr, 10);
+  const finalNum = parsed > 0 ? parsed : suggestedNumber;
+  return (
+    <Modal title={`New ${squadType === 'chunin' ? 'Chunin' : 'Genin'} Squad`} onClose={onClose}>
+      <Field
+        label={`Squad Number (default: ${suggestedNumber})`}
+        value={numStr}
+        onChange={setNumStr}
+        type="number"
+        placeholder={String(suggestedNumber)}
+      />
+      <p className="text-[10px] italic text-slate-500 mb-2">
+        The first member you add will be set as squad captain.
+      </p>
+      <SaveBtn label="Continue → Add Captain" onClick={() => onConfirm(finalNum)} />
+    </Modal>
+  );
+}
+
 // ─── SQUAD MEMBER MODAL ───────────────────────────────────────────────────────
 
-function SquadMemberModal({ village, squadType, squadNumber, role, member, userId, onClose, onSaved }) {
+function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, member, userId, onClose, onSaved }) {
   const isEdit = !!member;
-  const [name, setName]     = useState(member?.name || '');
-  const [link, setLink]     = useState(member?.discord_link || '');
+
+  // Normalise: 'part_time' stored in DB is treated as the squad's base role + partTime flag
+  const isPartTimeRole   = rawRole === 'part_time';
+  const baseRole         = isPartTimeRole ? (squadType === 'chunin' ? 'member' : 'genin') : rawRole;
+  const isPartTimeMember = isPartTimeRole || member?.role === 'part_time';
+
+  const [name, setName]       = useState(member?.name || '');
+  const [link, setLink]       = useState(member?.discord_link || '');
+  const [partTime, setPartTime] = useState(isPartTimeMember);
   const [loading, setLoading] = useState(false);
-  const [error, setError]   = useState('');
+  const [error, setError]     = useState('');
 
   const handleSave = async () => {
     if (!name.trim()) { setError('Name is required.'); return; }
     setLoading(true); setError('');
+    const finalRole = (baseRole !== 'captain' && partTime) ? 'part_time' : baseRole;
     const payload = {
-      village, squad_type: squadType, squad_number: squadNumber, role,
+      village, squad_type: squadType, squad_number: squadNumber, role: finalRole,
       name: name.trim(), discord_link: link.trim() || null,
       updated_by: userId,
     };
@@ -282,11 +314,25 @@ function SquadMemberModal({ village, squadType, squadNumber, role, member, userI
     onSaved();
   };
 
-  const roleLabel = role === 'captain' ? 'Captain' : role === 'member' ? 'Chunin Member' : 'Genin';
+  const roleLabel = baseRole === 'captain' ? 'Captain' : baseRole === 'member' ? 'Chunin Member' : 'Genin';
   return (
     <Modal title={`${isEdit ? 'Edit' : 'Add'} ${roleLabel} — Squad ${squadNumber}`} onClose={onClose}>
       <Field label="Character Name" value={name} onChange={setName} placeholder="OC Name" />
       <Field label="Discord Link" value={link} onChange={setLink} placeholder="https://discord.com/channels/..." />
+      {baseRole !== 'captain' && (
+        <div className="mb-3 flex items-center gap-2.5">
+          <input
+            type="checkbox" id="partTimeChk"
+            checked={partTime}
+            onChange={e => setPartTime(e.target.checked)}
+            className="w-4 h-4 rounded"
+            style={{ accentColor: '#38bdf8' }}
+          />
+          <label htmlFor="partTimeChk" className="text-xs text-slate-400 cursor-pointer select-none">
+            Part-time member
+          </label>
+        </div>
+      )}
       {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
       <SaveBtn loading={loading} onClick={handleSave} />
     </Modal>
@@ -450,12 +496,18 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                 : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{captain.name}</span>
               }
             </div>
-            {canEdit && (
-              <div className="flex gap-1 shrink-0 ml-2">
-                <AdminBtn icon={Pencil} onClick={() => setModal({ role: 'captain', member: captain })} title="Edit" />
-                <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title="Remove" />
-              </div>
-            )}
+            <div className="flex items-center gap-1 shrink-0 ml-2">
+              <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
+                    style={{ background: `${t.accent}22`, color: t.accent }}>
+                Captain
+              </span>
+              {canEdit && (
+                <>
+                  <AdminBtn icon={Pencil} onClick={() => setModal({ role: 'captain', member: captain })} title="Edit" />
+                  <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title="Remove" />
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -474,12 +526,20 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                 : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{m.name}</span>
               }
             </div>
-            {canEdit && (
-              <div className="flex gap-1 shrink-0 ml-2">
-                <AdminBtn icon={Pencil} onClick={() => setModal({ role: m.role, member: m })} title="Edit" />
-                <AdminBtn icon={Trash2} onClick={() => handleDelete(m.id)} color="#f87171" title="Remove" />
-              </div>
-            )}
+            <div className="flex items-center gap-1 shrink-0 ml-2">
+              {m.role === 'part_time' && (
+                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
+                      style={{ background: 'rgba(148,163,184,0.12)', color: '#94a3b8' }}>
+                  Part Time
+                </span>
+              )}
+              {canEdit && (
+                <>
+                  <AdminBtn icon={Pencil} onClick={() => setModal({ role: m.role, member: m })} title="Edit" />
+                  <AdminBtn icon={Trash2} onClick={() => handleDelete(m.id)} color="#f87171" title="Remove" />
+                </>
+              )}
+            </div>
           </div>
         ))}
 
@@ -803,16 +863,15 @@ export default function RosterPage({ userRole, userId }) {
     return nums.map(n => ({ squadNumber: n, rows: rows.filter(s => s.squad_number === n) }));
   };
 
-  // Add new squad (admin only): creates a captain row with a new squad_number
-  const handleAddSquad = async (villageId, squadType) => {
+  // Add new squad: show number picker first, then captain modal
+  const handleAddSquad = (villageId, squadType) => {
     const existing = squads.filter(s => s.village === villageId && s.squad_type === squadType);
     const maxNum = existing.length > 0 ? Math.max(...existing.map(s => s.squad_number)) : 0;
-    const newNum = maxNum + 1;
-    // Open modal for captain of the new squad — we'll reuse SquadMemberModal via a local state
-    setNewSquad({ village: villageId, squadType, squadNumber: newNum });
+    setNewSquadConfig({ village: villageId, squadType, suggestedNumber: maxNum + 1 });
   };
 
-  const [newSquad, setNewSquad]           = useState(null);
+  const [newSquadConfig, setNewSquadConfig] = useState(null);
+  const [newSquad, setNewSquad]             = useState(null);
   const [swordsModal, setSwordsModal]       = useState(null); // { sword, entry } | null
   const [jinchurikiModal, setJinchurikiModal] = useState(null); // { beastId, entry } | null
   const [wandererModal, setWandererModal]   = useState(null); // null | 'add' | entry
@@ -1113,6 +1172,20 @@ export default function RosterPage({ userRole, userId }) {
       </div>
 
       {/* New squad captain modal */}
+      {/* Step 1: pick squad number */}
+      {newSquadConfig && (
+        <NewSquadModal
+          squadType={newSquadConfig.squadType}
+          suggestedNumber={newSquadConfig.suggestedNumber}
+          onConfirm={(num) => {
+            setNewSquadConfig(null);
+            setNewSquad({ village: newSquadConfig.village, squadType: newSquadConfig.squadType, squadNumber: num });
+          }}
+          onClose={() => setNewSquadConfig(null)}
+        />
+      )}
+
+      {/* Step 2: add captain */}
       {newSquad && (
         <SquadMemberModal
           village={newSquad.village} squadType={newSquad.squadType}
