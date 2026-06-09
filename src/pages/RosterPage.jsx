@@ -14,6 +14,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
+  PieChart, Pie, Cell, Legend,
 } from 'recharts';
 import { supabase } from '../lib/supabase';
 
@@ -1077,9 +1078,10 @@ function DataTab({ entries, squads }) {
         results.push({ type: 'overloaded', color: '#f87171', title: `${vn} teachers overloaded`, body: `${vn} averages ${c.geninPerTeacher} genin per teacher.`, cta: `Create a Jonin or Special Jonin in ${vn}.` });
       if (c.teachers > 0 && c.geninPerTeacher < 1.5 && c.genin > 0)
         results.push({ type: 'teacher_surplus', color: '#94a3b8', title: `${vn} has open teacher slots`, body: `${vn} only has ${c.geninPerTeacher} genin per teacher. Plenty of room for new genin.`, cta: `Create a Genin in ${vn}.` });
-      const total = c.unteachedGenin + c.unteachedChunin;
-      if (total > 0)
-        results.push({ type: 'open_squads', color: '#fb923c', title: `${vn} needs squad captains`, body: `${vn} has ${[c.unteachedGenin > 0 ? `${c.unteachedGenin} genin squad${c.unteachedGenin > 1 ? 's' : ''} without a captain` : null, c.unteachedChunin > 0 ? `${c.unteachedChunin} chunin squad${c.unteachedChunin > 1 ? 's' : ''} without a leader` : null].filter(Boolean).join(' and ')}.`, cta: `Create a Jonin or Special Jonin in ${vn}.` });
+      if (c.unteachedGenin > 0)
+        results.push({ type: 'open_squads', color: '#fb923c', title: `${vn} needs squad captains`, body: `${vn} has ${c.unteachedGenin} genin squad${c.unteachedGenin > 1 ? 's' : ''} without a captain.`, cta: `Create a Jonin or Special Jonin in ${vn}.` });
+      if (c.unteachedChunin > 0)
+        results.push({ type: 'open_squads', color: '#fb923c', title: `${vn} needs squad leaders`, body: `${vn} has ${c.unteachedChunin} chunin squad${c.unteachedChunin > 1 ? 's' : ''} without a leader.`, cta: `Create a Chunin in ${vn}.` });
     });
     return results;
   }, [allCounts, allEmpty]);
@@ -1095,6 +1097,45 @@ function DataTab({ entries, squads }) {
     villages.forEach(v => { row[v.name.replace('gakure', '')] = allCounts[v.id][key]; });
     return row;
   });
+
+  const serverStats = useMemo(() => {
+    const totalGenin        = villages.reduce((s, v) => s + allCounts[v.id].genin, 0);
+    const totalChunin       = villages.reduce((s, v) => s + allCounts[v.id].chunin, 0);
+    const totalJonin        = villages.reduce((s, v) => s + allCounts[v.id].jonin, 0);
+    const totalSpecialJonin = villages.reduce((s, v) => s + allCounts[v.id].specialJonin, 0);
+    const totalRogue      = entries.filter(e => e.roster_type === 'rogue').length;
+    const totalWanderer   = entries.filter(e => e.roster_type === 'wanderer').length;
+    const totalSwordsmen  = entries.filter(e => e.roster_type === 'swordsmen').length;
+    const totalJinchuriki = entries.filter(e => e.roster_type === 'jinchuriki').length;
+
+    const villagePopData = villages.map(v => ({
+      name: v.name.replace('gakure', ''),
+      value: allCounts[v.id].total,
+      color: VILLAGE_COLORS[v.id],
+    }));
+
+    const pieData = [
+      ...villagePopData,
+      { name: 'Rogue',      value: totalRogue,      color: '#ef4444' },
+      { name: 'Wanderer',   value: totalWanderer,   color: '#a78bfa' },
+      { name: 'Swordsmen',  value: totalSwordsmen,  color: '#38bdf8' },
+      { name: 'Jinchuriki', value: totalJinchuriki, color: '#f97316' },
+    ].filter(d => d.value > 0);
+
+    const rankBarData = [
+      { name: 'Genin',       total: totalGenin,        fill: RANK_COLORS.genin },
+      { name: 'Chunin',      total: totalChunin,       fill: RANK_COLORS.chunin },
+      { name: 'Jonin',       total: totalJonin,        fill: RANK_COLORS.jonin },
+      { name: 'Spec. Jonin', total: totalSpecialJonin, fill: RANK_COLORS.specialJonin },
+      { name: 'Rogue',       total: totalRogue,        fill: '#ef4444' },
+      { name: 'Wanderer',    total: totalWanderer,     fill: '#a78bfa' },
+      { name: 'Swordsmen',   total: totalSwordsmen,    fill: '#38bdf8' },
+      { name: 'Jinchuriki',  total: totalJinchuriki,   fill: '#f97316' },
+    ].filter(d => d.total > 0);
+
+    const serverTotal = pieData.reduce((s, d) => s + d.value, 0);
+    return { pieData, rankBarData, serverTotal };
+  }, [allCounts, entries]);
 
   function needLevel(val, max) {
     if (val === 0) return 'empty';
@@ -1201,6 +1242,44 @@ function DataTab({ entries, squads }) {
             </div>
         }
       </div>
+
+      {!allEmpty && (
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.25em] font-black text-slate-500 mb-3">
+            Server Population — {serverStats.serverTotal} total characters
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-sm p-4" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <p className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 mb-4">Population by Affiliation</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <PieChart>
+                  <Pie data={serverStats.pieData} dataKey="value" nameKey="name"
+                       cx="50%" cy="50%" outerRadius={80} innerRadius={40}
+                       paddingAngle={3} strokeWidth={0}>
+                    {serverStats.pieData.map((d, i) => <Cell key={i} fill={d.color} fillOpacity={0.85} />)}
+                  </Pie>
+                  <Tooltip {...TT} formatter={(val, name) => [`${val} characters`, name]} />
+                  <Legend iconType="circle" iconSize={8}
+                          formatter={v => <span style={{ color: '#94a3b8', fontSize: 10, fontWeight: 700 }}>{v}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="rounded-sm p-4" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)' }}>
+              <p className="text-[10px] uppercase tracking-[0.2em] font-black text-slate-400 mb-4">Breakdown by Category</p>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={serverStats.rankBarData} layout="vertical" barCategoryGap="20%">
+                  <XAxis type="number" tick={{ fill: '#475569', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} width={72} />
+                  <Tooltip {...TT} />
+                  <Bar dataKey="total" radius={[0, 2, 2, 0]}>
+                    {serverStats.rankBarData.map((d, i) => <Cell key={i} fill={d.fill} fillOpacity={0.85} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
