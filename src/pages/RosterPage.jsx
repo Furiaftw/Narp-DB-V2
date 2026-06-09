@@ -73,9 +73,11 @@ function getCounts(entries, squads, villageId) {
   const geninNums    = [...new Set(allSquads.filter(s => s.squad_type === 'genin').map(s => s.squad_number))];
   const unteachedChunin = chuninNums.filter(n => !allSquads.find(s => s.squad_number === n && s.squad_type === 'chunin' && s.role === 'captain')).length;
   const unteachedGenin  = geninNums.filter(n => !allSquads.find(s => s.squad_number === n && s.squad_type === 'genin' && s.role === 'captain')).length;
-  const geninPerTeacher = teachers > 0 ? +(genin / teachers).toFixed(1) : 0;
+  const geninPerTeacher  = teachers > 0 ? +(genin / teachers).toFixed(1) : 0;
+  const assignedTeachers = allSquads.filter(s => s.squad_type === 'genin' && s.role === 'captain').length;
+  const freeTeachers     = Math.max(0, teachers - assignedTeachers);
 
-  return { jonin, specialJonin, teachers, chunin, genin, total, unteachedChunin, unteachedGenin, geninPerTeacher };
+  return { jonin, specialJonin, teachers, chunin, genin, total, unteachedChunin, unteachedGenin, geninPerTeacher, assignedTeachers, freeTeachers };
 }
 
 // ─── MODAL ────────────────────────────────────────────────────────────────────
@@ -161,6 +163,7 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
   const [bringIn, setBringIn]         = useState(meta.bring_in || []);
   const [friendlyWith, setFriendly]   = useState(meta.friendly_with || []);
   const [hostileWith, setHostile]     = useState(meta.hostile_with || []);
+  const [anbu, setAnbu]               = useState(meta?.anbu || false);
   const [loading, setLoading]         = useState(false);
   const [error, setError]             = useState('');
 
@@ -169,6 +172,7 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
     if (rosterType === 'wanderer')  return { friendly_with: friendlyWith, hostile_with: hostileWith };
     if (rosterType === 'swordsmen') return { sword };
     if (rosterType === 'jinchuriki') return { beast_id: beastId };
+    if (rosterType.endsWith('_jonin') || rosterType.endsWith('_special_jonin')) return { anbu };
     return {};
   };
 
@@ -199,6 +203,16 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
     <Modal title={modalTitle} onClose={onClose}>
       <Field label="Character Name" value={name} onChange={setName} placeholder="OC Name" />
       <Field label="Discord Link" value={link} onChange={setLink} placeholder="https://discord.com/channels/..." />
+
+      {(rosterType.endsWith('_jonin') || rosterType.endsWith('_special_jonin')) && (
+        <div className="mb-3 flex items-center gap-2.5">
+          <input type="checkbox" id="anbuChk" checked={anbu} onChange={e => setAnbu(e.target.checked)}
+                 className="w-4 h-4 rounded" style={{ accentColor: '#38bdf8' }} />
+          <label htmlFor="anbuChk" className="text-xs text-slate-400 cursor-pointer select-none">
+            ANBU operative
+          </label>
+        </div>
+      )}
 
       {rosterType === 'swordsmen' && (
         <div className="mb-3">
@@ -254,33 +268,153 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
   );
 }
 
-// ─── NEW SQUAD MODAL ─────────────────────────────────────────────────────────
-// Lets the admin pick a squad number before creating a new squad
+// ─── CREATE SQUAD MODAL ───────────────────────────────────────────────────────
+// Single-step squad creation: number + optional captain + member slots
 
-function NewSquadModal({ squadType, suggestedNumber, onConfirm, onClose }) {
-  const [numStr, setNumStr] = useState(String(suggestedNumber));
-  const parsed = parseInt(numStr, 10);
-  const finalNum = parsed > 0 ? parsed : suggestedNumber;
+function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads, userId, onSaved, onClose }) {
+  const [numStr, setNumStr]           = useState(String(suggestedNumber));
+  const [captainName, setCaptainName] = useState('');
+  const [captainLink, setCaptainLink] = useState('');
+  const [skipCaptain, setSkipCaptain] = useState(false);
+  const [members, setMembers]         = useState([
+    { name: '', link: '', partTime: false },
+    { name: '', link: '', partTime: false },
+    { name: '', link: '', partTime: false },
+  ]);
+  const [saving, setSaving] = useState(false);
+  const [error, setError]   = useState('');
+
+  const assignedCaptainNames = new Set(
+    squads.filter(s => s.village === village && s.squad_type === 'genin' && s.role === 'captain').map(s => s.name)
+  );
+  const availableMentors = squadType === 'genin'
+    ? entries
+        .filter(e => (e.roster_type === `${village}_jonin` || e.roster_type === `${village}_special_jonin`)
+                     && !assignedCaptainNames.has(e.name))
+        .map(e => ({ name: e.name, discord_link: e.discord_link,
+                     rank: e.roster_type.includes('special') ? 'Spec. Jonin' : 'Jonin' }))
+    : [];
+
+  const updateMember = (i, field, value) =>
+    setMembers(prev => prev.map((m, idx) => idx === i ? { ...m, [field]: value } : m));
+
+  const addSlot = () => setMembers(prev => [...prev, { name: '', link: '', partTime: true }]);
+
+  const handleCreate = async () => {
+    const finalNum = parseInt(numStr, 10) > 0 ? parseInt(numStr, 10) : suggestedNumber;
+    const rows = [];
+
+    if (!skipCaptain && captainName.trim()) {
+      rows.push({ village, squad_type: squadType, squad_number: finalNum, role: 'captain',
+                  name: captainName.trim(), discord_link: captainLink.trim() || null,
+                  created_by: userId, updated_by: userId });
+    } else {
+      rows.push({ village, squad_type: squadType, squad_number: finalNum, role: 'sentinel',
+                  name: '', created_by: userId, updated_by: userId });
+    }
+
+    members.forEach((m, i) => {
+      if (!m.name.trim()) return;
+      const role = (i < 3 && !m.partTime) ? (squadType === 'chunin' ? 'member' : 'genin') : 'part_time';
+      rows.push({ village, squad_type: squadType, squad_number: finalNum, role,
+                  name: m.name.trim(), discord_link: m.link.trim() || null,
+                  created_by: userId, updated_by: userId });
+    });
+
+    setSaving(true);
+    const { error: err } = await supabase.from('roster_squads').insert(rows);
+    setSaving(false);
+    if (err) { console.error(err); setError(err.message); return; }
+    onSaved();
+  };
+
+  const memberLabel = squadType === 'chunin' ? 'Chunin' : 'Genin';
+
   return (
-    <Modal title={`New ${squadType === 'chunin' ? 'Chunin' : 'Genin'} Squad`} onClose={onClose}>
-      <Field
-        label={`Squad Number (default: ${suggestedNumber})`}
-        value={numStr}
-        onChange={setNumStr}
-        type="number"
-        placeholder={String(suggestedNumber)}
-      />
-      <p className="text-[10px] italic text-slate-500 mb-2">
-        The first member you add will be set as squad captain.
-      </p>
-      <SaveBtn label="Continue → Add Captain" onClick={() => onConfirm(finalNum)} />
+    <Modal title={`New ${memberLabel} Squad`} onClose={onClose}>
+      <Field label={`Squad Number (default: ${suggestedNumber})`} value={numStr} onChange={setNumStr}
+             type="number" placeholder={String(suggestedNumber)} />
+
+      {/* Captain section */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between mb-2">
+          <label className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-500">
+            Captain{skipCaptain ? ' (skip)' : ''}
+          </label>
+          <button type="button" onClick={() => setSkipCaptain(s => !s)}
+            className="text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-sm transition-all"
+            style={skipCaptain
+              ? { background: 'rgba(251,146,60,0.15)', color: '#fb923c' }
+              : { background: 'rgba(255,255,255,0.06)', color: '#64748b', border: '1px solid rgba(255,255,255,0.08)' }}>
+            {skipCaptain ? 'Add Later' : 'Skip'}
+          </button>
+        </div>
+        {!skipCaptain && (
+          <>
+            {availableMentors.length > 0 && (
+              <div className="mb-3">
+                <label className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1.5">Available Mentors</label>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pb-1">
+                  {availableMentors.map(m => (
+                    <button key={m.name} type="button"
+                      onClick={() => { setCaptainName(m.name); setCaptainLink(m.discord_link || ''); }}
+                      className="text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-sm transition-all"
+                      style={captainName === m.name
+                        ? { background: '#38bdf8', color: '#021a26' }
+                        : { background: 'rgba(255,255,255,0.06)', color: '#64748b', border: '1px solid rgba(255,255,255,0.08)' }}>
+                      {m.name} · {m.rank}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[9px] italic text-slate-600 mt-1.5">Or enter manually ↓</p>
+              </div>
+            )}
+            <Field label="Captain Name" value={captainName} onChange={setCaptainName} placeholder="OC Name" />
+            <Field label="Captain Discord Link" value={captainLink} onChange={setCaptainLink} placeholder="https://discord.com/channels/..." />
+          </>
+        )}
+      </div>
+
+      {/* Member slots */}
+      <div className="mb-2">
+        <label className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 mb-2">Members</label>
+        {members.map((m, i) => (
+          <div key={i} className="mb-2 rounded-sm p-2.5" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{memberLabel} {i + 1}</span>
+              <div className="flex items-center gap-1.5">
+                <input type="checkbox" id={`ptBulk-${i}`} checked={m.partTime}
+                  onChange={e => updateMember(i, 'partTime', e.target.checked)}
+                  className="w-3.5 h-3.5 rounded" style={{ accentColor: '#38bdf8' }} />
+                <label htmlFor={`ptBulk-${i}`} className="text-[9px] text-slate-500 cursor-pointer select-none">Part-time</label>
+              </div>
+            </div>
+            <input value={m.name} onChange={e => updateMember(i, 'name', e.target.value)}
+              placeholder="Name (optional)"
+              className="w-full rounded-sm px-2.5 py-1.5 text-xs text-slate-200 outline-none mb-1.5"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }} />
+            <input value={m.link} onChange={e => updateMember(i, 'link', e.target.value)}
+              placeholder="Discord link (optional)"
+              className="w-full rounded-sm px-2.5 py-1.5 text-xs text-slate-200 outline-none"
+              style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)' }} />
+          </div>
+        ))}
+        <button type="button" onClick={addSlot}
+          className="flex items-center gap-1 px-2.5 py-1 rounded-sm text-[9px] font-black uppercase tracking-wider w-full justify-center transition-all mt-1"
+          style={{ background: 'rgba(255,255,255,0.03)', color: '#475569', border: '1px dashed rgba(255,255,255,0.08)' }}>
+          <Plus size={9} /> Add Slot (Part-time)
+        </button>
+      </div>
+
+      {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+      <SaveBtn loading={saving} onClick={handleCreate} label="Create Squad" />
     </Modal>
   );
 }
 
 // ─── SQUAD MEMBER MODAL ───────────────────────────────────────────────────────
 
-function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, member, userId, onClose, onSaved }) {
+function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, member, userId, onClose, onSaved, availableMentors = [] }) {
   const isEdit = !!member;
 
   // Normalise: 'part_time' stored in DB is treated as the squad's base role + partTime flag
@@ -310,25 +444,41 @@ function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, memb
       : await supabase.from('roster_squads').insert(payload);
 
     setLoading(false);
-    if (err) { setError(err.message); return; }
+    if (err) { console.error('[roster] squad save error:', err); setError(err.message); return; }
     onSaved();
   };
 
   const roleLabel = baseRole === 'captain' ? 'Captain' : baseRole === 'member' ? 'Chunin Member' : 'Genin';
   return (
     <Modal title={`${isEdit ? 'Edit' : 'Add'} ${roleLabel} — Squad ${squadNumber}`} onClose={onClose}>
+      {baseRole === 'captain' && squadType === 'genin' && availableMentors.length > 0 && (
+        <div className="mb-4">
+          <label className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1.5">Available Mentors</label>
+          <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pb-1">
+            {availableMentors.map(m => (
+              <button key={m.name} type="button"
+                onClick={() => { setName(m.name); setLink(m.discord_link || ''); }}
+                style={name === m.name ? { background: '#38bdf8', color: '#021a26' } : { background: 'rgba(255,255,255,0.06)', color: '#64748b', border: '1px solid rgba(255,255,255,0.08)' }}
+                className="text-[9px] font-black uppercase tracking-wider px-2.5 py-1 rounded-sm transition-all">
+                {m.name} · {m.rank}
+              </button>
+            ))}
+          </div>
+          <p className="text-[9px] italic text-slate-600 mt-1.5">Or enter manually ↓</p>
+        </div>
+      )}
       <Field label="Character Name" value={name} onChange={setName} placeholder="OC Name" />
       <Field label="Discord Link" value={link} onChange={setLink} placeholder="https://discord.com/channels/..." />
       {baseRole !== 'captain' && (
         <div className="mb-3 flex items-center gap-2.5">
           <input
-            type="checkbox" id="partTimeChk"
+            type="checkbox" id={`ptChk-${squadNumber}`}
             checked={partTime}
             onChange={e => setPartTime(e.target.checked)}
             className="w-4 h-4 rounded"
             style={{ accentColor: '#38bdf8' }}
           />
-          <label htmlFor="partTimeChk" className="text-xs text-slate-400 cursor-pointer select-none">
+          <label htmlFor={`ptChk-${squadNumber}`} className="text-xs text-slate-400 cursor-pointer select-none">
             Part-time member
           </label>
         </div>
@@ -349,7 +499,7 @@ const AdminBtn = ({ icon: Icon, onClick, color = '#64748b', title }) => (
   </button>
 );
 
-const Person = ({ name, link, t, canEdit, onEdit, onDelete }) => {
+const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta }) => {
   const nameEl = link
     ? <a href={link} target="_blank" rel="noopener noreferrer"
          style={{ color: t.accent }}
@@ -364,6 +514,12 @@ const Person = ({ name, link, t, canEdit, onEdit, onDelete }) => {
       <div className="flex items-center gap-2 min-w-0">
         <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
         {nameEl}
+        {meta?.anbu && (
+          <span className="text-[8px] font-black tracking-widest px-1.5 py-0.5 rounded-sm shrink-0"
+                style={{ background: 'rgba(15,23,42,0.9)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.2)' }}>
+            ANBU
+          </span>
+        )}
       </div>
       {canEdit && (
         <div className="flex gap-1 shrink-0 ml-2">
@@ -444,11 +600,23 @@ const SlotTracker = ({ filled, cap, accent }) => (
 
 // ─── SQUAD CARD ───────────────────────────────────────────────────────────────
 
-function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, onRefresh }) {
-  const [modal, setModal] = useState(null); // { role } or { role, member }
+function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, onRefresh, entries = [], squads = [] }) {
+  const [modal, setModal]           = useState(null); // { role } or { role, member }
+  const [editingNum, setEditingNum] = useState(false);
 
   const captain = rows.find(r => r.role === 'captain');
-  const members = rows.filter(r => r.role !== 'captain');
+  const members = rows.filter(r => r.role !== 'captain' && r.role !== 'sentinel');
+
+  const assignedCaptainNames = new Set(
+    squads.filter(s => s.village === village && s.squad_type === 'genin' && s.role === 'captain').map(s => s.name)
+  );
+  const availableMentors = squadType === 'genin'
+    ? entries
+        .filter(e => (e.roster_type === `${village}_jonin` || e.roster_type === `${village}_special_jonin`)
+                     && !assignedCaptainNames.has(e.name))
+        .map(e => ({ name: e.name, discord_link: e.discord_link,
+                     rank: e.roster_type.includes('special') ? 'Spec. Jonin' : 'Jonin' }))
+    : [];
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
@@ -456,29 +624,37 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
     onRefresh();
   };
 
+  const handleRenumber = async (newNum) => {
+    if (newNum === squadNumber || !newNum || newNum < 1) return;
+    await supabase.from('roster_squads')
+      .update({ squad_number: newNum })
+      .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
+    onRefresh();
+  };
+
   return (
     <>
       <div className="rounded-sm p-3"
-           style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.04)', borderLeft: `2px solid ${t.accentBorder}` }}>
+           style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.04)', borderLeft: `2px solid ${!captain ? 'rgba(251,146,60,0.5)' : t.accentBorder}` }}>
         <div className="flex items-center justify-between mb-2">
-          <p className="text-[9px] font-black uppercase tracking-[0.2em]" style={{ color: t.accent, opacity: 0.6 }}>
-            Squad {squadNumber}
-          </p>
-          <div className="flex items-center gap-1.5">
-            {!captain && (
-              <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
-                    style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}>
-                No Captain
-              </span>
-            )}
-            {canEdit && !captain && (
-              <button onClick={() => setModal({ role: 'captain' })}
-                className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider"
-                style={{ background: t.accentFaint, color: t.accent, border: `1px solid ${t.accentBorder}` }}>
-                <Plus size={8} /> Captain
-              </button>
-            )}
-          </div>
+          {editingNum ? (
+            <input
+              type="number"
+              defaultValue={squadNumber}
+              autoFocus
+              onBlur={e => { handleRenumber(parseInt(e.target.value, 10) || squadNumber); setEditingNum(false); }}
+              onKeyDown={e => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') setEditingNum(false); }}
+              className="w-16 text-[9px] font-black uppercase bg-transparent outline-none border-b"
+              style={{ color: t.accent, borderColor: t.accent }}
+            />
+          ) : (
+            <span className="text-[9px] font-black uppercase tracking-[0.2em]"
+                  style={{ color: t.accent, opacity: 0.6, cursor: canEdit ? 'pointer' : 'default' }}
+                  onClick={() => canEdit && setEditingNum(true)}>
+              Squad {squadNumber}
+              {canEdit && <Pencil size={8} className="inline ml-1 opacity-40" />}
+            </span>
+          )}
         </div>
 
         {captain && (
@@ -487,20 +663,20 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
             <div className="flex items-center gap-2 min-w-0">
               <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
-              {captain.discord_link
-                ? <a href={captain.discord_link} target="_blank" rel="noopener noreferrer"
-                     style={{ color: t.accent }}
-                     className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
-                    {captain.name}
-                  </a>
-                : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{captain.name}</span>
-              }
+              <div className="flex flex-col min-w-0">
+                {captain.discord_link
+                  ? <a href={captain.discord_link} target="_blank" rel="noopener noreferrer"
+                       style={{ color: t.accent }}
+                       className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
+                      {captain.name}
+                    </a>
+                  : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{captain.name}</span>
+                }
+                <span className="text-[8px] font-black uppercase tracking-[0.15em]"
+                      style={{ color: t.accent, opacity: 0.55 }}>Captain</span>
+              </div>
             </div>
             <div className="flex items-center gap-1 shrink-0 ml-2">
-              <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
-                    style={{ background: `${t.accent}22`, color: t.accent }}>
-                Captain
-              </span>
               {canEdit && (
                 <>
                   <AdminBtn icon={Pencil} onClick={() => setModal({ role: 'captain', member: captain })} title="Edit" />
@@ -508,6 +684,22 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {!captain && (
+          <div className="flex items-center justify-between py-2 px-3 border-b border-white/5">
+            <p className="text-[10px] font-black uppercase tracking-wider animate-pulse"
+               style={{ color: 'rgba(251,146,60,0.8)' }}>
+              Looking for Captain
+            </p>
+            {canEdit && (
+              <button onClick={() => setModal({ role: 'captain' })}
+                className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider"
+                style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.25)' }}>
+                <Plus size={8} /> Add Captain
+              </button>
+            )}
           </div>
         )}
 
@@ -556,8 +748,18 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
         <SquadMemberModal
           village={village} squadType={squadType} squadNumber={squadNumber}
           role={modal.role} member={modal.member || null} userId={userId}
+          availableMentors={modal.role === 'captain' ? availableMentors : []}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); onRefresh(); }}
+          onSaved={async () => {
+            if (modal.role === 'captain' && !modal.member) {
+              await supabase.from('roster_squads')
+                .delete()
+                .eq('village', village).eq('squad_type', squadType)
+                .eq('squad_number', squadNumber).eq('role', 'sentinel');
+            }
+            setModal(null);
+            onRefresh();
+          }}
         />
       )}
     </>
@@ -586,7 +788,7 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
       {entries.length === 0
         ? <EmptyNote />
         : entries.map(e => (
-            <Person key={e.id} name={e.name} link={e.discord_link} t={t}
+            <Person key={e.id} name={e.name} link={e.discord_link} t={t} meta={e.meta}
               canEdit={canEdit}
               onEdit={() => setModal(e)}
               onDelete={() => handleDelete(e.id)} />
@@ -647,6 +849,10 @@ function DataTab({ entries, squads }) {
   const allCounts = useMemo(() =>
     Object.fromEntries(villages.map(v => [v.id, getCounts(entries, squads, v.id)])),
   [entries, squads]);
+
+  const sortedVillages = useMemo(() =>
+    [...villages].sort((a, b) => allCounts[a.id].total - allCounts[b.id].total),
+  [allCounts]);
 
   const allEmpty = Object.values(allCounts).every(c => c.total === 0);
 
@@ -715,7 +921,7 @@ function DataTab({ entries, squads }) {
       <div>
         <p className="text-[10px] uppercase tracking-[0.25em] font-black text-slate-500 mb-3">Village Status</p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {villages.map(v => {
+          {sortedVillages.map(v => {
             const c = allCounts[v.id];
             const allV = Object.values(allCounts);
             const maxG = Math.max(...allV.map(x => x.genin)), maxC = Math.max(...allV.map(x => x.chunin));
@@ -734,6 +940,17 @@ function DataTab({ entries, squads }) {
                   <div className="mt-3 pt-3" style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
                     {c.unteachedGenin  > 0 && <p className="text-[10px] text-slate-400 mb-1"><span style={{ color: '#f87171', fontWeight: 900 }}>{c.unteachedGenin}</span> genin squad{c.unteachedGenin > 1 ? 's' : ''} without a captain</p>}
                     {c.unteachedChunin > 0 && <p className="text-[10px] text-slate-400"><span style={{ color: '#f87171', fontWeight: 900 }}>{c.unteachedChunin}</span> chunin squad{c.unteachedChunin > 1 ? 's' : ''} without a leader</p>}
+                  </div>
+                )}
+                {c.teachers > 0 && (
+                  <div className="mt-3 pt-3 flex items-center justify-between"
+                       style={{ borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Teachers</span>
+                    <div className="flex items-center gap-1.5 text-[10px] font-black">
+                      <span style={{ color: '#34d399' }}>{c.freeTeachers} free</span>
+                      <span className="text-slate-600">/</span>
+                      <span className="text-slate-400">{c.teachers} total</span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -871,7 +1088,6 @@ export default function RosterPage({ userRole, userId }) {
   };
 
   const [newSquadConfig, setNewSquadConfig] = useState(null);
-  const [newSquad, setNewSquad]             = useState(null);
   const [swordsModal, setSwordsModal]       = useState(null); // { sword, entry } | null
   const [jinchurikiModal, setJinchurikiModal] = useState(null); // { beastId, entry } | null
   const [wandererModal, setWandererModal]   = useState(null); // null | 'add' | entry
@@ -973,7 +1189,8 @@ export default function RosterPage({ userRole, userId }) {
                     {getSquadGroups(activeVillage, 'chunin').map(g => (
                       <SquadCard key={g.squadNumber} village={activeVillage} squadType="chunin"
                         squadNumber={g.squadNumber} rows={g.rows} t={t}
-                        canEdit={canEdit} userId={userId} onRefresh={fetchData} />
+                        canEdit={canEdit} userId={userId} onRefresh={fetchData}
+                        entries={entries} squads={squads} />
                     ))}
                   </div>
               }
@@ -1001,7 +1218,8 @@ export default function RosterPage({ userRole, userId }) {
                     {getSquadGroups(activeVillage, 'genin').map(g => (
                       <SquadCard key={g.squadNumber} village={activeVillage} squadType="genin"
                         squadNumber={g.squadNumber} rows={g.rows} t={t}
-                        canEdit={canEdit} userId={userId} onRefresh={fetchData} />
+                        canEdit={canEdit} userId={userId} onRefresh={fetchData}
+                        entries={entries} squads={squads} />
                     ))}
                   </div>
               }
@@ -1171,27 +1389,16 @@ export default function RosterPage({ userRole, userId }) {
 
       </div>
 
-      {/* New squad captain modal */}
-      {/* Step 1: pick squad number */}
       {newSquadConfig && (
-        <NewSquadModal
+        <CreateSquadModal
+          village={newSquadConfig.village}
           squadType={newSquadConfig.squadType}
           suggestedNumber={newSquadConfig.suggestedNumber}
-          onConfirm={(num) => {
-            setNewSquadConfig(null);
-            setNewSquad({ village: newSquadConfig.village, squadType: newSquadConfig.squadType, squadNumber: num });
-          }}
+          entries={entries}
+          squads={squads}
+          userId={userId}
+          onSaved={() => { setNewSquadConfig(null); fetchData(); }}
           onClose={() => setNewSquadConfig(null)}
-        />
-      )}
-
-      {/* Step 2: add captain */}
-      {newSquad && (
-        <SquadMemberModal
-          village={newSquad.village} squadType={newSquad.squadType}
-          squadNumber={newSquad.squadNumber} role="captain" member={null} userId={userId}
-          onClose={() => setNewSquad(null)}
-          onSaved={() => { setNewSquad(null); fetchData(); }}
         />
       )}
     </div>
