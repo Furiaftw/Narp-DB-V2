@@ -44,6 +44,7 @@ import {
   updateSubmissionControl,
 } from './lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
+import RosterPage from './pages/RosterPage';
 
 
 /* ============================================================================
@@ -4743,6 +4744,7 @@ export default function App() {
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
     ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
+    ...(isAdmin ? [{ id: 'roster',  label: 'Roster' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -4850,7 +4852,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className="flex-1 overflow-y-auto p-4 md:p-6 pb-20">
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5087,6 +5089,10 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {tab === 'roster' && isAdmin && (
+          <RosterPage userRole={role} userId={profile?.id} />
         )}
       </div>
 
