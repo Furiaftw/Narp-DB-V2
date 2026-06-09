@@ -85,18 +85,18 @@ function getCounts(entries, squads, villageId) {
 
 function Modal({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
+    <div className="fixed inset-0 z-50 overflow-y-auto p-4"
          style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
-      <div className="w-full max-w-md rounded-sm shadow-2xl flex flex-col"
-           style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)', maxHeight: '90vh' }}>
-        <div className="flex items-center justify-between px-5 py-4 shrink-0"
-             style={{ borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+      <div className="w-full max-w-md mx-auto rounded-sm shadow-2xl my-4"
+           style={{ background: '#0f172a', border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div className="flex items-center justify-between px-5 py-4 sticky top-0 rounded-t-sm z-10"
+             style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', background: '#0f172a' }}>
           <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-300">{title}</p>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300 transition-colors">
             <X size={16} />
           </button>
         </div>
-        <div className="px-5 py-4 overflow-y-auto">{children}</div>
+        <div className="px-5 py-4">{children}</div>
       </div>
     </div>
   );
