@@ -3110,6 +3110,7 @@ function PendingJutsuCard({
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [hasSubmitterChatted, setHasSubmitterChatted] = useState(false);
+  const [nudgeCooldown, setNudgeCooldown] = useState(false);
   const messagesEndRef = useRef(null);
 
   const isClaimed = !!(
@@ -3291,8 +3292,11 @@ function PendingJutsuCard({
   const nudgeReviewerLocked = lastStaffMsgTime > 0 && (Date.now() - lastStaffMsgTime) < 24 * 60 * 60 * 1000;
 
   const handleNudgeReviewer = async () => {
+    if (nudgeCooldown) return;
     const reviewerDiscordId = pending.assignee?.discord_id || pending.first_reviewer?.discord_id;
     if (!reviewerDiscordId) { alert('Reviewer Discord ID not available.'); return; }
+    setNudgeCooldown(true);
+    setTimeout(() => setNudgeCooldown(false), 5000);
     try {
       const sess = await getCurrentSession();
       const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
@@ -3309,8 +3313,11 @@ function PendingJutsuCard({
   };
 
   const handleNudgeSubmitter = async () => {
+    if (nudgeCooldown) return;
     const discordId = pending.submitter?.discord_id;
     if (!discordId) { alert('Submitter Discord ID not available.'); return; }
+    setNudgeCooldown(true);
+    setTimeout(() => setNudgeCooldown(false), 5000);
     try {
       const sess = await getCurrentSession();
       const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
@@ -3398,7 +3405,7 @@ function PendingJutsuCard({
                 <>
                   <button onClick={() => onReview(pending.id)}
                           className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                    <Icon n="Check" size={14}/> Review (Step 1)
+                    <Icon n="Check" size={14}/> Begin Second Review
                   </button>
                   {['admin', 'owner'].includes(currentUser.role) && (
                     <button onClick={() => onApprove(pending.id)}
@@ -3420,7 +3427,7 @@ function PendingJutsuCard({
                   )}
                   {isStrictSubmitter && (
                     <div className="text-[10px] text-slate-400 italic self-center">
-                      Another Reviewer must perform Review (Step 1)
+                      Another Reviewer must perform Begin Second Review
                     </div>
                   )}
                 </>
@@ -3655,10 +3662,10 @@ function PendingJutsuCard({
                         <button
                           type="button"
                           onClick={handleNudgeReviewer}
-                          disabled={nudgeReviewerLocked}
+                          disabled={nudgeReviewerLocked || nudgeCooldown}
                           title={nudgeReviewerLocked ? "Wait 24h after the reviewer's last message before nudging again" : 'Send a DM reminder to the reviewer'}
                           className={`flex-1 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
-                            nudgeReviewerLocked
+                            nudgeReviewerLocked || nudgeCooldown
                               ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
                               : 'bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100'
                           }`}
@@ -3666,20 +3673,21 @@ function PendingJutsuCard({
                           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                           </svg>
-                          {nudgeReviewerLocked ? 'Nudge available in 24 hours' : 'Nudge Reviewer'}
+                          {nudgeReviewerLocked ? 'Nudge available in 24 hours' : nudgeCooldown ? 'Nudge Sent!' : 'Nudge Reviewer'}
                         </button>
                       )}
                       {hasStaffPrivileges && (
                         <button
                           type="button"
                           onClick={handleNudgeSubmitter}
+                          disabled={nudgeCooldown}
                           title="Send a DM reminder to the submitter"
-                          className="flex-1 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100 transition-all"
+                          className={`flex-1 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all ${nudgeCooldown ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-slate-50 text-slate-600 border border-slate-200 hover:bg-slate-100'}`}
                         >
                           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                           </svg>
-                          Nudge Submitter
+                          {nudgeCooldown ? 'Nudge Sent!' : 'Nudge Submitter'}
                         </button>
                       )}
                     </div>

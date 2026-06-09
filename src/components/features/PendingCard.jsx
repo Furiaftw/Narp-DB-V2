@@ -546,7 +546,7 @@ export function PendingJutsuCard({
             <>
               <button onClick={() => onReview(pending.id)}
                       className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                <Icon n="Check" size={14}/> Review (Step 1)
+                <Icon n="Check" size={14}/> Begin Second Review
               </button>
               {['admin', 'owner'].includes(currentUser.role) && (
                 <button onClick={() => onApprove(pending.id)}
@@ -558,7 +558,7 @@ export function PendingJutsuCard({
           ) : (
             isStrictSubmitter && (
               <div className="text-[10px] text-slate-400 italic self-center">
-                Another Reviewer must perform Review (Step 1)
+                Another Reviewer must perform Begin Second Review
               </div>
             )
           )
