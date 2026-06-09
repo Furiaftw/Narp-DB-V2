@@ -2,8 +2,15 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BookOpen, Users, ChevronRight, BarChart2, TrendingUp, AlertTriangle,
   CheckCircle, ArrowRight, Crown, Skull, Compass, Sword, Flame,
-  Plus, Pencil, Trash2, X, Loader2,
+  Plus, Pencil, Trash2, X, Loader2, GripVertical,
 } from 'lucide-react';
+import {
+  DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext, verticalListSortingStrategy, useSortable, arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
@@ -59,6 +66,25 @@ const JINCHURIKI_ACCENT = { accent: '#f97316', accentFaint: 'rgba(249,115,22,0.0
 
 function isAdmin(role) { return role === 'admin' || role === 'owner'; }
 
+function useSortSensors() {
+  return useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(TouchSensor,   { activationConstraint: { delay: 250, tolerance: 5 } }),
+  );
+}
+
+async function saveEntryOrder(ids) {
+  await Promise.all(
+    ids.map((id, i) => supabase.from('roster_entries').update({ sort_order: i }).eq('id', id))
+  );
+}
+
+async function saveSquadMemberOrder(ids) {
+  await Promise.all(
+    ids.map((id, i) => supabase.from('roster_squads').update({ sort_order: i }).eq('id', id))
+  );
+}
+
 function getCounts(entries, squads, villageId) {
   const ofType = (t) => entries.filter(e => e.roster_type === t).length;
   const jonin        = ofType(`${villageId}_jonin`);
@@ -78,6 +104,28 @@ function getCounts(entries, squads, villageId) {
   const freeTeachers     = Math.max(0, teachers - assignedTeachers);
 
   return { jonin, specialJonin, teachers, chunin, genin, total, unteachedChunin, unteachedGenin, geninPerTeacher, assignedTeachers, freeTeachers };
+}
+
+// ─── SORTABLE ROW ─────────────────────────────────────────────────────────────
+
+function SortableRow({ id, t, canEdit, children }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id });
+  return (
+    <div ref={setNodeRef} className="flex items-center"
+         style={{ transform: CSS.Transform.toString(transform), transition,
+                  opacity: isDragging ? 0.4 : 1, position: 'relative',
+                  zIndex: isDragging ? 10 : 'auto' }}>
+      {canEdit && (
+        <button {...attributes} {...listeners}
+          className="px-1.5 py-2 shrink-0 touch-none cursor-grab active:cursor-grabbing opacity-25 hover:opacity-60 transition-opacity"
+          style={{ color: t.accent }}>
+          <GripVertical size={11} />
+        </button>
+      )}
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
 }
 
 // ─── MODAL ────────────────────────────────────────────────────────────────────
@@ -598,6 +646,40 @@ const SlotTracker = ({ filled, cap, accent }) => (
   </div>
 );
 
+// ─── MEMBER ROW (used inside SquadCard) ──────────────────────────────────────
+
+const MemberRow = ({ m, t, canEdit, onEdit, onDelete }) => (
+  <div className="flex items-center justify-between py-2 px-3 border-b border-white/5 group"
+       onMouseEnter={e => e.currentTarget.style.background = t.accentFaint}
+       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+    <div className="flex items-center gap-2 min-w-0">
+      <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
+      {m.discord_link
+        ? <a href={m.discord_link} target="_blank" rel="noopener noreferrer"
+             style={{ color: t.accent }}
+             className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
+            {m.name}
+          </a>
+        : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{m.name}</span>
+      }
+    </div>
+    <div className="flex items-center gap-1 shrink-0 ml-2">
+      {m.role === 'part_time' && (
+        <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
+              style={{ background: 'rgba(148,163,184,0.12)', color: '#94a3b8' }}>
+          Part Time
+        </span>
+      )}
+      {canEdit && (
+        <>
+          <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
+          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" />
+        </>
+      )}
+    </div>
+  </div>
+);
+
 // ─── SQUAD CARD ───────────────────────────────────────────────────────────────
 
 function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, onRefresh, entries = [], squads = [] }) {
@@ -606,6 +688,19 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
 
   const captain = rows.find(r => r.role === 'captain');
   const members = rows.filter(r => r.role !== 'captain' && r.role !== 'sentinel');
+
+  const [orderedMembers, setOrderedMembers] = useState(members);
+  useEffect(() => setOrderedMembers(members), [rows]); // eslint-disable-line react-hooks/exhaustive-deps
+  const memberSensors = useSortSensors();
+
+  const handleMemberDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const oldIndex = orderedMembers.findIndex(m => m.id === active.id);
+    const newIndex = orderedMembers.findIndex(m => m.id === over.id);
+    const next = arrayMove(orderedMembers, oldIndex, newIndex);
+    setOrderedMembers(next);
+    saveSquadMemberOrder(next.map(m => m.id));
+  };
 
   const assignedCaptainNames = new Set(
     squads.filter(s => s.village === village && s.squad_type === 'genin' && s.role === 'captain').map(s => s.name)
@@ -714,37 +809,24 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
           </div>
         )}
 
-        {members.map(m => (
-          <div key={m.id} className="flex items-center justify-between py-2 px-3 border-b border-white/5 group"
-               onMouseEnter={e => e.currentTarget.style.background = t.accentFaint}
-               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-            <div className="flex items-center gap-2 min-w-0">
-              <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
-              {m.discord_link
-                ? <a href={m.discord_link} target="_blank" rel="noopener noreferrer"
-                     style={{ color: t.accent }}
-                     className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
-                    {m.name}
-                  </a>
-                : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{m.name}</span>
-              }
-            </div>
-            <div className="flex items-center gap-1 shrink-0 ml-2">
-              {m.role === 'part_time' && (
-                <span className="text-[8px] font-black uppercase tracking-wider px-1.5 py-0.5 rounded-sm"
-                      style={{ background: 'rgba(148,163,184,0.12)', color: '#94a3b8' }}>
-                  Part Time
-                </span>
-              )}
-              {canEdit && (
-                <>
-                  <AdminBtn icon={Pencil} onClick={() => setModal({ role: m.role, member: m })} title="Edit" />
-                  <AdminBtn icon={Trash2} onClick={() => handleDelete(m.id)} color="#f87171" title="Remove" />
-                </>
-              )}
-            </div>
-          </div>
-        ))}
+        {canEdit && orderedMembers.length > 1
+          ? <DndContext sensors={memberSensors} collisionDetection={closestCenter} onDragEnd={handleMemberDragEnd}>
+              <SortableContext items={orderedMembers.map(m => m.id)} strategy={verticalListSortingStrategy}>
+                {orderedMembers.map(m => (
+                  <SortableRow key={m.id} id={m.id} t={t} canEdit={canEdit}>
+                    <MemberRow m={m} t={t} canEdit={canEdit}
+                      onEdit={() => setModal({ role: m.role, member: m })}
+                      onDelete={() => handleDelete(m.id)} />
+                  </SortableRow>
+                ))}
+              </SortableContext>
+            </DndContext>
+          : orderedMembers.map(m => (
+              <MemberRow key={m.id} m={m} t={t} canEdit={canEdit}
+                onEdit={() => setModal({ role: m.role, member: m })}
+                onDelete={() => handleDelete(m.id)} />
+            ))
+        }
 
         {canEdit && (
           <button onClick={() => setModal({ role: squadType === 'chunin' ? 'member' : 'genin' })}
@@ -782,11 +864,23 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
 
 function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, onRefresh, sublabel = false }) {
   const [modal, setModal] = useState(null); // null | 'add' | entry object
+  const [orderedEntries, setOrderedEntries] = useState(entries);
+  useEffect(() => setOrderedEntries(entries), [entries]);
+  const sensors = useSortSensors();
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
     await supabase.from('roster_entries').delete().eq('id', id);
     onRefresh();
+  };
+
+  const handleDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const oldIndex = orderedEntries.findIndex(e => e.id === active.id);
+    const newIndex = orderedEntries.findIndex(e => e.id === over.id);
+    const next = arrayMove(orderedEntries, oldIndex, newIndex);
+    setOrderedEntries(next);
+    saveEntryOrder(next.map(e => e.id));
   };
 
   const Header = sublabel
@@ -796,14 +890,23 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
   return (
     <>
       {Header}
-      {entries.length === 0
+      {orderedEntries.length === 0
         ? <EmptyNote />
-        : entries.map(e => (
-            <Person key={e.id} name={e.name} link={e.discord_link} t={t} meta={e.meta}
-              canEdit={canEdit}
-              onEdit={() => setModal(e)}
-              onDelete={() => handleDelete(e.id)} />
-          ))
+        : canEdit && orderedEntries.length > 1
+          ? <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={orderedEntries.map(e => e.id)} strategy={verticalListSortingStrategy}>
+                {orderedEntries.map(e => (
+                  <SortableRow key={e.id} id={e.id} t={t} canEdit={canEdit}>
+                    <Person name={e.name} link={e.discord_link} t={t} meta={e.meta}
+                      canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} />
+                  </SortableRow>
+                ))}
+              </SortableContext>
+            </DndContext>
+          : orderedEntries.map(e => (
+              <Person key={e.id} name={e.name} link={e.discord_link} t={t} meta={e.meta}
+                canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} />
+            ))
       }
       {modal && (
         <EntryModal
@@ -814,6 +917,81 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
         />
       )}
     </>
+  );
+}
+
+// ─── WANDERER SECTION ─────────────────────────────────────────────────────────
+
+function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal, setWandererModal }) {
+  const ta = WANDERER_ACCENT;
+  const [ordered, setOrdered] = useState(wanderers);
+  useEffect(() => setOrdered(wanderers), [wanderers]);
+  const sensors = useSortSensors();
+
+  const handleDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return;
+    const oldIndex = ordered.findIndex(w => w.id === active.id);
+    const newIndex = ordered.findIndex(w => w.id === over.id);
+    const next = arrayMove(ordered, oldIndex, newIndex);
+    setOrdered(next);
+    saveEntryOrder(next.map(w => w.id));
+  };
+
+  const WandererCard = ({ w }) => (
+    <div className="rounded-sm p-4" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
+      <div className="flex items-center justify-between gap-2 mb-3 pb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <div className="flex items-center gap-2 min-w-0">
+          <Compass size={13} style={{ color: ta.accent, opacity: 0.7, flexShrink: 0 }} />
+          {w.discord_link
+            ? <a href={w.discord_link} target="_blank" rel="noopener noreferrer"
+                 style={{ color: ta.accent }}
+                 className="text-sm font-bold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline truncate">{w.name}</a>
+            : <span className="text-sm font-bold tracking-wide text-slate-200 truncate">{w.name}</span>}
+        </div>
+        {canEdit && (
+          <div className="flex gap-1 shrink-0">
+            <AdminBtn icon={Pencil} onClick={() => setWandererModal(w)} title="Edit" />
+            <AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', w.id); onRefresh(); }}} color="#f87171" title="Remove" />
+          </div>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div><p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1">Friendly With</p><PillList items={w.meta?.friendly_with} color="#34d399" /></div>
+        <div><p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1">Hostile With</p><PillList items={w.meta?.hostile_with} color="#f87171" /></div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
+      <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canEdit} onAdd={() => setWandererModal('add')} />
+      <SlotTracker filled={wanderers.length} cap={6} accent={ta.accent} />
+      <p className="text-[10px] italic text-slate-500 px-1 mb-5">Staff Request required, not guaranteed to get.</p>
+      {ordered.length === 0 ? <EmptyNote /> : (
+        canEdit && ordered.length > 1
+          ? <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={ordered.map(w => w.id)} strategy={verticalListSortingStrategy}>
+                <div className="space-y-3">
+                  {ordered.map(w => (
+                    <SortableRow key={w.id} id={w.id} t={ta} canEdit={canEdit}>
+                      <WandererCard w={w} />
+                    </SortableRow>
+                  ))}
+                </div>
+              </SortableContext>
+            </DndContext>
+          : <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {ordered.map(w => <WandererCard key={w.id} w={w} />)}
+            </div>
+      )}
+      {wandererModal && (
+        <EntryModal rosterType="wanderer"
+          entry={wandererModal === 'add' ? null : wandererModal}
+          userId={userId}
+          onClose={() => setWandererModal(null)}
+          onSaved={() => { setWandererModal(null); onRefresh(); }} />
+      )}
+    </div>
   );
 }
 
@@ -1253,43 +1431,13 @@ export default function RosterPage({ userRole, userId }) {
         })()}
 
         {/* ── Wanderers ── */}
-        {mainTab === 'wanderer' && (() => {
-          const wanderers = ofType('wanderer');
-          const ta = WANDERER_ACCENT;
-          return (
-            <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-              <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canEdit} onAdd={() => setWandererModal('add')} />
-              <SlotTracker filled={wanderers.length} cap={6} accent={ta.accent} />
-              <p className="text-[10px] italic text-slate-500 px-1 mb-5">Staff Request required, not guaranteed to get.</p>
-              {wanderers.length === 0 ? <EmptyNote /> : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {wanderers.map(w => (
-                    <div key={w.id} className="rounded-sm p-4" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-                      <div className="flex items-center justify-between gap-2 mb-3 pb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                        <div className="flex items-center gap-2 min-w-0">
-                          <Compass size={13} style={{ color: ta.accent, opacity: 0.7, flexShrink: 0 }} />
-                          {w.discord_link ? <a href={w.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: ta.accent }} className="text-sm font-bold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline truncate">{w.name}</a> : <span className="text-sm font-bold tracking-wide text-slate-200 truncate">{w.name}</span>}
-                        </div>
-                        {canEdit && <div className="flex gap-1 shrink-0"><AdminBtn icon={Pencil} onClick={() => setWandererModal(w)} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', w.id); fetchData(); }}} color="#f87171" title="Remove" /></div>}
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div><p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1">Friendly With</p><PillList items={w.meta?.friendly_with} color="#34d399" /></div>
-                        <div><p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1">Hostile With</p><PillList items={w.meta?.hostile_with} color="#f87171" /></div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              {wandererModal && (
-                <EntryModal rosterType="wanderer"
-                  entry={wandererModal === 'add' ? null : wandererModal}
-                  userId={userId}
-                  onClose={() => setWandererModal(null)}
-                  onSaved={() => { setWandererModal(null); fetchData(); }} />
-              )}
-            </div>
-          );
-        })()}
+        {mainTab === 'wanderer' && (
+          <WandererSection
+            wanderers={ofType('wanderer')}
+            canEdit={canEdit} userId={userId} onRefresh={fetchData}
+            wandererModal={wandererModal} setWandererModal={setWandererModal}
+          />
+        )}
 
         {/* ── Swordsmen ── */}
         {mainTab === 'swords' && (() => {
