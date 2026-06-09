@@ -149,14 +149,14 @@ function SaveBtn({ loading, onClick, label = 'Save' }) {
 
 // ─── ENTRY EDIT MODAL ─────────────────────────────────────────────────────────
 
-function EntryModal({ rosterType, entry, userId, onClose, onSaved }) {
+function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword = '', initialBeastId = '' }) {
   const isEdit = !!entry;
   const meta   = entry?.meta || {};
 
   const [name, setName]               = useState(entry?.name || '');
   const [link, setLink]               = useState(entry?.discord_link || '');
-  const [sword, setSword]             = useState(meta.sword || '');
-  const [beastId, setBeastId]         = useState(meta.beast_id || '');
+  const [sword, setSword]             = useState(meta.sword || initialSword || '');
+  const [beastId, setBeastId]         = useState(meta.beast_id || initialBeastId || '');
   const [wantedIn, setWantedIn]       = useState(meta.wanted_in || []);
   const [bringIn, setBringIn]         = useState(meta.bring_in || []);
   const [friendlyWith, setFriendly]   = useState(meta.friendly_with || []);
@@ -812,7 +812,10 @@ export default function RosterPage({ userRole, userId }) {
     setNewSquad({ village: villageId, squadType, squadNumber: newNum });
   };
 
-  const [newSquad, setNewSquad] = useState(null);
+  const [newSquad, setNewSquad]           = useState(null);
+  const [swordsModal, setSwordsModal]       = useState(null); // { sword, entry } | null
+  const [jinchurikiModal, setJinchurikiModal] = useState(null); // { beastId, entry } | null
+  const [wandererModal, setWandererModal]   = useState(null); // null | 'add' | entry
 
   if (loading) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#020408' }}>
@@ -953,7 +956,7 @@ export default function RosterPage({ userRole, userId }) {
           const ta = ROGUE_ACCENT;
           return (
             <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-              <SectionHeader icon={Skull} title="Rogue Roster" t={ta} canEdit={canEdit} onAdd={() => {}} />
+              <SectionHeader icon={Skull} title="Rogue Roster" t={ta} canEdit={false} />
               <SlotTracker filled={rogues.length} cap={6} accent={ta.accent} />
               <p className="text-[10px] italic text-slate-500 px-1 mb-5">Must become a rogue in-character.</p>
               <EntrySection title="" rosterType="rogue" entries={rogues} t={ta} canEdit={canEdit} userId={userId} onRefresh={fetchData} sublabel={false} icon={Skull} />
@@ -967,7 +970,7 @@ export default function RosterPage({ userRole, userId }) {
           const ta = WANDERER_ACCENT;
           return (
             <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-              <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canEdit} onAdd={() => {}} />
+              <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canEdit} onAdd={() => setWandererModal('add')} />
               <SlotTracker filled={wanderers.length} cap={6} accent={ta.accent} />
               <p className="text-[10px] italic text-slate-500 px-1 mb-5">Staff Request required, not guaranteed to get.</p>
               {wanderers.length === 0 ? <EmptyNote /> : (
@@ -979,7 +982,7 @@ export default function RosterPage({ userRole, userId }) {
                           <Compass size={13} style={{ color: ta.accent, opacity: 0.7, flexShrink: 0 }} />
                           {w.discord_link ? <a href={w.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: ta.accent }} className="text-sm font-bold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline truncate">{w.name}</a> : <span className="text-sm font-bold tracking-wide text-slate-200 truncate">{w.name}</span>}
                         </div>
-                        {canEdit && <div className="flex gap-1 shrink-0"><AdminBtn icon={Pencil} onClick={() => {}} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', w.id); fetchData(); }}} color="#f87171" title="Remove" /></div>}
+                        {canEdit && <div className="flex gap-1 shrink-0"><AdminBtn icon={Pencil} onClick={() => setWandererModal(w)} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', w.id); fetchData(); }}} color="#f87171" title="Remove" /></div>}
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div><p className="text-[9px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1">Friendly With</p><PillList items={w.meta?.friendly_with} color="#34d399" /></div>
@@ -989,7 +992,13 @@ export default function RosterPage({ userRole, userId }) {
                   ))}
                 </div>
               )}
-              {canEdit && <EntryModal rosterType="wanderer" entry={null} userId={userId} onClose={() => {}} onSaved={fetchData} />}
+              {wandererModal && (
+                <EntryModal rosterType="wanderer"
+                  entry={wandererModal === 'add' ? null : wandererModal}
+                  userId={userId}
+                  onClose={() => setWandererModal(null)}
+                  onSaved={() => { setWandererModal(null); fetchData(); }} />
+              )}
             </div>
           );
         })()}
@@ -1001,7 +1010,7 @@ export default function RosterPage({ userRole, userId }) {
           const ta = SWORDS_ACCENT;
           return (
             <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-              <SectionHeader icon={Sword} title="Seven Ninja Swordsmen" t={ta} canEdit={canEdit} onAdd={() => {}} />
+              <SectionHeader icon={Sword} title="Seven Ninja Swordsmen" t={ta} canEdit={false} />
               <SlotTracker filled={swordsmen.length} cap={7} accent={ta.accent} />
               <div className="space-y-2">
                 {SWORDS_LIST.map((sword, i) => {
@@ -1021,8 +1030,8 @@ export default function RosterPage({ userRole, userId }) {
                       {canEdit && (
                         <div className="flex gap-1 shrink-0">
                           {bearer
-                            ? <><AdminBtn icon={Pencil} onClick={() => {}} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); }}} color="#f87171" title="Remove" /></>
-                            : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => {}}><Plus size={8} /> Assign</button>
+                            ? <><AdminBtn icon={Pencil} onClick={() => setSwordsModal({ sword: bearer.meta?.sword, entry: bearer })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); }}} color="#f87171" title="Remove" /></>
+                            : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setSwordsModal({ sword, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>
                       )}
@@ -1034,6 +1043,14 @@ export default function RosterPage({ userRole, userId }) {
             </div>
           );
         })()}
+        {swordsModal && (
+          <EntryModal rosterType="swordsmen"
+            entry={swordsModal.entry}
+            initialSword={swordsModal.entry ? '' : swordsModal.sword}
+            userId={userId}
+            onClose={() => setSwordsModal(null)}
+            onSaved={() => { setSwordsModal(null); fetchData(); }} />
+        )}
 
         {/* ── Jinchuriki ── */}
         {mainTab === 'jinchuriki' && (() => {
@@ -1042,7 +1059,7 @@ export default function RosterPage({ userRole, userId }) {
           const ta = JINCHURIKI_ACCENT;
           return (
             <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-              <SectionHeader icon={Flame} title="Jinchuriki" t={ta} canEdit={canEdit} onAdd={() => {}} />
+              <SectionHeader icon={Flame} title="Jinchuriki" t={ta} canEdit={false} />
               <SlotTracker filled={jins.length} cap={10} accent={ta.accent} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {TAILED_BEASTS.map(beast => {
@@ -1070,8 +1087,8 @@ export default function RosterPage({ userRole, userId }) {
                       {canEdit && (
                         <div className="flex gap-1 shrink-0">
                           {host
-                            ? <><AdminBtn icon={Pencil} onClick={() => {}} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); }}} color="#f87171" title="Remove" /></>
-                            : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => {}}><Plus size={8} /> Assign</button>
+                            ? <><AdminBtn icon={Pencil} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: host })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); }}} color="#f87171" title="Remove" /></>
+                            : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>
                       )}
@@ -1082,6 +1099,14 @@ export default function RosterPage({ userRole, userId }) {
             </div>
           );
         })()}
+        {jinchurikiModal && (
+          <EntryModal rosterType="jinchuriki"
+            entry={jinchurikiModal.entry}
+            initialBeastId={jinchurikiModal.entry ? '' : jinchurikiModal.beastId}
+            userId={userId}
+            onClose={() => setJinchurikiModal(null)}
+            onSaved={() => { setJinchurikiModal(null); fetchData(); }} />
+        )}
 
         {mainTab === 'data' && <DataTab entries={entries} squads={squads} />}
 
