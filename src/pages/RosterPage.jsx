@@ -632,6 +632,14 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
     onRefresh();
   };
 
+  const handleDeleteSquad = async () => {
+    if (!window.confirm(`Delete Squad ${squadNumber} and all its members?`)) return;
+    await supabase.from('roster_squads')
+      .delete()
+      .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
+    onRefresh();
+  };
+
   return (
     <>
       <div className="rounded-sm p-3"
@@ -654,6 +662,9 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               Squad {squadNumber}
               {canEdit && <Pencil size={8} className="inline ml-1 opacity-40" />}
             </span>
+          )}
+          {canEdit && (
+            <AdminBtn icon={Trash2} onClick={handleDeleteSquad} color="#f87171" title="Delete squad" />
           )}
         </div>
 
