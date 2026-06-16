@@ -540,15 +540,15 @@ function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, memb
 
 // ─── SHARED DISPLAY PRIMITIVES ────────────────────────────────────────────────
 
-const AdminBtn = ({ icon: Icon, onClick, color = '#64748b', title }) => (
-  <button onClick={onClick} title={title}
-    className="p-1 rounded-sm transition-colors hover:opacity-100 opacity-40 hover:opacity-80"
+const AdminBtn = ({ icon: IconComp, onClick, color = '#64748b', title, loading = false }) => (
+  <button onClick={onClick} title={title} disabled={loading}
+    className="p-1 rounded-sm transition-colors hover:opacity-100 opacity-40 hover:opacity-80 disabled:cursor-wait"
     style={{ color }}>
-    <Icon size={12} />
+    {loading ? <Loader2 size={12} className="animate-spin" style={{ color }} /> : <IconComp size={12} />}
   </button>
 );
 
-const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta }) => {
+const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta, deleteLoading = false }) => {
   const nameEl = link
     ? <a href={link} target="_blank" rel="noopener noreferrer"
          style={{ color: t.accent }}
@@ -573,7 +573,7 @@ const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta }) => {
       {canEdit && (
         <div className="flex gap-1 shrink-0 ml-2">
           <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
-          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" />
+          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" loading={deleteLoading} />
         </div>
       )}
     </div>
@@ -649,7 +649,7 @@ const SlotTracker = ({ filled, cap, accent }) => (
 
 // ─── MEMBER ROW (used inside SquadCard) ──────────────────────────────────────
 
-const MemberRow = ({ m, t, canEdit, onEdit, onDelete }) => (
+const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false }) => (
   <div className="flex items-center justify-between py-2 px-3 border-b border-white/5 group"
        onMouseEnter={e => e.currentTarget.style.background = t.accentFaint}
        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -674,7 +674,7 @@ const MemberRow = ({ m, t, canEdit, onEdit, onDelete }) => (
       {canEdit && (
         <>
           <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
-          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" />
+          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" loading={deleteLoading} />
         </>
       )}
     </div>
@@ -714,26 +714,45 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                      rank: e.roster_type.includes('special') ? 'Spec. Jonin' : 'Jonin' }))
     : [];
 
+  const [deletingMemberId, setDeletingMemberId] = useState(null);
+  const [deletingSquad, setDeletingSquad] = useState(false);
+  const [renumbering, setRenumbering] = useState(false);
+
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
-    await supabase.from('roster_squads').delete().eq('id', id);
-    onRefresh();
+    setDeletingMemberId(id);
+    try {
+      await supabase.from('roster_squads').delete().eq('id', id);
+      onRefresh();
+    } finally {
+      setDeletingMemberId(null);
+    }
   };
 
   const handleRenumber = async (newNum) => {
     if (newNum === squadNumber || !newNum || newNum < 1) return;
-    await supabase.from('roster_squads')
-      .update({ squad_number: newNum })
-      .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
-    onRefresh();
+    setRenumbering(true);
+    try {
+      await supabase.from('roster_squads')
+        .update({ squad_number: newNum })
+        .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
+      onRefresh();
+    } finally {
+      setRenumbering(false);
+    }
   };
 
   const handleDeleteSquad = async () => {
     if (!window.confirm(`Delete Squad ${squadNumber} and all its members?`)) return;
-    await supabase.from('roster_squads')
-      .delete()
-      .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
-    onRefresh();
+    setDeletingSquad(true);
+    try {
+      await supabase.from('roster_squads')
+        .delete()
+        .eq('village', village).eq('squad_type', squadType).eq('squad_number', squadNumber);
+      onRefresh();
+    } finally {
+      setDeletingSquad(false);
+    }
   };
 
   return (
@@ -752,15 +771,15 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               style={{ color: t.accent, borderColor: t.accent }}
             />
           ) : (
-            <span className="text-[9px] font-black uppercase tracking-[0.2em]"
-                  style={{ color: t.accent, opacity: 0.6, cursor: canEdit ? 'pointer' : 'default' }}
-                  onClick={() => canEdit && setEditingNum(true)}>
+            <span className="text-[9px] font-black uppercase tracking-[0.2em] flex items-center gap-1"
+                  style={{ color: t.accent, opacity: 0.6, cursor: canEdit && !renumbering ? 'pointer' : 'default' }}
+                  onClick={() => canEdit && !renumbering && setEditingNum(true)}>
               Squad {squadNumber}
-              {canEdit && <Pencil size={8} className="inline ml-1 opacity-40" />}
+              {canEdit && (renumbering ? <Loader2 size={8} className="inline animate-spin" /> : <Pencil size={8} className="inline opacity-40" />)}
             </span>
           )}
           {canEdit && (
-            <AdminBtn icon={Trash2} onClick={handleDeleteSquad} color="#f87171" title="Delete squad" />
+            <AdminBtn icon={Trash2} onClick={handleDeleteSquad} color="#f87171" title="Delete squad" loading={deletingSquad} />
           )}
         </div>
 
@@ -787,7 +806,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               {canEdit && (
                 <>
                   <AdminBtn icon={Pencil} onClick={() => setModal({ role: 'captain', member: captain })} title="Edit" />
-                  <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title="Remove" />
+                  <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title="Remove" loading={deletingMemberId === captain.id} />
                 </>
               )}
             </div>
@@ -817,7 +836,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                   <SortableRow key={m.id} id={m.id} t={t} canEdit={canEdit}>
                     <MemberRow m={m} t={t} canEdit={canEdit}
                       onEdit={() => setModal({ role: m.role, member: m })}
-                      onDelete={() => handleDelete(m.id)} />
+                      onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id} />
                   </SortableRow>
                 ))}
               </SortableContext>
@@ -825,7 +844,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
           : orderedMembers.map(m => (
               <MemberRow key={m.id} m={m} t={t} canEdit={canEdit}
                 onEdit={() => setModal({ role: m.role, member: m })}
-                onDelete={() => handleDelete(m.id)} />
+                onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id} />
             ))
         }
 
@@ -866,13 +885,19 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
 function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, onRefresh, sublabel = false }) {
   const [modal, setModal] = useState(null); // null | 'add' | entry object
   const [orderedEntries, setOrderedEntries] = useState(entries);
+  const [deletingId, setDeletingId] = useState(null);
   useEffect(() => setOrderedEntries(entries), [entries]);
   const sensors = useSortSensors();
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
-    await supabase.from('roster_entries').delete().eq('id', id);
-    onRefresh();
+    setDeletingId(id);
+    try {
+      await supabase.from('roster_entries').delete().eq('id', id);
+      onRefresh();
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   const handleDragEnd = ({ active, over }) => {
@@ -899,7 +924,7 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
                 {orderedEntries.map(e => (
                   <SortableRow key={e.id} id={e.id} t={t} canEdit={canEdit}>
                     <Person name={e.name} link={e.discord_link} t={t} meta={e.meta}
-                      canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} />
+                      canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} deleteLoading={deletingId === e.id} />
                   </SortableRow>
                 ))}
               </SortableContext>
@@ -926,6 +951,7 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
 function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal, setWandererModal }) {
   const ta = WANDERER_ACCENT;
   const [ordered, setOrdered] = useState(wanderers);
+  const [deletingId, setDeletingId] = useState(null);
   useEffect(() => setOrdered(wanderers), [wanderers]);
   const sensors = useSortSensors();
 
@@ -952,7 +978,7 @@ function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal,
         {canEdit && (
           <div className="flex gap-1 shrink-0">
             <AdminBtn icon={Pencil} onClick={() => setWandererModal(w)} title="Edit" />
-            <AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', w.id); onRefresh(); }}} color="#f87171" title="Remove" />
+            <AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingId(w.id); try { await supabase.from('roster_entries').delete().eq('id', w.id); onRefresh(); } finally { setDeletingId(null); } }}} color="#f87171" title="Remove" loading={deletingId === w.id} />
           </div>
         )}
       </div>
@@ -1292,6 +1318,7 @@ export default function RosterPage({ userRole, userId }) {
   const [loading, setLoading]         = useState(true);
   const [activeVillage, setActiveVillage] = useState('konoha');
   const [mainTab, setMainTab]         = useState('roster');
+  const [deletingRosterId, setDeletingRosterId] = useState(null);
 
   const canEdit = isAdmin(userRole);
 
@@ -1306,6 +1333,17 @@ export default function RosterPage({ userRole, userId }) {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  // Real-time: refresh roster when any entry/squad changes in another tab or for another user
+  useEffect(() => {
+    if (!supabase) return;
+    const channel = supabase
+      .channel('roster-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'roster_entries' }, () => fetchData())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'roster_squads' },  () => fetchData())
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchData]);
 
   const isVillageTab = mainTab === 'roster';
   const v  = VILLAGE_META[activeVillage];
@@ -1545,7 +1583,7 @@ export default function RosterPage({ userRole, userId }) {
                       {canEdit && (
                         <div className="flex gap-1 shrink-0">
                           {bearer
-                            ? <><AdminBtn icon={Pencil} onClick={() => setSwordsModal({ sword: bearer.meta?.sword, entry: bearer })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); }}} color="#f87171" title="Remove" /></>
+                            ? <><AdminBtn icon={Pencil} onClick={() => setSwordsModal({ sword: bearer.meta?.sword, entry: bearer })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(bearer.id); try { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title="Remove" loading={deletingRosterId === bearer.id} /></>
                             : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setSwordsModal({ sword, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>
@@ -1602,7 +1640,7 @@ export default function RosterPage({ userRole, userId }) {
                       {canEdit && (
                         <div className="flex gap-1 shrink-0">
                           {host
-                            ? <><AdminBtn icon={Pencil} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: host })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); }}} color="#f87171" title="Remove" /></>
+                            ? <><AdminBtn icon={Pencil} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: host })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(host.id); try { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title="Remove" loading={deletingRosterId === host.id} /></>
                             : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>

@@ -11,9 +11,6 @@ export const BM_TIER_TO_RANK        = { Primary: 'A', Secondary: 'B', Tertiary: 
 export const RANK_COST_MAP = { E: '1 CU', D: '2 CU', C: '4 CU', B: '6 CU', A: '8 CU', S: '10 CU' };
 export const RANK_COST_NUM = { E: 1, D: 2, C: 4, B: 6, A: 8, S: 10 };
 
-export const MOCK_ADMIN = { uid: 'admin-1', email: 'admin@preview', role: 'admin' };
-export const MOCK_USER  = { uid: 'user-1',  email: 'user@preview',  role: 'user'  };
-
 const baseJutsus = [
   { name: 'Fireball',           nature: 'Fire',     rank: ['C'],         types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], bloodline: 'Sharingan' },
   { name: 'Chidori',             nature: 'Lightning', rank: ['B', 'A'],   types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], locked: true, multiRank: true },

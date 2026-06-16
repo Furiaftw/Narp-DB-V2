@@ -78,9 +78,6 @@ const BM_TIER_TO_RANK        = { Primary: 'A', Secondary: 'B', Tertiary: 'C' };
 const RANK_COST_MAP = { E: '1 CU', D: '2 CU', C: '4 CU', B: '6 CU', A: '8 CU', S: '10 CU' };
 const RANK_COST_NUM = { E: 1, D: 2, C: 4, B: 6, A: 8, S: 10 };
 
-const MOCK_ADMIN = { uid: 'admin-1', email: 'admin@preview', role: 'admin' };
-const MOCK_USER  = { uid: 'user-1',  email: 'user@preview',  role: 'user'  };
-
 /* ---------------------------------------------------------------------------
    UTILITIES
    --------------------------------------------------------------------------- */
@@ -3111,6 +3108,8 @@ function PendingJutsuCard({
   const [chatInput, setChatInput] = useState('');
   const [hasSubmitterChatted, setHasSubmitterChatted] = useState(false);
   const [nudgeCooldown, setNudgeCooldown] = useState(false);
+  const [isSending, setIsSending] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
   const messagesEndRef = useRef(null);
 
   const isClaimed = !!(
@@ -3239,23 +3238,25 @@ function PendingJutsuCard({
   const handleSend = async (e) => {
     if (e) e.preventDefault();
     const messageText = chatInput.trim();
-    if (!messageText) return;
-
+    if (!messageText || isSending) return;
+    setIsSending(true);
     try {
       await sendReviewChat(pending.id, messageText, false);
       setChatInput('');
       const freshMsgs = await fetchReviewChats(pending.id);
-      if (freshMsgs) {
-        setChatMessages(freshMsgs);
-      }
+      if (freshMsgs) setChatMessages(freshMsgs);
     } catch (err) {
       alert('Error sending message: ' + (err.message || err));
+    } finally {
+      setIsSending(false);
     }
   };
 
   const finalStepActivated = pending.data?.finalStepActivated || chatMessages.some(m => m.message && m.message.startsWith('[SYSTEM_FINAL_STEP]'));
 
   const handleActivateFinalStep = async () => {
+    if (isActivating) return;
+    setIsActivating(true);
     try {
       const systemMessage = `[SYSTEM_FINAL_STEP] Initialized by ${currentUserProfile?.username || 'Reviewer'}`;
       await sendReviewChat(pending.id, systemMessage, false);
@@ -3269,15 +3270,13 @@ function PendingJutsuCard({
       };
       await updatePendingJutsuData(pending.id, nextData);
 
-      if (refreshPending) {
-        await refreshPending();
-      }
+      if (refreshPending) await refreshPending();
       const freshMsgs = await fetchReviewChats(pending.id);
-      if (freshMsgs) {
-        setChatMessages(freshMsgs);
-      }
+      if (freshMsgs) setChatMessages(freshMsgs);
     } catch (err) {
       alert('Couldn\'t start the OC approval flow. Refresh the page and try again.');
+    } finally {
+      setIsActivating(false);
     }
   };
 
@@ -3542,13 +3541,13 @@ function PendingJutsuCard({
                     <button
                       type="button"
                       onClick={handleActivateFinalStep}
-                      className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
+                      disabled={isActivating}
+                      className="bg-amber-600 hover:bg-amber-700 disabled:opacity-60 text-white px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
                     >
-                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <line x1="12" y1="5" x2="12" y2="19" />
-                        <line x1="5" y1="12" x2="19" y2="12" />
-                      </svg>
-                      Send Thread Instructions
+                      {isActivating
+                        ? <><Icon n="Refresh" size={14} className="animate-spin" /> Activating...</>
+                        : <><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg> Send Thread Instructions</>
+                      }
                     </button>
                   </div>
                 )}
@@ -3697,18 +3696,19 @@ function PendingJutsuCard({
                       type="text"
                       value={chatInput}
                       onChange={(e) => setChatInput(e.target.value)}
+                      disabled={isSending}
                       placeholder={isStaff ? "Type a message to the player..." : "Type a message to the team..."}
-                      className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500"
+                      className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-60"
                     />
                     <button
                       type="submit"
-                      className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800"
+                      disabled={isSending}
+                      className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60"
                     >
-                      Send
-                      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                        <line x1="22" y1="2" x2="11" y2="13" />
-                        <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                      </svg>
+                      {isSending
+                        ? <><Icon n="Refresh" size={14} className="animate-spin" /> Sending</>
+                        : <>Send <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg></>
+                      }
                     </button>
                   </form>
                 </div>
@@ -4163,14 +4163,23 @@ export default function App() {
     try {
       channel = subscribeToDatabaseChanges((payload) => {
         const table = payload?.table;
+        const eventType = payload?.eventType;
         if (table === 'pending_jutsus') {
-          clearTimeout(pendingDebounce);
-          pendingDebounce = setTimeout(() => refreshPending(), 300);
+          if (eventType === 'UPDATE' && payload?.new?.id) {
+            // Patch only the changed row — avoids a full round-trip on every status change
+            setPendingJutsus(prev => prev.map(p =>
+              p.id === payload.new.id ? { ...p, ...payload.new } : p
+            ));
+          } else {
+            // INSERT or DELETE: need full refresh (INSERT needs joined profile data)
+            clearTimeout(pendingDebounce);
+            pendingDebounce = setTimeout(() => refreshPending(), 300);
+          }
         } else if (table === 'jutsus' || table === 'bloodlines') {
           clearTimeout(catalogDebounce);
           catalogDebounce = setTimeout(() => refreshDB(), 500);
         }
-        // pending_chats: handled per-card in PendingCard — no global refresh needed
+        // pending_chats / roster_entries / roster_squads: handled elsewhere — no global refresh needed
         if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
     } catch (err) {
@@ -4418,8 +4427,9 @@ export default function App() {
         }
       }
 
-      await refreshPending();
-      await refreshDB();
+      // Optimistic update already removed the card; let realtime subscription sync any
+      // stragglers. Fire a background refresh so the list stays consistent without blocking.
+      setTimeout(() => refreshPending(), 1500);
     } catch (e) {
       alert('Approve failed: ' + e.message);
     } finally {
@@ -4535,7 +4545,7 @@ export default function App() {
       }
 
       await cancelPendingJutsu(id);
-      await refreshPending();
+      setTimeout(() => refreshPending(), 1500);
     } catch (e) {
       alert('Cancel failed: ' + e.message);
     }

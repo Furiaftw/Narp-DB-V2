@@ -462,6 +462,16 @@ export const subscribeToDatabaseChanges = (onTableChange) => {
       { event: '*', schema: 'public', table: 'pending_chats' },
       (payload) => onTableChange(payload)
     )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'roster_entries' },
+      (payload) => onTableChange(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'roster_squads' },
+      (payload) => onTableChange(payload)
+    )
     .subscribe();
 
   return channel;
