@@ -2034,16 +2034,33 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
 /* ============================================================================
    COMPONENT: BloodlinesRosterTab
    ============================================================================ */
-function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit }) {
+function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
   const ORDER = ['Dojutsu', 'KKG', 'Hiden', 'Specialization', 'Other'];
   const SUBCAT_LABELS = { Dojutsu: 'Dojutsu', KKG: 'Kekkei Genkai', Hiden: 'Hiden', Specialization: 'Specialization', Other: 'Other' };
 
+  const toggleCat = (v) => setBF(p => ({ ...p, cat: p.cat.includes(v) ? p.cat.filter(x => x !== v) : [...p.cat, v] }));
+  const toggleSub = (v) => setBF(p => ({ ...p, sub: p.sub.includes(v) ? p.sub.filter(x => x !== v) : [...p.sub, v] }));
+  const activeCount = (bF?.cat?.length || 0) + (bF?.sub?.length || 0) + (bF?.q ? 1 : 0);
+
+  const filtB = useMemo(() => {
+    let list = bloodlines || [];
+    if (bF?.q) {
+      const q = bF.q.toLowerCase();
+      list = list.filter(b => b.name?.toLowerCase().includes(q) || (b.custom_tags || []).some(t => t.toLowerCase().includes(q)));
+    }
+    if (bF?.cat?.length) list = list.filter(b => bF.cat.includes(b.category));
+    if (bF?.sub?.length) list = list.filter(b => bF.sub.includes(b.subcategory));
+    if (bF?.srt === 'za') return [...list].sort((a, b) => b.name.localeCompare(a.name));
+    if (bF?.srt === 'newest') return [...list].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return [...list].sort((a, b) => a.name.localeCompare(b.name));
+  }, [bloodlines, bF]);
+
   const grouped = ORDER.reduce((acc, sub) => {
-    acc[sub] = (bloodlines || []).filter(b => b.subcategory === sub).sort((a, b) => a.name.localeCompare(b.name));
+    acc[sub] = filtB.filter(b => b.subcategory === sub);
     return acc;
   }, {});
 
-  const uncategorized = (bloodlines || []).filter(b => !ORDER.includes(b.subcategory)).sort((a, b) => a.name.localeCompare(b.name));
+  const uncategorized = filtB.filter(b => !ORDER.includes(b.subcategory));
   if (uncategorized.length) grouped['Other'] = [...(grouped['Other'] || []), ...uncategorized];
 
   if (!bloodlines || bloodlines.length === 0) {
@@ -2056,25 +2073,93 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit }) {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10">
-      {ORDER.map(sub => {
-        const items = grouped[sub];
-        if (!items || items.length === 0) return null;
-        return (
-          <div key={sub}>
-            <div className="flex items-center gap-3 mb-4">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{SUBCAT_LABELS[sub]}</h2>
-              <div className="flex-1 h-px bg-slate-200" />
-              <span className="text-xs font-bold text-slate-400">{items.length}</span>
-            </div>
-            <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {items.map(bl => (
-                <BloodlineRosterCard key={bl._id} bl={bl} isAdmin={isAdmin} onEdit={() => onEdit(bl)} />
-              ))}
-            </div>
+    <div className="max-w-6xl mx-auto space-y-8">
+      {/* Filter row */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm">
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[160px]">
+            <Icon n="Search" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <input
+              type="text"
+              value={bF?.q || ''}
+              onChange={e => setBF(p => ({ ...p, q: e.target.value }))}
+              placeholder="Search bloodlines..."
+              className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-xl bg-white text-slate-800 focus:outline-none focus:border-indigo-400"
+            />
           </div>
-        );
-      })}
+          {/* Sort */}
+          <select
+            value={bF?.srt || 'az'}
+            onChange={e => setBF(p => ({ ...p, srt: e.target.value }))}
+            className="text-sm border border-slate-200 rounded-xl px-3 py-2 bg-white text-slate-700 focus:outline-none focus:border-indigo-400"
+          >
+            <option value="az">Name (A-Z)</option>
+            <option value="za">Name (Z-A)</option>
+            <option value="newest">Newest First</option>
+          </select>
+          {/* Clear */}
+          {activeCount > 0 && (
+            <button
+              onClick={() => setBF({ q: '', cat: [], sub: [], srt: bF?.srt || 'az' })}
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 px-3 py-2 rounded-xl hover:bg-indigo-50 transition-colors border border-indigo-200"
+            >
+              Clear ({activeCount})
+            </button>
+          )}
+        </div>
+        {/* Category chips */}
+        <div className="flex flex-wrap gap-2">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest self-center mr-1">Type:</span>
+          {BL_CATS.map(c => (
+            <button key={c} onClick={() => toggleCat(c)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                bF?.cat?.includes(c) ? 'bg-indigo-100 border-indigo-300 text-indigo-800 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}>
+              {c}
+            </button>
+          ))}
+        </div>
+        {/* Subcategory chips */}
+        <div className="flex flex-wrap gap-2">
+          <span className="text-xs font-bold text-slate-400 uppercase tracking-widest self-center mr-1">Category:</span>
+          {ORDER.map(s => (
+            <button key={s} onClick={() => toggleSub(s)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border ${
+                bF?.sub?.includes(s) ? 'bg-indigo-100 border-indigo-300 text-indigo-800 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}>
+              {SUBCAT_LABELS[s]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {filtB.length === 0 ? (
+        <div className="text-center py-12">
+          <Icon n="Search" size={36} className="text-slate-300 mx-auto mb-3" />
+          <p className="text-slate-500 font-semibold">No bloodlines match your filters.</p>
+          <button onClick={() => setBF({ q: '', cat: [], sub: [], srt: bF?.srt || 'az' })} className="mt-3 text-sm text-indigo-600 hover:underline">Clear filters</button>
+        </div>
+      ) : (
+        ORDER.map(sub => {
+          const items = grouped[sub];
+          if (!items || items.length === 0) return null;
+          return (
+            <div key={sub}>
+              <div className="flex items-center gap-3 mb-4">
+                <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{SUBCAT_LABELS[sub]}</h2>
+                <div className="flex-1 h-px bg-slate-200" />
+                <span className="text-xs font-bold text-slate-400">{items.length}</span>
+              </div>
+              <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {items.map(bl => (
+                  <BloodlineRosterCard key={bl._id} bl={bl} isAdmin={isAdmin} onEdit={() => onEdit(bl)} />
+                ))}
+              </div>
+            </div>
+          );
+        })
+      )}
     </div>
   );
 }
@@ -3917,6 +4002,7 @@ export default function App() {
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
 
   const [f, setF] = useState(INITIAL_FILTER_STATE);
+  const [bF, setBF] = useState({ q: '', cat: [], sub: [], srt: 'az' });
   const clearF = useCallback(() => setF(p => {
     const next = { ...p };
     ARRAY_FILTER_KEYS.forEach(k => next[k] = []);
@@ -4911,6 +4997,8 @@ export default function App() {
             bloodlines={db.bloodlines || []}
             isAdmin={isAdmin}
             onEdit={(bl) => setAdminForm({ r: bl, tab: 'bloodlines' })}
+            bF={bF}
+            setBF={setBF}
           />
         )}
 
@@ -5066,7 +5154,7 @@ export default function App() {
                                       </span>
                                     )}
                                   </div>
-                                  <div className="text-xs text-slate-400 font-mono truncate max-w-[200px]">{m.email}</div>
+                                  <div className="text-xs text-slate-400 font-mono truncate max-w-[200px]">{isOwner ? m.email : maskEmail(m.email)}</div>
                                 </div>
                               </td>
                               <td className="py-3 px-4 text-slate-500 font-mono text-xs">
