@@ -146,11 +146,14 @@ export default async (req) => {
       (u) => u.email && u.email.toLowerCase() === email.toLowerCase()
     );
 
+    let targetUserId;
+
     if (existingUser) {
-      // If YES: update their password via admin.updateUserById()
+      targetUserId = existingUser.id;
+      // Update their password and explicitly confirm the account to clear any "pending approval" state
       const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(
         existingUser.id,
-        { password: securePassword }
+        { password: securePassword, email_confirm: true, ban_duration: 'none' }
       );
 
       if (updateError) {
@@ -160,15 +163,16 @@ export default async (req) => {
         });
       }
     } else {
-      // If NO: create the user via admin.createUser(), passing their discord metadata
+      // Create the user via admin.createUser(), passing their discord metadata
       const avatarUrl = discordUser.avatar
         ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
         : `https://cdn.discordapp.com/embed/avatars/${(parseInt(discordUser.id.slice(-4)) || 0) % 6}.png`;
 
-      const { error: createError } = await supabaseAdmin.auth.admin.createUser({
+      const { data: createdUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
         email: email,
         password: securePassword,
         email_confirm: true,
+        ban_duration: 'none',
         user_metadata: {
           preferred_username: discordUser.username,
           avatar_url: avatarUrl,
@@ -184,6 +188,8 @@ export default async (req) => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+
+      targetUserId = createdUser?.user?.id;
     }
 
     // Crucial Last Step: Because our Postgres trigger creates the profile row asynchronously, wait 1000ms,
