@@ -532,10 +532,10 @@ const loadDB = async () => {
   try {
     if (isSupabaseConfigured()) {
       try {
-        // Add a 3-second timeout safeguard to prevent hanging on slow database networks
+        // 10s timeout — Safari/Mac needs more time for TLS handshake on cold Supabase connections
         const fetchPromise = fetchAllFromSupabase();
         const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Supabase fetch timeout')), 3000)
+          setTimeout(() => reject(new Error('Supabase fetch timeout')), 10000)
         );
         const remote = await Promise.race([fetchPromise, timeoutPromise]);
         if (remote) {
@@ -548,7 +548,10 @@ const loadDB = async () => {
       }
     }
     const cached = LS.get(STORAGE.CACHE, null);
-    if (cached?.jutsus && Array.isArray(cached.jutsus) && cached.jutsus.length) {
+    // Skip a stale STATIC_SEED cache when Supabase is configured — seed IDs are shaped like
+    // 'j-0-0'. Serving those would show fake demo data instead of retrying the real DB.
+    const isSeedCache = /^j-\d+-\d+$/.test(cached?.jutsus?.[0]?.id ?? '');
+    if (cached?.jutsus?.length && !(isSupabaseConfigured() && isSeedCache)) {
       try {
         return normalizeDB(cached);
       } catch (cachedErr) {
@@ -558,7 +561,12 @@ const loadDB = async () => {
   } catch (globalErr) {
     console.warn('[NARP] Unexpected error in loadDB, falling back to static seed.', globalErr);
   }
-  LS.set(STORAGE.CACHE, { ...STATIC_SEED, ts: Date.now() });
+  // Only persist STATIC_SEED to localStorage in pure offline/dev mode (no Supabase configured).
+  // When Supabase IS configured but temporarily unreachable, don't poison the cache —
+  // the next load should retry the real DB rather than serving fake demo data.
+  if (!isSupabaseConfigured()) {
+    LS.set(STORAGE.CACHE, { ...STATIC_SEED, ts: Date.now() });
+  }
   return normalizeDB(STATIC_SEED);
 };
 
