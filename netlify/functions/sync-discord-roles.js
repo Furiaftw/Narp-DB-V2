@@ -51,21 +51,15 @@ export default async (req) => {
     }
 
     /* ------------------------------------------------------------------
-       STEP 1.5 — If they already exist and have a role assigned,
-       abort the role update and retain their database role.
-       Only assign a role via Discord sync on their very first login.
+       STEP 1.5 — Immediately confirm the user's account so no Supabase
+       "pending approval" or email-confirmation gate can block login.
+       Discord has already verified the user's identity; we don't need
+       any additional Supabase-side approval step.
        ------------------------------------------------------------------ */
-    if (existingProfile && existingProfile.role) {
-      console.log(`[sync-discord-roles] User ${userId} already has role '${existingProfile.role}' assigned. Aborting Discord sync.`);
-      return json({
-        id: existingProfile.id,
-        email: existingProfile.email,
-        username: existingProfile.username,
-        avatar_url: existingProfile.avatar_url,
-        role: existingProfile.role,
-        discord_id: existingProfile.discord_id,
-      }, 200);
-    }
+    await supabaseAdmin.auth.admin.updateUserById(userId, {
+      email_confirm: true,
+      ban_duration: 'none',
+    }).catch((e) => console.warn('[sync-discord-roles] Could not auto-confirm user:', e.message));
 
     /* ------------------------------------------------------------------
        STEP 2 — CRITICAL owner safeguard.
@@ -150,12 +144,20 @@ export default async (req) => {
 
     /* ------------------------------------------------------------------
        STEP 6 — Persist the verified role.
-       Preserve any existing profile fields; for a brand-new user, populate
-       the base details from Supabase Auth.
+       Discord role is only written on the very first login (when
+       discord_role_synced_at is NULL). After that the column is set and
+       subsequent logins leave the DB role untouched, preserving any
+       manual assignment made via the member board.
+       Owner is always protected regardless of sync status (Step 2 above).
        ------------------------------------------------------------------ */
+    const alreadySynced = Boolean(existingProfile?.discord_role_synced_at);
     let profileToSave;
     if (existingProfile) {
-      profileToSave = { ...existingProfile, role: appRole };
+      profileToSave = {
+        ...existingProfile,
+        role: alreadySynced ? existingProfile.role : appRole,
+        discord_role_synced_at: existingProfile.discord_role_synced_at ?? new Date().toISOString(),
+      };
     } else {
       const { data: { user }, error: getUserError } = await supabaseAdmin.auth.admin.getUser(userId);
       if (getUserError || !user) {
@@ -168,6 +170,7 @@ export default async (req) => {
         avatar_url: meta.avatar_url || meta.picture || '',
         username: meta.preferred_username || meta.user_name || meta.name || '',
         role: appRole,
+        discord_role_synced_at: new Date().toISOString(),
       };
     }
 
