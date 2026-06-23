@@ -192,8 +192,8 @@ export default async (req) => {
       targetUserId = createdUser?.user?.id;
     }
 
-    // Crucial Last Step: Because our Postgres trigger creates the profile row asynchronously, wait 1000ms,
-    // then check if the user already has a role in profiles. If they exist and have a role, do NOT overwrite it!
+    // Wait briefly for the Postgres trigger to create the profile row, then apply the Discord-derived role.
+    // Owner role is the only one protected from being overwritten — all others sync from Discord.
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const { data: existingProfile, error: fetchError } = await supabaseAdmin
@@ -206,8 +206,8 @@ export default async (req) => {
       console.warn(`[discord-login] Failed to fetch existing profile for ${email}: ${fetchError.message}`);
     }
 
-    if (existingProfile && existingProfile.role) {
-      console.log(`[discord-login] User already exists in database with role '${existingProfile.role}'. Retaining database role.`);
+    if (existingProfile && existingProfile.role === 'owner') {
+      console.log(`[discord-login] User is owner — role preserved.`);
     } else {
       const { error: dbError } = await supabaseAdmin
         .from('profiles')

@@ -51,21 +51,15 @@ export default async (req) => {
     }
 
     /* ------------------------------------------------------------------
-       STEP 1.5 — If they already exist and have a role assigned,
-       abort the role update and retain their database role.
-       Only assign a role via Discord sync on their very first login.
+       STEP 1.5 — Immediately confirm the user's account so no Supabase
+       "pending approval" or email-confirmation gate can block login.
+       Discord has already verified the user's identity; we don't need
+       any additional Supabase-side approval step.
        ------------------------------------------------------------------ */
-    if (existingProfile && existingProfile.role) {
-      console.log(`[sync-discord-roles] User ${userId} already has role '${existingProfile.role}' assigned. Aborting Discord sync.`);
-      return json({
-        id: existingProfile.id,
-        email: existingProfile.email,
-        username: existingProfile.username,
-        avatar_url: existingProfile.avatar_url,
-        role: existingProfile.role,
-        discord_id: existingProfile.discord_id,
-      }, 200);
-    }
+    await supabaseAdmin.auth.admin.updateUserById(userId, {
+      email_confirm: true,
+      ban_duration: 'none',
+    }).catch((e) => console.warn('[sync-discord-roles] Could not auto-confirm user:', e.message));
 
     /* ------------------------------------------------------------------
        STEP 2 — CRITICAL owner safeguard.
