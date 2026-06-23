@@ -144,12 +144,20 @@ export default async (req) => {
 
     /* ------------------------------------------------------------------
        STEP 6 — Persist the verified role.
-       Preserve any existing profile fields; for a brand-new user, populate
-       the base details from Supabase Auth.
+       Discord role is only written on the very first login (when
+       discord_role_synced_at is NULL). After that the column is set and
+       subsequent logins leave the DB role untouched, preserving any
+       manual assignment made via the member board.
+       Owner is always protected regardless of sync status (Step 2 above).
        ------------------------------------------------------------------ */
+    const alreadySynced = Boolean(existingProfile?.discord_role_synced_at);
     let profileToSave;
     if (existingProfile) {
-      profileToSave = { ...existingProfile, role: appRole };
+      profileToSave = {
+        ...existingProfile,
+        role: alreadySynced ? existingProfile.role : appRole,
+        discord_role_synced_at: existingProfile.discord_role_synced_at ?? new Date().toISOString(),
+      };
     } else {
       const { data: { user }, error: getUserError } = await supabaseAdmin.auth.admin.getUser(userId);
       if (getUserError || !user) {
@@ -162,6 +170,7 @@ export default async (req) => {
         avatar_url: meta.avatar_url || meta.picture || '',
         username: meta.preferred_username || meta.user_name || meta.name || '',
         role: appRole,
+        discord_role_synced_at: new Date().toISOString(),
       };
     }
 

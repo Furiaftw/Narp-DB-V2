@@ -193,12 +193,13 @@ export default async (req) => {
     }
 
     // Wait briefly for the Postgres trigger to create the profile row, then apply the Discord-derived role.
-    // Owner role is the only one protected from being overwritten — all others sync from Discord.
+    // Discord role is only written on the first login (discord_role_synced_at IS NULL).
+    // Owner role is never overwritten. Manual member-board assignments are preserved after first sync.
     await new Promise((resolve) => setTimeout(resolve, 1000));
 
     const { data: existingProfile, error: fetchError } = await supabaseAdmin
       .from('profiles')
-      .select('role')
+      .select('role, discord_role_synced_at')
       .eq('email', email)
       .maybeSingle();
 
@@ -206,17 +207,20 @@ export default async (req) => {
       console.warn(`[discord-login] Failed to fetch existing profile for ${email}: ${fetchError.message}`);
     }
 
-    if (existingProfile && existingProfile.role === 'owner') {
+    if (existingProfile?.role === 'owner') {
       console.log(`[discord-login] User is owner — role preserved.`);
-    } else {
+    } else if (!existingProfile?.discord_role_synced_at) {
+      // First login — apply Discord-derived role and mark as synced
       const { error: dbError } = await supabaseAdmin
         .from('profiles')
-        .update({ role: appRole })
+        .update({ role: appRole, discord_role_synced_at: new Date().toISOString() })
         .eq('email', email);
 
       if (dbError) {
         console.warn(`Failed to update user profile role in database: ${dbError.message}`);
       }
+    } else {
+      console.log(`[discord-login] Role already synced for ${email} — preserving DB role.`);
     }
 
     // Return { email, password } to the frontend
