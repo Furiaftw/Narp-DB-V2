@@ -43,6 +43,8 @@ import {
   fetchSubmissionControls,
   updateSubmissionControl,
   fetchRecentChats,
+  fetchMyParticipatingChatIds,
+  updateMySiteNickname,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification } from './lib/notifications';
 import RecentChatActivity from './components/features/RecentChatActivity';
@@ -2997,6 +2999,10 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
   const [notifEnabled, setNotifEnabledState] = useState(() => isNotifEnabled());
   const [notifPermission, setNotifPermissionState] = useState(() => getNotifPermission());
   const [notifDeniedMsg, setNotifDeniedMsg] = useState(false);
+  const [nicknameInput, setNicknameInput] = useState('');
+  const [nicknameEditing, setNicknameEditing] = useState(false);
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  const [nicknameMsg, setNicknameMsg] = useState('');
 
   const activeProfile = supabaseReady ? profile : {
     id: 'dev-user-id',
@@ -3081,9 +3087,87 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
           <div className="p-4 border-b border-slate-100 flex items-center gap-3">
             <ProfileAvatar profile={activeProfile} className="w-10 h-10 rounded-lg" />
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold text-slate-800 truncate">{activeProfile.username || 'No name'}</div>
+              <div className="text-sm font-bold text-slate-800 truncate">
+                {activeProfile.site_nickname || activeProfile.username || 'No name'}
+              </div>
+              {activeProfile.site_nickname && (
+                <div className="text-[10px] text-slate-400 truncate">@{activeProfile.username}</div>
+              )}
             </div>
           </div>
+
+          {/* Site Nickname — staff / admin / owner only */}
+          {supabaseReady && profile && ['staff', 'admin', 'owner'].includes(profile.role) && (
+            <div className="border-b border-slate-100 px-4 py-3">
+              <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Site Nickname</div>
+              {!nicknameEditing ? (
+                <div className="flex items-center gap-2">
+                  <span className="flex-1 text-xs text-slate-700 truncate">
+                    {profile.site_nickname || <span className="text-slate-400 italic">Not set</span>}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setNicknameInput(profile.site_nickname || ''); setNicknameEditing(true); setNicknameMsg(''); }}
+                    className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 px-2 py-1 rounded hover:bg-indigo-50 shrink-0"
+                  >Edit</button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <input
+                    type="text"
+                    value={nicknameInput}
+                    onChange={e => setNicknameInput(e.target.value)}
+                    maxLength={32}
+                    placeholder="Enter nickname…"
+                    autoFocus
+                    className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-indigo-400 text-slate-800"
+                    onKeyDown={e => { if (e.key === 'Escape') setNicknameEditing(false); }}
+                  />
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <button
+                      type="button"
+                      disabled={nicknameSaving}
+                      onClick={async () => {
+                        setNicknameSaving(true);
+                        try {
+                          const updated = await updateMySiteNickname(nicknameInput);
+                          onProfileUpdate(updated);
+                          setNicknameMsg('Saved!');
+                          setNicknameEditing(false);
+                        } catch (err) {
+                          setNicknameMsg(err.message || 'Failed to save');
+                        } finally { setNicknameSaving(false); }
+                      }}
+                      className="text-[10px] font-bold bg-indigo-600 text-white px-2.5 py-1 rounded hover:bg-indigo-700 disabled:opacity-60"
+                    >{nicknameSaving ? 'Saving…' : 'Save'}</button>
+                    <button
+                      type="button"
+                      onClick={() => { setNicknameEditing(false); setNicknameMsg(''); }}
+                      className="text-[10px] font-bold text-slate-500 px-2 py-1 rounded hover:bg-slate-100"
+                    >Cancel</button>
+                    {profile.site_nickname && (
+                      <button
+                        type="button"
+                        disabled={nicknameSaving}
+                        onClick={async () => {
+                          setNicknameSaving(true);
+                          try {
+                            const updated = await updateMySiteNickname('');
+                            onProfileUpdate(updated);
+                            setNicknameEditing(false);
+                          } catch (err) { setNicknameMsg(err.message || 'Failed'); }
+                          finally { setNicknameSaving(false); }
+                        }}
+                        className="text-[10px] font-bold text-rose-500 hover:text-rose-700 px-2 py-1 rounded hover:bg-rose-50 ml-auto"
+                      >Clear</button>
+                    )}
+                  </div>
+                  {nicknameMsg && <p className="text-[10px] text-indigo-600">{nicknameMsg}</p>}
+                </div>
+              )}
+            </div>
+          )}
+
           {profile?.role === 'owner' && (
             <div className="px-4 py-3 border-b border-slate-100 bg-amber-50">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Preview as</label>
@@ -3966,6 +4050,7 @@ export default function App() {
   const [expandedPendingId, setExpandedPendingId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [recentChats, setRecentChats] = useState([]);
+  const [myParticipatingIds, setMyParticipatingIds] = useState(() => new Set());
   const [appNotifEnabled, setAppNotifEnabled] = useState(() => isNotifEnabled());
   const [appNotifPermission, setAppNotifPermission] = useState(() => getNotifPermission());
   const [appNotifDenied, setAppNotifDenied] = useState(false);
@@ -4247,8 +4332,9 @@ export default function App() {
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
   useEffect(() => {
-    if (!supabaseReady || !isStaff) return;
+    if (!supabaseReady || !isStaff || !profile?.id) return;
     fetchRecentChats().then(setRecentChats).catch(() => {});
+    fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
   }, [supabaseReady, isStaff]);
 
   const [refreshing, setRefreshing] = useState(false);
@@ -4303,6 +4389,7 @@ export default function App() {
             });
           }
           fetchRecentChats().then(setRecentChats).catch(() => {});
+          if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
         }
         if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
@@ -4453,9 +4540,13 @@ export default function App() {
           if (chats && chats.length > 0) {
             chatTranscript = chats.map(c => {
               const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
-              const name = c.profiles?.username || 'Unknown';
+              const name = c.profiles?.site_nickname || c.profiles?.username || 'Unknown';
+              if (c.is_deleted) return `[${time}] ${name}:\n[Message deleted by sender]`;
               const msgText = c.message || '';
-              return `[${time}] ${name}:\n${msgText}`;
+              const editNote = c.is_edited && c.original_message
+                ? `\n  [Edited — original: ${c.original_message}]`
+                : c.is_edited ? '\n  [Edited]' : '';
+              return `[${time}] ${name}:\n${msgText}${editNote}`;
             }).join('\n\n') + '\n\n';
           }
           logData = await sendDiscordLog(
@@ -4617,9 +4708,13 @@ export default function App() {
           if (chats.length > 0) {
             chatTranscript = chats.map(c => {
               const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
-              const name = c.profiles?.username || 'Unknown';
+              const name = c.profiles?.site_nickname || c.profiles?.username || 'Unknown';
+              if (c.is_deleted) return `[${time}] ${name}:\n[Message deleted by sender]`;
               const msgText = c.message || '';
-              return `[${time}] ${name}:\n${msgText}`;
+              const editNote = c.is_edited && c.original_message
+                ? `\n  [Edited — original: ${c.original_message}]`
+                : c.is_edited ? '\n  [Edited]' : '';
+              return `[${time}] ${name}:\n${msgText}${editNote}`;
             }).join('\n\n') + '\n\n';
           }
           logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript, webhookConfig);
@@ -4913,6 +5008,14 @@ export default function App() {
       .filter(c => !['staff', 'admin', 'owner'].includes(c.profiles?.role))
       .map(c => c.pending_id)
   );
+  // For staff, only surface recent chats for submissions they claimed or messaged in.
+  // Admins and owners see all.
+  const visibleRecentChats = ['admin', 'owner'].includes(role)
+    ? recentChats
+    : recentChats.filter(c => {
+        const claimed = getPendingAssignedId(pendingJutsus.find(p => p.id === c.pending_id)) === profile?.id;
+        return claimed || myParticipatingIds.has(c.pending_id);
+      });
 
   return (
     <div className="w-full min-h-screen bg-slate-200 flex flex-col font-sans text-slate-900">
@@ -5115,7 +5218,7 @@ export default function App() {
               <>
                 {/* Recent Chat Activity panel (Feature 5) */}
                 <RecentChatActivity
-                  recentChats={recentChats}
+                  recentChats={visibleRecentChats}
                   pendingItems={pendingJutsus}
                   onSelectPending={(id) => {
                     setExpandedPendingId(id);
