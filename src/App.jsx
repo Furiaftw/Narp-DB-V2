@@ -3119,44 +3119,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               </div>
             </div>
           )}
-          {/* Notification toggle */}
-          {'Notification' in window && (
-            <div className="border-t border-slate-100 px-4 py-3">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={notifEnabled && notifPermission === 'granted' ? 'text-indigo-600' : 'text-slate-400'}>
-                    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
-                  </svg>
-                  <span className="text-xs font-semibold text-slate-700">Chat Notifications</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (notifEnabled) {
-                      setNotifEnabled(false);
-                      setNotifEnabledState(false);
-                    } else {
-                      const perm = await requestNotifPermission();
-                      setNotifPermissionState(perm);
-                      if (perm === 'granted') {
-                        setNotifEnabled(true);
-                        setNotifEnabledState(true);
-                        setNotifDeniedMsg(false);
-                      } else {
-                        setNotifDeniedMsg(true);
-                      }
-                    }
-                  }}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${notifEnabled && notifPermission === 'granted' ? 'bg-indigo-600' : 'bg-slate-200'}`}
-                >
-                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${notifEnabled && notifPermission === 'granted' ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </button>
-              </div>
-              {notifDeniedMsg && (
-                <p className="text-[10px] text-rose-500 mt-1">Notifications blocked. Enable in browser settings.</p>
-              )}
-            </div>
-          )}
           <button onClick={() => { setOpen(false); onSignOut(); }}
                   type="button"
                   className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-600 hover:bg-rose-50 flex items-center gap-2.5 border-t border-slate-100">
@@ -4004,6 +3966,9 @@ export default function App() {
   const [expandedPendingId, setExpandedPendingId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [recentChats, setRecentChats] = useState([]);
+  const [appNotifEnabled, setAppNotifEnabled] = useState(() => isNotifEnabled());
+  const [appNotifPermission, setAppNotifPermission] = useState(() => getNotifPermission());
+  const [appNotifDenied, setAppNotifDenied] = useState(false);
 
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
@@ -4943,6 +4908,11 @@ export default function App() {
     update: 'bg-amber-100 text-amber-800 border-amber-300',
     delete: 'bg-rose-100 text-rose-800 border-rose-300',
   };
+  const awaitingReplyIds = new Set(
+    recentChats
+      .filter(c => !['staff', 'admin', 'owner'].includes(c.profiles?.role))
+      .map(c => c.pending_id)
+  );
 
   return (
     <div className="w-full min-h-screen bg-slate-200 flex flex-col font-sans text-slate-900">
@@ -4972,6 +4942,41 @@ export default function App() {
                   <Icon n="Settings" size={14}/>
                   <span className="hidden sm:inline">System Tools</span>
                 </button>
+              )}
+              {'Notification' in window && profile && (
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    title={appNotifEnabled && appNotifPermission === 'granted' ? 'Chat notifications ON — click to disable' : appNotifPermission === 'denied' ? 'Notifications blocked in browser settings' : 'Enable chat notifications'}
+                    onClick={async () => {
+                      if (appNotifEnabled) {
+                        setNotifEnabled(false);
+                        setAppNotifEnabled(false);
+                        setAppNotifDenied(false);
+                      } else {
+                        const perm = await requestNotifPermission();
+                        setAppNotifPermission(perm);
+                        if (perm === 'granted') {
+                          setNotifEnabled(true);
+                          setAppNotifEnabled(true);
+                          setAppNotifDenied(false);
+                        } else {
+                          setAppNotifDenied(true);
+                        }
+                      }
+                    }}
+                    className={`p-2 rounded-lg border transition-colors shrink-0 ${appNotifEnabled && appNotifPermission === 'granted' ? 'border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-500' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill={appNotifEnabled && appNotifPermission === 'granted' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
+                  </button>
+                  {appNotifDenied && (
+                    <div className="absolute top-full right-0 mt-1 w-48 bg-rose-600 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg z-50 whitespace-normal">
+                      Notifications blocked. Enable in your browser settings.
+                    </div>
+                  )}
+                </div>
               )}
               {tab === 'jutsus' && (
                 <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
@@ -5157,7 +5162,7 @@ export default function App() {
                           const elapsedStr = hrs < 48 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
 
                           return (
-                            <div key={p.id} id={`pending-row-${p.id}`} className="rounded-xl overflow-hidden border border-slate-200 bg-white shadow-xs">
+                            <div key={p.id} id={`pending-row-${p.id}`} className={`rounded-xl overflow-hidden border bg-white shadow-xs ${awaitingReplyIds.has(p.id) ? 'border-orange-300' : 'border-slate-200'}`}>
                               <button
                                 type="button"
                                 onClick={() => setExpandedPendingId(prev => prev === p.id ? null : p.id)}
@@ -5167,6 +5172,12 @@ export default function App() {
                                   {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Del'}
                                 </span>
                                 <span className="flex-1 font-semibold text-slate-900 text-sm truncate min-w-0">{rowName}</span>
+                                {awaitingReplyIds.has(p.id) && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full shrink-0">
+                                    <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                                    Reply needed
+                                  </span>
+                                )}
                                 <span className="text-[11px] text-slate-500 shrink-0 hidden sm:block">by {rowSubmitter}</span>
                                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${p.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
                                   {p.status === 'pending_review' ? 'Review' : 'Approval'}
