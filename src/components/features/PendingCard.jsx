@@ -299,6 +299,8 @@ export function PendingJutsuCard({
   const [activeTab, setActiveTab] = useState('submitter'); // 'submitter' or 'staff'
   const [isSending, setIsSending] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
+  const [showConfirmClaim, setShowConfirmClaim] = useState(false);
+  const [showActionsModal, setShowActionsModal] = useState(false);
   const profileCache = useRef({});
   const messagesEndRef = useRef(null);
 
@@ -311,6 +313,11 @@ export function PendingJutsuCard({
       ? (pendingItem.assigned_to.id !== null && pendingItem.assigned_to.id !== undefined)
       : (typeof pendingItem.assigned_to === 'string' && pendingItem.assigned_to.trim() !== ''))
   );
+
+  const claimedById = pendingItem.assigned_to
+    ? (typeof pendingItem.assigned_to === 'object' ? pendingItem.assigned_to.id : pendingItem.assigned_to)
+    : null;
+  const isClaimedByMe = claimedById === currentUserId;
 
   const elapsed = (() => {
     const baseTimeStr = pending.submitted_at;
@@ -556,82 +563,162 @@ export function PendingJutsuCard({
         </div>
       )}
 
-      <div className="flex gap-2 mt-1 flex-wrap">
-        {pending.status === 'pending_review' ? (
-          hasStaffPrivileges ? (
-            <>
-              <button onClick={() => onReview(pending.id)}
-                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                <Icon n="Check" size={14}/> Begin Second Review
-              </button>
-              {['admin', 'owner'].includes(currentUser.role) && (
-                <button onClick={() => onApprove(pending.id)}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                  <Icon n="Check" size={14}/> Admin Approve
+      {/* ── Actions area ── */}
+      {hasStaffPrivileges && !isMySubmissionsView ? (
+        <div className="flex gap-2 mt-1 items-center flex-wrap">
+          {!isClaimed ? (
+            showConfirmClaim ? (
+              /* 2-step confirmation for Assign to Me */
+              <div className="flex-1 flex items-center gap-2 bg-teal-50 border border-teal-200 rounded-xl px-3 py-2">
+                <span className="text-xs font-semibold text-teal-700 flex-1">Confirm assigning this to yourself?</span>
+                <button
+                  onClick={() => { onClaim(pending.id); setShowConfirmClaim(false); }}
+                  className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1"
+                >
+                  <Icon n="Check" size={12}/> Yes
                 </button>
-              )}
-            </>
-          ) : (
-            isStrictSubmitter && (
-              <div className="text-[10px] text-slate-400 italic self-center">
-                Another Reviewer must perform Begin Second Review
+                <button
+                  onClick={() => setShowConfirmClaim(false)}
+                  className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg font-bold text-xs flex items-center gap-1"
+                >
+                  <Icon n="X" size={12}/> Cancel
+                </button>
               </div>
+            ) : (
+              <button
+                onClick={() => setShowConfirmClaim(true)}
+                className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-1.5"
+              >
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+                </svg>
+                Assign to Me
+              </button>
             )
-          )
-        ) : (
-          hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-            <button onClick={() => onApprove(pending.id)}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-              <Icon n="Check" size={14}/> Approve
-            </button>
-          )
-        )}
-        {onEdit && (
-          <button onClick={() => onEdit(pending)}
-                  className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Edit pending payload">
-            <Icon n="Edit" size={14}/> Edit
-          </button>
-        )}
-        {hasStaffPrivileges && (
-          <button onClick={() => onCancel(pending.id)}
-                  className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-            <Icon n="X" size={14}/> Cancel Submission
-          </button>
-        )}
-        {!isClaimed && hasStaffPrivileges && (
-          <button onClick={() => onClaim(pending.id)}
-                  className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                  title="Claim Review">
-            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-            </svg>
-            Assign to Me
-          </button>
-        )}
-        {(isReviewerOrAdmin || isMine) && (
+          ) : (
+            <span className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border ${isClaimedByMe ? 'bg-teal-50 text-teal-700 border-teal-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}>
+              {isClaimedByMe ? 'Assigned to you' : `Claimed by ${pending.assignee?.username || 'someone'}`}
+            </span>
+          )}
           <button
-            onClick={() => setIsChatOpen(true)}
-            className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-            title="Open Chat"
+            onClick={() => setShowActionsModal(true)}
+            className="bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-1.5"
           >
             <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>
             </svg>
-            Review Chat
+            Actions
           </button>
-        )}
-        {isStrictSubmitter && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            Another Reviewer must approve
+        </div>
+      ) : (
+        /* Submitter / my-submissions view — keep original compact layout */
+        <div className="flex gap-2 mt-1 flex-wrap">
+          {(isReviewerOrAdmin || isMine) && (
+            <button
+              onClick={() => setIsChatOpen(true)}
+              className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+              title="Open Chat"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              Review Chat
+            </button>
+          )}
+          {isStrictSubmitter && pending.status === 'pending_approval' && (
+            <div className="text-[10px] text-slate-400 italic self-center">
+              Another Reviewer must approve
+            </div>
+          )}
+          {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
+            <div className="text-[10px] text-slate-400 italic self-center">
+              You reviewed this. Another Reviewer must approve.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Actions modal ── */}
+      {showActionsModal && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/50" onClick={() => setShowActionsModal(false)} />
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={() => setShowActionsModal(false)}>
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="bg-slate-900 text-white px-5 py-4 flex items-center justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs text-slate-400 font-semibold truncate">{name}</div>
+                  <div className="text-sm font-bold">Actions</div>
+                </div>
+                <button onClick={() => setShowActionsModal(false)} className="text-slate-400 hover:text-white ml-3">
+                  <Icon n="X" size={18}/>
+                </button>
+              </div>
+              <div className="p-4 flex flex-col gap-2">
+                {/* View Review Chat */}
+                <button
+                  onClick={() => { setIsChatOpen(true); setShowActionsModal(false); }}
+                  className="w-full bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                >
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  View Review Chat
+                </button>
+
+                {/* Begin Second Review */}
+                {pending.status === 'pending_review' && hasStaffPrivileges && (
+                  <button
+                    onClick={() => { onReview(pending.id); setShowActionsModal(false); }}
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                  >
+                    <Icon n="Check" size={16}/> Begin Second Review
+                  </button>
+                )}
+
+                {/* Admin Approve (admin/owner during pending_review) */}
+                {pending.status === 'pending_review' && ['admin', 'owner'].includes(currentUser.role) && (
+                  <button
+                    onClick={() => { onApprove(pending.id); setShowActionsModal(false); }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                  >
+                    <Icon n="Check" size={16}/> Admin Approve
+                  </button>
+                )}
+
+                {/* Approve (pending_approval stage) */}
+                {pending.status !== 'pending_review' && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
+                  <button
+                    onClick={() => { onApprove(pending.id); setShowActionsModal(false); }}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                  >
+                    <Icon n="Check" size={16}/> Approve
+                  </button>
+                )}
+
+                {/* Edit */}
+                {onEdit && (
+                  <button
+                    onClick={() => { onEdit(pending); setShowActionsModal(false); }}
+                    className="w-full bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                  >
+                    <Icon n="Edit" size={16}/> Edit Submission
+                  </button>
+                )}
+
+                {/* Cancel Submission — destructive */}
+                <div className="mt-1 pt-2 border-t border-slate-100">
+                  <button
+                    onClick={() => { onCancel(pending.id); setShowActionsModal(false); }}
+                    className="w-full bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 px-4 py-3 rounded-xl font-bold text-sm flex items-center gap-3"
+                  >
+                    <Icon n="X" size={16}/> Cancel Submission
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
-        )}
-        {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
-          <div className="text-[10px] text-slate-400 italic self-center">
-            You reviewed this. Another Reviewer must approve.
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       {isChatOpen && (
         <>

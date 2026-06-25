@@ -42,7 +42,10 @@ import {
   saveWebhookConfig,
   fetchSubmissionControls,
   updateSubmissionControl,
+  fetchRecentChats,
 } from './lib/supabase';
+import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification } from './lib/notifications';
+import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
 
@@ -2991,6 +2994,9 @@ function MemberWorkThreadInput({ member, onSave }) {
 function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, devRole, onToggleDevRole, onProfileUpdate, viewAsRole, onSetViewAsRole }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
+  const [notifEnabled, setNotifEnabledState] = useState(() => isNotifEnabled());
+  const [notifPermission, setNotifPermissionState] = useState(() => getNotifPermission());
+  const [notifDeniedMsg, setNotifDeniedMsg] = useState(false);
 
   const activeProfile = supabaseReady ? profile : {
     id: 'dev-user-id',
@@ -3381,7 +3387,7 @@ function PendingJutsuCard({
     .filter(m => ['staff', 'admin', 'owner'].includes(m.profiles?.role))
     .reduce((latest, m) => Math.max(latest, new Date(m.created_at).getTime()), 0);
 
-  const nudgeReviewerLocked = lastStaffMsgTime > 0 && (Date.now() - lastStaffMsgTime) < 24 * 60 * 60 * 1000;
+  const nudgeReviewerLocked = lastStaffMsgTime > 0 && (Date.now() - lastStaffMsgTime) < 30 * 60 * 1000;
 
   const handleNudgeReviewer = async () => {
     if (nudgeCooldown) return;
@@ -3755,7 +3761,7 @@ function PendingJutsuCard({
                           type="button"
                           onClick={handleNudgeReviewer}
                           disabled={nudgeReviewerLocked || nudgeCooldown}
-                          title={nudgeReviewerLocked ? "Wait 24h after the reviewer's last message before nudging again" : 'Send a DM reminder to the reviewer'}
+                          title={nudgeReviewerLocked ? "Wait 30 min after the reviewer's last message before nudging again" : 'Send a DM reminder to the reviewer'}
                           className={`flex-1 text-xs font-bold py-2 px-3 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
                             nudgeReviewerLocked || nudgeCooldown
                               ? 'bg-slate-100 text-slate-400 cursor-not-allowed'
@@ -3765,7 +3771,7 @@ function PendingJutsuCard({
                           <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
                           </svg>
-                          {nudgeReviewerLocked ? 'Nudge available in 24 hours' : nudgeCooldown ? 'Nudge Sent!' : 'Nudge Reviewer'}
+                          {nudgeReviewerLocked ? 'Nudge available in ~30 min' : nudgeCooldown ? 'Nudge Sent!' : 'Nudge Reviewer'}
                         </button>
                       )}
                       {hasStaffPrivileges && (
@@ -3948,6 +3954,7 @@ export default function App() {
   const isOwner = role === 'owner';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
+  const pendingJutsusRef = useRef([]);
   const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
@@ -3956,6 +3963,12 @@ export default function App() {
   const [mySubsHasNew, setMySubsHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
   const tabRef = useRef('jutsus');
+  const [expandedPendingId, setExpandedPendingId] = useState(null);
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const [recentChats, setRecentChats] = useState([]);
+  const [appNotifEnabled, setAppNotifEnabled] = useState(() => isNotifEnabled());
+  const [appNotifPermission, setAppNotifPermission] = useState(() => getNotifPermission());
+  const [appNotifDenied, setAppNotifDenied] = useState(false);
 
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
@@ -4233,6 +4246,11 @@ export default function App() {
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
+  useEffect(() => {
+    if (!supabaseReady || !isStaff) return;
+    fetchRecentChats().then(setRecentChats).catch(() => {});
+  }, [supabaseReady, isStaff]);
+
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
     setRefreshing(true);
@@ -4273,7 +4291,19 @@ export default function App() {
           clearTimeout(catalogDebounce);
           catalogDebounce = setTimeout(() => refreshDB(), 500);
         }
-        // pending_chats / roster_entries / roster_squads: handled elsewhere — no global refresh needed
+        // pending_chats: fire browser notification and refresh recent chat list
+        if (table === 'pending_chats' && eventType === 'INSERT' && payload?.new?.sender_id !== profile?.id) {
+          const submission = pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id);
+          if (submission) {
+            const subName = submission.data?.name || 'a submission';
+            showChatNotification({
+              title: `New message — ${subName}`,
+              body: (payload.new?.message || '').slice(0, 80),
+              tag: `pending-${payload.new?.pending_id}`,
+            });
+          }
+          fetchRecentChats().then(setRecentChats).catch(() => {});
+        }
         if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
     } catch (err) {
@@ -4308,7 +4338,8 @@ export default function App() {
       setPendingHasNew(true);
     }
     prevPendingCountRef.current = pendingJutsus.length;
-  }, [pendingJutsus.length, pendingLoaded]);
+    pendingJutsusRef.current = pendingJutsus;
+  }, [pendingJutsus, pendingLoaded]);
 
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity, askSecondApproval }) => {
     const isJutsus = t === 'jutsus';
@@ -4857,6 +4888,32 @@ export default function App() {
     setF(p => ({ ...p, sort: 'az', showFilters: false }));
   };
 
+  const getPendingAssignedId = (p) => {
+    if (!p.assigned_to) return null;
+    return typeof p.assigned_to === 'object' ? p.assigned_to.id : p.assigned_to;
+  };
+  const pendingGroupClaimedByMe = pendingJutsus.filter(p => getPendingAssignedId(p) === profile?.id);
+  const pendingGroupRest = pendingJutsus.filter(p => getPendingAssignedId(p) !== profile?.id);
+  const pendingGroupApproval = pendingGroupRest.filter(p => p.status === 'pending_approval');
+  const pendingGroupNeeds = pendingGroupRest.filter(p => p.status === 'pending_review' && !getPendingAssignedId(p));
+  const pendingGroupOthers = pendingGroupRest.filter(p => !(p.status === 'pending_approval') && !(p.status === 'pending_review' && !getPendingAssignedId(p)));
+  const pendingGroups = [
+    { key: 'mine',     label: 'Claimed by Me',     emoji: '⭐', items: pendingGroupClaimedByMe },
+    { key: 'approval', label: 'Pending Approval',   emoji: '🔵', items: pendingGroupApproval },
+    { key: 'needs',    label: 'Needs Reviewer',     emoji: '🟡', items: pendingGroupNeeds },
+    { key: 'others',   label: 'Claimed by Others',  emoji: '⬜', items: pendingGroupOthers },
+  ].filter(g => g.items.length > 0);
+  const pendingOpColors = {
+    insert: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+    update: 'bg-amber-100 text-amber-800 border-amber-300',
+    delete: 'bg-rose-100 text-rose-800 border-rose-300',
+  };
+  const awaitingReplyIds = new Set(
+    recentChats
+      .filter(c => !['staff', 'admin', 'owner'].includes(c.profiles?.role))
+      .map(c => c.pending_id)
+  );
+
   return (
     <div className="w-full min-h-screen bg-slate-200 flex flex-col font-sans text-slate-900">
 
@@ -4885,6 +4942,41 @@ export default function App() {
                   <Icon n="Settings" size={14}/>
                   <span className="hidden sm:inline">System Tools</span>
                 </button>
+              )}
+              {'Notification' in window && profile && (
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    title={appNotifEnabled && appNotifPermission === 'granted' ? 'Chat notifications ON — click to disable' : appNotifPermission === 'denied' ? 'Notifications blocked in browser settings' : 'Enable chat notifications'}
+                    onClick={async () => {
+                      if (appNotifEnabled) {
+                        setNotifEnabled(false);
+                        setAppNotifEnabled(false);
+                        setAppNotifDenied(false);
+                      } else {
+                        const perm = await requestNotifPermission();
+                        setAppNotifPermission(perm);
+                        if (perm === 'granted') {
+                          setNotifEnabled(true);
+                          setAppNotifEnabled(true);
+                          setAppNotifDenied(false);
+                        } else {
+                          setAppNotifDenied(true);
+                        }
+                      }
+                    }}
+                    className={`p-2 rounded-lg border transition-colors shrink-0 ${appNotifEnabled && appNotifPermission === 'granted' ? 'border-indigo-500 bg-indigo-600 text-white hover:bg-indigo-500' : 'border-slate-700 bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'}`}
+                  >
+                    <svg viewBox="0 0 24 24" width="15" height="15" fill={appNotifEnabled && appNotifPermission === 'granted' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0" />
+                    </svg>
+                  </button>
+                  {appNotifDenied && (
+                    <div className="absolute top-full right-0 mt-1 w-48 bg-rose-600 text-white text-[10px] font-semibold px-2.5 py-1.5 rounded-lg shadow-lg z-50 whitespace-normal">
+                      Notifications blocked. Enable in your browser settings.
+                    </div>
+                  )}
+                </div>
               )}
               {tab === 'jutsus' && (
                 <div className="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700 mr-2 shrink-0">
@@ -5021,32 +5113,108 @@ export default function App() {
               </div>
             ) : (
               <>
+                {/* Recent Chat Activity panel (Feature 5) */}
+                <RecentChatActivity
+                  recentChats={recentChats}
+                  pendingItems={pendingJutsus}
+                  onSelectPending={(id) => {
+                    setExpandedPendingId(id);
+                    const p2 = pendingJutsus.find(x => x.id === id);
+                    if (p2) {
+                      const aid = getPendingAssignedId(p2);
+                      let gk;
+                      if (aid === profile?.id) gk = 'mine';
+                      else if (p2.status === 'pending_approval') gk = 'approval';
+                      else if (p2.status === 'pending_review' && !aid) gk = 'needs';
+                      else gk = 'others';
+                      setCollapsedGroups(prev => { const n = new Set(prev); n.delete(gk); return n; });
+                    }
+                    setTimeout(() => document.getElementById(`pending-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
+                  }}
+                />
+
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{pendingJutsus.length} Pending</div>
-                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
-                  {pendingJutsus.map(p => {
-                    const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
-                    return (
-                      <PendingJutsuCard
-                        key={p.id}
-                        pending={p}
-                        originalJutsu={original}
-                        currentUserId={profile?.id}
-                        isAdmin={isAdmin}
-                        onApprove={handleApprovePending}
-                        onCancel={handleCancelPending}
-                        onSubmitterCancel={handleSubmitterCancelPending}
-                        onReview={handleReviewPending}
-                        onEdit={handleEditPending}
-                        currentUserRole={role}
-                        refreshTrigger={refreshTrigger}
-                        onClaim={handleClaimPending}
-                        isMySubmissionsView={false}
-                        currentUserProfile={profile}
-                        refreshPending={refreshPending}
-                        isApproving={approvingIds.has(p.id)} />
-                    );
-                  })}
-                </div>
+
+                {pendingGroups.map(({ key, label, emoji, items }) => (
+                  <div key={key} className="mb-4">
+                    <button
+                      type="button"
+                      onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; })}
+                      className="w-full flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl mb-1 transition-colors"
+                    >
+                      <span className="text-base">{emoji}</span>
+                      <span className="font-bold text-slate-700 text-sm flex-1 text-left">{label}</span>
+                      <span className="bg-white border border-slate-200 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
+                      <Icon n={collapsedGroups.has(key) ? 'Down' : 'Up'} size={14} className="text-slate-400" />
+                    </button>
+
+                    {!collapsedGroups.has(key) && (
+                      <div className="flex flex-col gap-1">
+                        {items.map(p => {
+                          const op = p.operation;
+                          const rowDisplay = op === 'delete' ? {} : (p.data || {});
+                          const rowName = rowDisplay.name || '(no name)';
+                          const rowSubmitter = p.submitter?.username || 'Unknown';
+                          const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
+                          const isExpanded = expandedPendingId === p.id;
+                          const diffMs = Date.now() - new Date(p.submitted_at || 0).getTime();
+                          const hrs = Math.floor(diffMs / 3600000);
+                          const elapsedStr = hrs < 48 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
+
+                          return (
+                            <div key={p.id} id={`pending-row-${p.id}`} className={`rounded-xl overflow-hidden border bg-white shadow-xs ${awaitingReplyIds.has(p.id) ? 'border-orange-300' : 'border-slate-200'}`}>
+                              <button
+                                type="button"
+                                onClick={() => setExpandedPendingId(prev => prev === p.id ? null : p.id)}
+                                className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
+                              >
+                                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 ${pendingOpColors[op] || ''}`}>
+                                  {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Del'}
+                                </span>
+                                <span className="flex-1 font-semibold text-slate-900 text-sm truncate min-w-0">{rowName}</span>
+                                {awaitingReplyIds.has(p.id) && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full shrink-0">
+                                    <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+                                    Reply needed
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-500 shrink-0 hidden sm:block">by {rowSubmitter}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${p.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+                                  {p.status === 'pending_review' ? 'Review' : 'Approval'}
+                                </span>
+                                <span className="text-[11px] text-slate-400 shrink-0">{elapsedStr}</span>
+                                <Icon n={isExpanded ? 'Up' : 'Down'} size={13} className="text-slate-400 shrink-0" />
+                              </button>
+
+                              {isExpanded && (
+                                <div className="border-t border-slate-100">
+                                  <PendingJutsuCard
+                                    pending={p}
+                                    originalJutsu={original}
+                                    currentUserId={profile?.id}
+                                    isAdmin={isAdmin}
+                                    onApprove={handleApprovePending}
+                                    onCancel={handleCancelPending}
+                                    onSubmitterCancel={handleSubmitterCancelPending}
+                                    onReview={handleReviewPending}
+                                    onEdit={handleEditPending}
+                                    currentUserRole={role}
+                                    refreshTrigger={refreshTrigger}
+                                    onClaim={handleClaimPending}
+                                    isMySubmissionsView={false}
+                                    currentUserProfile={profile}
+                                    refreshPending={refreshPending}
+                                    isApproving={approvingIds.has(p.id)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                ))}
               </>
             )}
           </div>
