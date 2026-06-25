@@ -10,6 +10,8 @@ import {
   approvePendingJutsu,
   reviewPendingJutsu,
   claimPendingSubmission,
+  editChatMessage,
+  deleteChatMessage,
 } from '../../lib/supabase';
 
 /* ============================================================================
@@ -301,6 +303,9 @@ export function PendingJutsuCard({
   const [isActivating, setIsActivating] = useState(false);
   const [showConfirmClaim, setShowConfirmClaim] = useState(false);
   const [showActionsModal, setShowActionsModal] = useState(false);
+  const [editingMsgId, setEditingMsgId] = useState(null);
+  const [editInput, setEditInput] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
   const profileCache = useRef({});
   const messagesEndRef = useRef(null);
 
@@ -850,23 +855,29 @@ export function PendingJutsuCard({
                       }
 
                       const isMe = msg.sender_id === currentUserId;
-                      const senderName = msg.profiles?.username || 'Unknown User';
+                      const senderName = msg.profiles?.site_nickname || msg.profiles?.username || 'Unknown User';
                       const isPrivate = msg.is_staff_only;
+                      const isDeleted = msg.is_deleted;
+                      const isEdited = msg.is_edited;
+                      const isEditingThis = editingMsgId === msg.id;
+
                       return (
                         <div
                           key={msg.id}
-                          className={`flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
-                            isMe
-                              ? isPrivate
-                                ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
-                                : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
-                              : isPrivate
-                                ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
-                                : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
+                          className={`group flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
+                            isDeleted
+                              ? 'self-end opacity-60 bg-slate-100 border border-slate-200 text-slate-400'
+                              : isMe
+                                ? isPrivate
+                                  ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
+                                  : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
+                                : isPrivate
+                                  ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
+                                  : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                           }`}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
-                            {msg.profiles?.avatar_url && (
+                            {msg.profiles?.avatar_url && !isDeleted && (
                               <img
                                 src={getNetlifyImageUrl(msg.profiles.avatar_url, 20)}
                                 srcSet={getNetlifyImageSrcSet(msg.profiles.avatar_url)}
@@ -877,10 +888,12 @@ export function PendingJutsuCard({
                                 loading="lazy"
                               />
                             )}
-                            <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
-                              {senderName}
-                            </span>
-                            {msg.profiles?.role && (() => {
+                            {!isDeleted && (
+                              <span className={`font-serif font-bold text-xs ${isMe ? (isPrivate ? 'text-amber-100' : 'text-indigo-100') : 'text-slate-900'}`}>
+                                {senderName}
+                              </span>
+                            )}
+                            {!isDeleted && msg.profiles?.role && (() => {
                               const senderRole = msg.profiles.role;
                               return (
                                 <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
@@ -898,12 +911,12 @@ export function PendingJutsuCard({
                                 </span>
                               );
                             })()}
-                            {isPrivate ? (
+                            {!isDeleted && isPrivate ? (
                               <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm bg-amber-200 text-amber-800 border border-amber-300">
                                 Private
                               </span>
                             ) : (
-                              activeTab === 'staff' && (
+                              !isDeleted && activeTab === 'staff' && (
                                 <span className={`text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded-sm ${
                                   isMe ? 'bg-indigo-500/30 text-indigo-50 border border-indigo-500/20' : 'bg-slate-100 text-slate-600 border border-slate-200'
                                 }`}>
@@ -911,13 +924,83 @@ export function PendingJutsuCard({
                                 </span>
                               )
                             )}
-                            <span className={`text-[10px] ${isMe ? (isPrivate ? 'text-amber-200' : 'text-indigo-200') : 'text-slate-400'}`}>
-                              · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
+                            {!isDeleted && (
+                              <span className={`text-[10px] ${isMe ? (isPrivate ? 'text-amber-200' : 'text-indigo-200') : 'text-slate-400'}`}>
+                                · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            )}
+                            {!isDeleted && isEdited && (
+                              <span className={`text-[9px] italic ${isMe ? 'text-white/60' : 'text-slate-400'}`}>edited</span>
+                            )}
+                            {/* Edit/Delete buttons — own messages only, not deleted, not system */}
+                            {isMe && !isDeleted && (
+                              <div className="ml-auto flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  title="Edit"
+                                  onClick={() => { setEditingMsgId(msg.id); setEditInput(msg.message); }}
+                                  className={`p-1 rounded ${isPrivate ? 'hover:bg-amber-500/40' : 'hover:bg-indigo-500/40'} transition-colors`}
+                                >
+                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete"
+                                  onClick={async () => {
+                                    if (!window.confirm('Delete this message?')) return;
+                                    try {
+                                      await deleteChatMessage(msg.id);
+                                      const fresh = await fetchReviewChats(pending.id);
+                                      if (fresh) setChatMessages(fresh);
+                                    } catch (err) { alert('Could not delete: ' + err.message); }
+                                  }}
+                                  className="p-1 rounded hover:bg-rose-500/40 transition-colors"
+                                >
+                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                                </button>
+                              </div>
+                            )}
                           </div>
-                          <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                            {renderMessageWithLinks(msg.message)}
-                          </p>
+                          {isDeleted ? (
+                            <p className="text-xs italic text-slate-400">Message removed.</p>
+                          ) : isEditingThis ? (
+                            <div className="flex flex-col gap-1.5 mt-1">
+                              <textarea
+                                value={editInput}
+                                onChange={e => setEditInput(e.target.value)}
+                                rows={3}
+                                className="w-full border border-white/30 rounded-lg px-3 py-2 text-sm bg-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-1 focus:ring-white/50 resize-none"
+                                onKeyDown={e => { if (e.key === 'Escape') { setEditingMsgId(null); } }}
+                              />
+                              <div className="flex gap-1.5">
+                                <button
+                                  type="button"
+                                  disabled={editSaving}
+                                  onClick={async () => {
+                                    if (!editInput.trim()) return;
+                                    setEditSaving(true);
+                                    try {
+                                      await editChatMessage(msg.id, editInput);
+                                      const fresh = await fetchReviewChats(pending.id);
+                                      if (fresh) setChatMessages(fresh);
+                                      setEditingMsgId(null);
+                                    } catch (err) { alert('Could not save edit: ' + err.message); }
+                                    finally { setEditSaving(false); }
+                                  }}
+                                  className="text-[11px] font-bold bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg disabled:opacity-60"
+                                >{editSaving ? 'Saving…' : 'Save'}</button>
+                                <button
+                                  type="button"
+                                  onClick={() => setEditingMsgId(null)}
+                                  className="text-[11px] font-bold text-white/70 hover:text-white px-2 py-1 rounded-lg"
+                                >Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
+                              {renderMessageWithLinks(msg.message)}
+                            </p>
+                          )}
                         </div>
                       );
                     })

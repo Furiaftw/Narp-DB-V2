@@ -102,7 +102,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -487,6 +487,68 @@ export const cancelPendingJutsu = async (id) => {
   if (!supabase) return;
   const { error } = await supabase.from('pending_jutsus').delete().eq('id', id);
   if (error) throw error;
+};
+
+export const updateMySiteNickname = async (nickname) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in');
+  const clean = (nickname || '').trim() || null;
+  const { data, error } = await supabase
+    .from('profiles')
+    .update({ site_nickname: clean })
+    .eq('id', session.user.id)
+    .select('id, email, username, avatar_url, role, discord_id, site_nickname, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const editChatMessage = async (messageId, newMessage) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in');
+  const { data: existing, error: fetchErr } = await supabase
+    .from('pending_chats')
+    .select('message, original_message')
+    .eq('id', messageId)
+    .single();
+  if (fetchErr) throw fetchErr;
+  const { data, error } = await supabase
+    .from('pending_chats')
+    .update({
+      message: newMessage.trim(),
+      is_edited: true,
+      original_message: existing.original_message ?? existing.message,
+    })
+    .eq('id', messageId)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+};
+
+export const deleteChatMessage = async (messageId) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in');
+  const { error } = await supabase
+    .from('pending_chats')
+    .update({ is_deleted: true })
+    .eq('id', messageId);
+  if (error) throw error;
+};
+
+export const fetchMyParticipatingChatIds = async (userId) => {
+  if (!supabase || !userId) return new Set();
+  try {
+    const { data, error } = await supabase
+      .from('pending_chats')
+      .select('pending_id')
+      .eq('sender_id', userId);
+    if (error) return new Set();
+    return new Set((data || []).map(r => r.pending_id));
+  } catch { return new Set(); }
 };
 
 export const fetchRecentChats = async (limit = 20) => {
