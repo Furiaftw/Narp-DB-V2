@@ -308,6 +308,7 @@ export function PendingJutsuCard({
   const [editSaving, setEditSaving] = useState(false);
   const [contextMenu, setContextMenu] = useState({ msgId: null, x: 0, y: 0 });
   const longPressTimerRef = useRef(null);
+  const lastTouchPosRef = useRef({ x: 0, y: 0 });
   const profileCache = useRef({});
   const messagesEndRef = useRef(null);
 
@@ -889,16 +890,33 @@ export function PendingJutsuCard({
                                   ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
                                   : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                           }`}
-                          onContextMenu={(e) => { e.preventDefault(); openContextMenu(e.clientX, e.clientY); }}
+                          style={{ WebkitTouchCallout: 'none' }}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            if (!isMe || isDeleted) return;
+                            clearTimeout(longPressTimerRef.current);
+                            // Mobile long-press fires contextmenu with clientX/Y = 0; fall back to stored touch pos
+                            const x = e.clientX || lastTouchPosRef.current.x;
+                            const y = e.clientY || lastTouchPosRef.current.y;
+                            openContextMenu(x, y);
+                          }}
                           onTouchStart={(e) => {
                             if (!isMe || isDeleted) return;
                             const touch = e.touches[0];
+                            lastTouchPosRef.current = { x: touch.clientX, y: touch.clientY };
                             longPressTimerRef.current = setTimeout(() => {
-                              openContextMenu(touch.clientX, touch.clientY);
-                            }, 500);
+                              if (navigator.vibrate) navigator.vibrate(40);
+                              openContextMenu(lastTouchPosRef.current.x, lastTouchPosRef.current.y);
+                            }, 550);
+                          }}
+                          onTouchMove={(e) => {
+                            const touch = e.touches[0];
+                            const dx = Math.abs(touch.clientX - lastTouchPosRef.current.x);
+                            const dy = Math.abs(touch.clientY - lastTouchPosRef.current.y);
+                            if (dx > 8 || dy > 8) clearTimeout(longPressTimerRef.current);
                           }}
                           onTouchEnd={() => clearTimeout(longPressTimerRef.current)}
-                          onTouchMove={() => clearTimeout(longPressTimerRef.current)}
+                          onTouchCancel={() => clearTimeout(longPressTimerRef.current)}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && !isDeleted && (
