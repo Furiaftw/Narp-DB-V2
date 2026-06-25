@@ -489,6 +489,32 @@ export const cancelPendingJutsu = async (id) => {
   if (error) throw error;
 };
 
+export const fetchRecentChats = async (limit = 20) => {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('pending_chats')
+      .select('id, pending_id, message, created_at, is_staff_only, sender_id, profiles(username, avatar_url, role)')
+      .eq('is_staff_only', false)
+      .order('created_at', { ascending: false })
+      .limit(100);
+    if (error) return [];
+    // Deduplicate: keep the most recent public message per pending_id
+    const seen = new Set();
+    const recent = [];
+    for (const msg of data) {
+      if (!seen.has(msg.pending_id)) {
+        seen.add(msg.pending_id);
+        recent.push(msg);
+        if (recent.length >= limit) break;
+      }
+    }
+    return recent;
+  } catch {
+    return [];
+  }
+};
+
 /* --- Role change audit log ------------------------------------------------- */
 
 export const fetchRoleChangeLog = async (limit = 100) => {
