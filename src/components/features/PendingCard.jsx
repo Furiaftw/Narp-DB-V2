@@ -307,6 +307,7 @@ export function PendingJutsuCard({
   const [editInput, setEditInput] = useState('');
   const [editSaving, setEditSaving] = useState(false);
   const [deletingMsgId, setDeletingMsgId] = useState(null);
+  const [activeMsgId, setActiveMsgId] = useState(null);
   const profileCache = useRef({});
   const messagesEndRef = useRef(null);
 
@@ -831,7 +832,10 @@ export function PendingJutsuCard({
                 )}
 
                 {/* Chat Body */}
-                <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3">
+                <div
+                  className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3"
+                  onClick={(e) => { if (e.target === e.currentTarget) setActiveMsgId(null); }}
+                >
                   {filteredMessages.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-12">
                       <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
@@ -877,12 +881,16 @@ export function PendingJutsuCard({
                               ? (isMe ? 'self-end' : 'self-start') + ' opacity-60 bg-slate-100 border border-slate-200 text-slate-400'
                               : isMe
                                 ? isPrivate
-                                  ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
-                                  : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
+                                  ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500 cursor-pointer'
+                                  : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500 cursor-pointer'
                                 : isPrivate
                                   ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
                                   : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                           }`}
+                          onClick={() => {
+                            if (!isMe || isDeleted || isEditingThis || deletingMsgId === msg.id) return;
+                            setActiveMsgId(prev => prev === msg.id ? null : msg.id);
+                          }}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && !isDeleted && (
@@ -939,34 +947,6 @@ export function PendingJutsuCard({
                             )}
                             {!isDeleted && isEdited && (
                               <span className={`text-[9px] italic ${isMe ? 'text-white/60' : 'text-slate-400'}`}>edited</span>
-                            )}
-                            {isMe && !isDeleted && !isEditingThis && (
-                              <div className="ml-auto flex items-center gap-0.5 shrink-0">
-                                <button
-                                  type="button"
-                                  title="Edit"
-                                  onClick={() => { setDeletingMsgId(null); setEditingMsgId(msg.id); setEditInput(msg.message); }}
-                                  className="p-1 rounded-md opacity-40 hover:opacity-100 hover:bg-white/20 transition-all"
-                                >
-                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                                  </svg>
-                                </button>
-                                <button
-                                  type="button"
-                                  title="Delete"
-                                  onClick={() => { setEditingMsgId(null); setDeletingMsgId(deletingMsgId === msg.id ? null : msg.id); }}
-                                  className="p-1 rounded-md opacity-40 hover:opacity-100 hover:bg-white/20 transition-all"
-                                >
-                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                    <polyline points="3 6 5 6 21 6"/>
-                                    <path d="M19 6l-1 14H6L5 6"/>
-                                    <path d="M10 11v6"/><path d="M14 11v6"/>
-                                    <path d="M9 6V4h6v2"/>
-                                  </svg>
-                                </button>
-                              </div>
                             )}
                           </div>
                           {isDeleted ? (
@@ -1032,9 +1012,41 @@ export function PendingJutsuCard({
                               </div>
                             </>
                           ) : (
-                            <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                              {renderMessageWithLinks(msg.message)}
-                            </p>
+                            <>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
+                                {renderMessageWithLinks(msg.message)}
+                              </p>
+                              {activeMsgId === msg.id && (
+                                <div className={`flex items-center gap-2 mt-2 pt-2 border-t ${isPrivate ? 'border-amber-400/30' : 'border-indigo-400/30'}`}>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setActiveMsgId(null); setDeletingMsgId(null); setEditingMsgId(msg.id); setEditInput(msg.message); }}
+                                    className={`flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg transition-colors ${
+                                      isPrivate ? 'bg-amber-500/25 hover:bg-amber-500/40 text-white' : 'bg-indigo-500/25 hover:bg-indigo-500/40 text-white'
+                                    }`}
+                                  >
+                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                    </svg>
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => { e.stopPropagation(); setActiveMsgId(null); setEditingMsgId(null); setDeletingMsgId(msg.id); }}
+                                    className="flex items-center gap-1.5 text-[11px] font-bold px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/35 text-rose-200 transition-colors"
+                                  >
+                                    <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                      <polyline points="3 6 5 6 21 6"/>
+                                      <path d="M19 6l-1 14H6L5 6"/>
+                                      <path d="M10 11v6"/><path d="M14 11v6"/>
+                                      <path d="M9 6V4h6v2"/>
+                                    </svg>
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </>
                           )}
                         </div>
                       );
