@@ -44,8 +44,10 @@ import {
   fetchRecentChats,
   fetchMyParticipatingChatIds,
   updateMySiteNickname,
+  savePushSubscription,
+  deletePushSubscription,
 } from './lib/supabase';
-import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification } from './lib/notifications';
+import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
@@ -3401,6 +3403,7 @@ export default function App() {
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const pendingJutsusRef = useRef([]);
   const [myOwnSubmissions, setMyOwnSubmissions] = useState([]);
+  const myOwnSubmissionsRef = useRef([]);
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [approvingIds, setApprovingIds] = useState(new Set());
@@ -3740,15 +3743,15 @@ export default function App() {
         }
         // pending_chats: fire browser notification and refresh recent chat list
         if (table === 'pending_chats' && eventType === 'INSERT' && payload?.new?.sender_id !== profile?.id) {
-          const submission = pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id);
-          if (submission) {
-            const subName = submission.data?.name || 'a submission';
-            showChatNotification({
-              title: `New message — ${subName}`,
-              body: (payload.new?.message || '').slice(0, 80),
-              tag: `pending-${payload.new?.pending_id}`,
-            });
-          }
+          const submission =
+            pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id) ||
+            myOwnSubmissionsRef.current.find(p => p.id === payload.new?.pending_id);
+          const subName = submission?.data?.name || 'a submission';
+          showChatNotification({
+            title: `New message — ${subName}`,
+            body: (payload.new?.message || '').slice(0, 80),
+            tag: `pending-${payload.new?.pending_id}`,
+          });
           fetchRecentChats().then(setRecentChats).catch(() => {});
           if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
         }
@@ -3787,7 +3790,8 @@ export default function App() {
     }
     prevPendingCountRef.current = pendingJutsus.length;
     pendingJutsusRef.current = pendingJutsus;
-  }, [pendingJutsus, pendingLoaded]);
+    myOwnSubmissionsRef.current = myOwnSubmissions;
+  }, [pendingJutsus, pendingLoaded, myOwnSubmissions]);
 
   const submitChange = useCallback(async ({ tab: t, operation, targetId, entity, askSecondApproval }) => {
     const isJutsus = t === 'jutsus';
@@ -4417,6 +4421,10 @@ export default function App() {
                         setNotifEnabled(false);
                         setAppNotifEnabled(false);
                         setAppNotifDenied(false);
+                        try {
+                          const endpoint = await unsubscribeFromPush();
+                          if (endpoint) await deletePushSubscription(endpoint);
+                        } catch {}
                       } else {
                         const perm = await requestNotifPermission();
                         setAppNotifPermission(perm);
@@ -4424,6 +4432,10 @@ export default function App() {
                           setNotifEnabled(true);
                           setAppNotifEnabled(true);
                           setAppNotifDenied(false);
+                          try {
+                            const pushSub = await subscribeToPush();
+                            if (pushSub) await savePushSubscription(pushSub);
+                          } catch {}
                         } else {
                           setAppNotifDenied(true);
                         }

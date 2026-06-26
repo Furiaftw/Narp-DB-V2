@@ -753,3 +753,21 @@ export const updateSubmissionControl = async (key, value, userId) => {
   }).eq('id', 1);
   if (error) throw error;
 };
+
+export const savePushSubscription = async (sub) => {
+  if (!supabase) return;
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) return;
+  const json = sub.toJSON();
+  await supabase.from('push_subscriptions').upsert({
+    user_id: user.id,
+    endpoint: json.endpoint,
+    p256dh: json.keys.p256dh,
+    auth: json.keys.auth,
+  }, { onConflict: 'endpoint' });
+};
+
+export const deletePushSubscription = async (endpoint) => {
+  if (!supabase || !endpoint) return;
+  await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+};

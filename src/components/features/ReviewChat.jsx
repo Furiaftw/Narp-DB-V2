@@ -312,6 +312,20 @@ export default function ReviewChat({
       setInput('');
       const fresh = await fetchReviewChats(pending.id);
       if (fresh) setMessages(fresh);
+      // Fire-and-forget push notification to other participants
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          fetch('/.netlify/functions/send-chat-push', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${session.access_token}`,
+            },
+            body: JSON.stringify({ pending_id: pending.id, message: text }),
+          }).catch(() => {});
+        }
+      } catch {}
     } catch (err) {
       alert('Error sending message: ' + (err.message || err));
     } finally {
