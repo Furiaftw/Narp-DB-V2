@@ -43,3 +43,43 @@ export const showChatNotification = ({ title, body, tag }) => {
     console.warn('[NARP] Notification error:', e);
   }
 };
+
+const VAPID_PUBLIC_KEY = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
+}
+
+export const subscribeToPush = async () => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
+  if (!VAPID_PUBLIC_KEY) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    if (existing) return existing;
+    return await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+    });
+  } catch (e) {
+    console.warn('[NARP] Push subscribe error:', e);
+    return null;
+  }
+};
+
+export const unsubscribeFromPush = async () => {
+  if (!('serviceWorker' in navigator)) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) {
+      await sub.unsubscribe();
+      return sub.endpoint;
+    }
+  } catch (e) {
+    console.warn('[NARP] Push unsubscribe error:', e);
+  }
+  return null;
+};

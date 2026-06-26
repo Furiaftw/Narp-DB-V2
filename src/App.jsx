@@ -44,8 +44,10 @@ import {
   fetchRecentChats,
   fetchMyParticipatingChatIds,
   updateMySiteNickname,
+  savePushSubscription,
+  deletePushSubscription,
 } from './lib/supabase';
-import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification } from './lib/notifications';
+import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
@@ -4419,6 +4421,10 @@ export default function App() {
                         setNotifEnabled(false);
                         setAppNotifEnabled(false);
                         setAppNotifDenied(false);
+                        try {
+                          const endpoint = await unsubscribeFromPush();
+                          if (endpoint) await deletePushSubscription(endpoint);
+                        } catch {}
                       } else {
                         const perm = await requestNotifPermission();
                         setAppNotifPermission(perm);
@@ -4426,6 +4432,10 @@ export default function App() {
                           setNotifEnabled(true);
                           setAppNotifEnabled(true);
                           setAppNotifDenied(false);
+                          try {
+                            const pushSub = await subscribeToPush();
+                            if (pushSub) await savePushSubscription(pushSub);
+                          } catch {}
                         } else {
                           setAppNotifDenied(true);
                         }
