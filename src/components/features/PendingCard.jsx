@@ -306,12 +306,7 @@ export function PendingJutsuCard({
   const [editingMsgId, setEditingMsgId] = useState(null);
   const [editInput, setEditInput] = useState('');
   const [editSaving, setEditSaving] = useState(false);
-  const [contextMenu, setContextMenu] = useState({ msgId: null, x: 0, y: 0 });
-  const longPressTimerRef = useRef(null);
-  const touchStartTimeRef = useRef(0);
-  const touchStartPosRef = useRef({ x: 0, y: 0 });
-  const touchMovedRef = useRef(false);
-  const menuOpenedAtRef = useRef(0);
+  const [deletingMsgId, setDeletingMsgId] = useState(null);
   const profileCache = useRef({});
   const messagesEndRef = useRef(null);
 
@@ -874,17 +869,10 @@ export function PendingJutsuCard({
                       const isEdited = msg.is_edited;
                       const isEditingThis = editingMsgId === msg.id;
 
-                      const showMenu = (x, y) => {
-                        const cx = Math.min(x, window.innerWidth - 180);
-                        const cy = Math.min(y, window.innerHeight - 90);
-                        menuOpenedAtRef.current = Date.now();
-                        setContextMenu({ msgId: msg.id, x: cx, y: cy });
-                      };
-
                       return (
                         <div
                           key={msg.id}
-                          className={`select-none flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
+                          className={`flex flex-col max-w-[85%] rounded-2xl px-4 py-2.5 text-sm shadow-xs ${
                             isDeleted
                               ? (isMe ? 'self-end' : 'self-start') + ' opacity-60 bg-slate-100 border border-slate-200 text-slate-400'
                               : isMe
@@ -895,45 +883,6 @@ export function PendingJutsuCard({
                                   ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
                                   : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                           }`}
-                          style={{ WebkitTouchCallout: 'none' }}
-                          onContextMenu={(e) => {
-                            e.preventDefault();
-                            if (!isMe || isDeleted) return;
-                            clearTimeout(longPressTimerRef.current);
-                            // Android long-press fires contextmenu with clientX/Y = 0; use stored touch pos
-                            showMenu(e.clientX || touchStartPosRef.current.x, e.clientY || touchStartPosRef.current.y);
-                          }}
-                          onTouchStart={(e) => {
-                            if (!isMe || isDeleted) return;
-                            touchMovedRef.current = false;
-                            touchStartTimeRef.current = Date.now();
-                            const t = e.touches[0];
-                            touchStartPosRef.current = { x: t.clientX, y: t.clientY };
-                            longPressTimerRef.current = setTimeout(() => {
-                              if (navigator.vibrate) navigator.vibrate(40);
-                              showMenu(touchStartPosRef.current.x, touchStartPosRef.current.y);
-                            }, 500);
-                          }}
-                          onTouchMove={(e) => {
-                            const t = e.touches[0];
-                            const dx = Math.abs(t.clientX - touchStartPosRef.current.x);
-                            const dy = Math.abs(t.clientY - touchStartPosRef.current.y);
-                            if (dx > 8 || dy > 8) {
-                              touchMovedRef.current = true;
-                              clearTimeout(longPressTimerRef.current);
-                            }
-                          }}
-                          onTouchEnd={() => clearTimeout(longPressTimerRef.current)}
-                          onTouchCancel={() => {
-                            // Android Chrome fires touchcancel when it detects a long press and takes
-                            // over the gesture. If we held long enough and didn't scroll, show the menu.
-                            const elapsed = Date.now() - touchStartTimeRef.current;
-                            clearTimeout(longPressTimerRef.current);
-                            if (elapsed >= 400 && !touchMovedRef.current && isMe && !isDeleted) {
-                              if (navigator.vibrate) navigator.vibrate(40);
-                              showMenu(touchStartPosRef.current.x, touchStartPosRef.current.y);
-                            }
-                          }}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && !isDeleted && (
@@ -991,6 +940,34 @@ export function PendingJutsuCard({
                             {!isDeleted && isEdited && (
                               <span className={`text-[9px] italic ${isMe ? 'text-white/60' : 'text-slate-400'}`}>edited</span>
                             )}
+                            {isMe && !isDeleted && !isEditingThis && (
+                              <div className="ml-auto flex items-center gap-0.5 shrink-0">
+                                <button
+                                  type="button"
+                                  title="Edit"
+                                  onClick={() => { setDeletingMsgId(null); setEditingMsgId(msg.id); setEditInput(msg.message); }}
+                                  className="p-1 rounded-md opacity-40 hover:opacity-100 hover:bg-white/20 transition-all"
+                                >
+                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete"
+                                  onClick={() => { setEditingMsgId(null); setDeletingMsgId(deletingMsgId === msg.id ? null : msg.id); }}
+                                  className="p-1 rounded-md opacity-40 hover:opacity-100 hover:bg-white/20 transition-all"
+                                >
+                                  <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6"/>
+                                    <path d="M19 6l-1 14H6L5 6"/>
+                                    <path d="M10 11v6"/><path d="M14 11v6"/>
+                                    <path d="M9 6V4h6v2"/>
+                                  </svg>
+                                </button>
+                              </div>
+                            )}
                           </div>
                           {isDeleted ? (
                             <p className="text-xs italic text-slate-400">Message removed.</p>
@@ -1001,7 +978,11 @@ export function PendingJutsuCard({
                                 onChange={e => setEditInput(e.target.value)}
                                 rows={3}
                                 autoFocus
-                                className="w-full border border-white/30 rounded-lg px-3 py-2 text-sm bg-white/20 text-white placeholder-white/60 focus:outline-none focus:ring-1 focus:ring-white/50 resize-none"
+                                className={`w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 resize-none ${
+                                  isPrivate
+                                    ? 'border-amber-400/40 bg-amber-500/20 text-white placeholder-amber-200/60 focus:ring-amber-300/50'
+                                    : 'border-indigo-400/40 bg-indigo-500/20 text-white placeholder-indigo-200/60 focus:ring-indigo-300/50'
+                                }`}
                                 onKeyDown={e => { if (e.key === 'Escape') setEditingMsgId(null); }}
                               />
                               <div className="flex gap-1.5">
@@ -1017,13 +998,39 @@ export function PendingJutsuCard({
                                     } catch (err) { alert('Could not save edit: ' + err.message); }
                                     finally { setEditSaving(false); }
                                   }}
-                                  className="text-[11px] font-bold bg-white/20 hover:bg-white/30 text-white px-3 py-1 rounded-lg disabled:opacity-60"
+                                  className="text-[11px] font-bold bg-white/25 hover:bg-white/35 text-white px-3 py-1 rounded-lg disabled:opacity-60 transition-colors"
                                 >{editSaving ? 'Saving…' : 'Save'}</button>
                                 <button type="button" onClick={() => setEditingMsgId(null)}
-                                  className="text-[11px] font-bold text-white/70 hover:text-white px-2 py-1 rounded-lg"
+                                  className="text-[11px] font-bold text-white/70 hover:text-white px-2 py-1 rounded-lg transition-colors"
                                 >Cancel</button>
                               </div>
                             </div>
+                          ) : deletingMsgId === msg.id ? (
+                            <>
+                              <p className="whitespace-pre-wrap break-words leading-relaxed text-sm opacity-50 line-clamp-2">
+                                {msg.message}
+                              </p>
+                              <div className={`flex items-center gap-2 mt-2 pt-2 flex-wrap border-t ${isPrivate ? 'border-amber-400/30' : 'border-indigo-400/30'}`}>
+                                <span className="text-[11px] text-white/80 font-medium">Remove this message?</span>
+                                <button
+                                  type="button"
+                                  onClick={async () => {
+                                    try {
+                                      await deleteChatMessage(msg.id);
+                                      const fresh = await fetchReviewChats(pending.id);
+                                      if (fresh) setChatMessages(fresh);
+                                      setDeletingMsgId(null);
+                                    } catch (err) { alert('Could not delete: ' + err.message); }
+                                  }}
+                                  className="text-[11px] font-bold bg-rose-500 hover:bg-rose-600 text-white px-3 py-1 rounded-lg transition-colors"
+                                >Remove</button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDeletingMsgId(null)}
+                                  className="text-[11px] font-bold text-white/70 hover:text-white px-2 py-1 rounded-lg transition-colors"
+                                >Cancel</button>
+                              </div>
+                            </>
                           ) : (
                             <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
                               {renderMessageWithLinks(msg.message)}
@@ -1035,63 +1042,6 @@ export function PendingJutsuCard({
                   )}
                   <div ref={messagesEndRef} />
                 </div>
-
-                {/* Context menu — right-click on desktop, long-press on mobile */}
-                {contextMenu.msgId && (
-                  <>
-                    <div
-                      className="fixed inset-0 z-[60]"
-                      onClick={() => {
-                        // Ignore the tap that opened the menu (Android fires a click right after touchcancel)
-                        if (Date.now() - menuOpenedAtRef.current < 400) return;
-                        setContextMenu({ msgId: null, x: 0, y: 0 });
-                      }}
-                    />
-                    <div
-                      className="fixed z-[61] bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden min-w-[160px] py-1"
-                      style={{ top: contextMenu.y, left: contextMenu.x }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const m = filteredMessages.find(m => m.id === contextMenu.msgId);
-                          if (m) { setEditingMsgId(m.id); setEditInput(m.message); }
-                          setContextMenu({ msgId: null, x: 0, y: 0 });
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 active:bg-slate-100 transition-colors text-left"
-                      >
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                        </svg>
-                        Edit Message
-                      </button>
-                      <div className="h-px bg-slate-100 mx-2" />
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          const msgIdToDelete = contextMenu.msgId;
-                          setContextMenu({ msgId: null, x: 0, y: 0 });
-                          if (!window.confirm('Delete this message?')) return;
-                          try {
-                            await deleteChatMessage(msgIdToDelete);
-                            const fresh = await fetchReviewChats(pending.id);
-                            if (fresh) setChatMessages(fresh);
-                          } catch (err) { alert('Could not delete: ' + err.message); }
-                        }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm text-rose-600 hover:bg-rose-50 active:bg-rose-100 transition-colors text-left"
-                      >
-                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <polyline points="3 6 5 6 21 6"/>
-                          <path d="M19 6l-1 14H6L5 6"/>
-                          <path d="M10 11v6"/><path d="M14 11v6"/>
-                          <path d="M9 6V4h6v2"/>
-                        </svg>
-                        Delete Message
-                      </button>
-                    </div>
-                  </>
-                )}
 
                 {/* Input Footer */}
                 <div 
