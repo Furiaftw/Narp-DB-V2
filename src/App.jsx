@@ -3419,6 +3419,23 @@ export default function App() {
   const [appNotifPermission, setAppNotifPermission] = useState(() => getNotifPermission());
   const [appNotifDenied, setAppNotifDenied] = useState(false);
 
+  // Once signed in, make sure this device actually has a push subscription saved.
+  // Backfills users who toggled notifications on before VAPID keys existed and
+  // refreshes endpoints that the browser may have rotated — no re-toggle needed.
+  useEffect(() => {
+    if (!profile?.id) return;
+    if (!isNotifEnabled()) return;
+    if (getNotifPermission() !== 'granted') return;
+    (async () => {
+      try {
+        const pushSub = await subscribeToPush();
+        if (pushSub) await savePushSubscription(pushSub);
+      } catch (e) {
+        console.warn('[NARP] Auto-resubscribe to push failed:', e);
+      }
+    })();
+  }, [profile?.id]);
+
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [tab, setTab]           = useState('jutsus');
@@ -4424,7 +4441,9 @@ export default function App() {
                         try {
                           const endpoint = await unsubscribeFromPush();
                           if (endpoint) await deletePushSubscription(endpoint);
-                        } catch {}
+                        } catch (e) {
+                          console.warn('[NARP] Failed to unsubscribe from push:', e);
+                        }
                       } else {
                         const perm = await requestNotifPermission();
                         setAppNotifPermission(perm);
@@ -4434,8 +4453,14 @@ export default function App() {
                           setAppNotifDenied(false);
                           try {
                             const pushSub = await subscribeToPush();
-                            if (pushSub) await savePushSubscription(pushSub);
-                          } catch {}
+                            if (pushSub) {
+                              await savePushSubscription(pushSub);
+                            } else {
+                              console.warn('[NARP] Notifications enabled but no push subscription was created (check VAPID config / service worker).');
+                            }
+                          } catch (e) {
+                            console.warn('[NARP] Failed to subscribe to push:', e);
+                          }
                         } else {
                           setAppNotifDenied(true);
                         }

@@ -266,8 +266,33 @@ In **System Tools → Audit Log → View log**, there's a list of every role cha
 | `VITE_SUPABASE_URL`            | yes¹     | manual                                  | Your Supabase project URL.                              |
 | `VITE_SUPABASE_DATABASE_URL`   | yes¹     | Supabase Netlify extension              | Same thing, different name. Either is accepted.         |
 | `VITE_SUPABASE_ANON_KEY`       | yes      | manual or extension                     | Anon public key. Safe to ship in the client bundle — RLS does the security work. |
+| `VITE_VAPID_PUBLIC_KEY`        | for push | manual                                  | Web Push public (VAPID) key. Shipped to the browser — safe to expose. Build scope. |
+| `VAPID_PUBLIC_KEY`             | for push | manual                                  | Same public key, read by the Netlify push function. Functions scope.    |
+| `VAPID_PRIVATE_KEY`            | for push | manual (**secret**)                     | Web Push private (VAPID) key. **Server-only secret** — never prefix with `VITE_`. |
+| `VAPID_SUBJECT`                | for push | manual                                  | A `mailto:` contact for the push service, e.g. `mailto:you@example.com`. |
 
 ¹ Only one of the two URL variables is needed. If both are set, `VITE_SUPABASE_URL` wins.
+
+### Push notifications (the bell icon)
+
+The site can send real OS-level push notifications when a new message is posted
+in a submission's review chat — delivered to the recipient's phone or desktop
+even when the site is closed. This uses the standard Web Push API.
+
+To enable it:
+
+1. Generate a VAPID keypair once: `npx web-push generate-vapid-keys`.
+2. Set the four `VAPID_*` / `VITE_VAPID_PUBLIC_KEY` vars above (same public key in
+   both `VITE_VAPID_PUBLIC_KEY` and `VAPID_PUBLIC_KEY`). Mark `VAPID_PRIVATE_KEY`
+   as a secret in Netlify, then trigger a fresh deploy so the build picks them up.
+3. Each user clicks the **bell icon** in the header and accepts the browser
+   permission prompt. Their device is then stored in the `push_subscriptions`
+   table and will receive pushes.
+
+**iPhone / iOS:** Apple only allows web push for sites that have been **installed
+to the Home Screen** (Add to Home Screen / "Install app") on iOS 16.4+. Android
+Chrome and all desktop browsers work directly in the browser tab. This is an
+Apple platform limitation, not a bug in the app.
 
 For local dev: put them in a `.env` file at the repo root (gitignored — see `.env.example`).
 
@@ -303,6 +328,13 @@ Check the browser console for `[NARP] submitPendingJutsu failed`. Usually means 
 
 **I demoted a Staff to User and their pending submissions disappeared.**
 By design — `cleanup_pending_on_demotion` trigger cancels their pending entries automatically when they lose staff privileges. Otherwise they'd be ghost submissions from someone who can no longer resubmit.
+
+**I enabled the bell but no push notifications arrive.**
+Work down this list:
+- Open the browser console after clicking the bell. `VITE_VAPID_PUBLIC_KEY is not set` means the build is missing the public VAPID key — set the env vars and redeploy.
+- Confirm a row exists for your user in the `push_subscriptions` table (Supabase → Table editor). No row means the subscribe step failed (keys missing, permission denied, or service worker not registered).
+- Check the `send-chat-push` function logs in Netlify. `VAPID not configured` (HTTP 500) means the server-side `VAPID_*` vars are missing. `sent=0` means there were no saved subscriptions for the recipients.
+- On iPhone, the site must be installed to the Home Screen first (see the push notifications section above).
 
 ---
 

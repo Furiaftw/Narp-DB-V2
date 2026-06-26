@@ -53,8 +53,14 @@ function urlBase64ToUint8Array(base64String) {
 }
 
 export const subscribeToPush = async () => {
-  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return null;
-  if (!VAPID_PUBLIC_KEY) return null;
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.warn('[NARP] Push not supported in this browser.');
+    return null;
+  }
+  if (!VAPID_PUBLIC_KEY) {
+    console.warn('[NARP] VITE_VAPID_PUBLIC_KEY is not set — push subscriptions are disabled. Set it in the Netlify build env.');
+    return null;
+  }
   try {
     const reg = await navigator.serviceWorker.ready;
     const existing = await reg.pushManager.getSubscription();

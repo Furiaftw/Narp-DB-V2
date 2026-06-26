@@ -6,3 +6,8 @@ dist/
 
 # Dependencies
 node_modules/
+
+# Local env files (never commit secrets — see .env.example)
+.env
+.env.local
+.env.*.local

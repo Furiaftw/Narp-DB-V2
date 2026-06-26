@@ -130,6 +130,13 @@ export default async (req) => {
   }
 
   const sent = results.filter(r => r.status === 'fulfilled').length;
+  const failed = results
+    .filter(r => r.status === 'rejected')
+    .map(r => r.reason?.statusCode || r.reason?.message || 'unknown');
+  console.log(
+    `[send-chat-push] pending=${pending_id} recipients=${recipientIds.length} subs=${pushSubs.length} sent=${sent} pruned=${gone.length}` +
+    (failed.length ? ` failed=${JSON.stringify(failed)}` : '')
+  );
   return new Response(JSON.stringify({ sent }), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
