@@ -4455,6 +4455,28 @@ export default function App() {
                             const pushSub = await subscribeToPush();
                             if (pushSub) {
                               await savePushSubscription(pushSub);
+                              // Immediately send a confirmation push so the user can
+                              // verify the full server-side pipeline from one device.
+                              try {
+                                const { data: { session } } = await supabase.auth.getSession();
+                                if (session?.access_token) {
+                                  const res = await fetch('/.netlify/functions/send-test-push', {
+                                    method: 'POST',
+                                    headers: { Authorization: `Bearer ${session.access_token}` },
+                                  });
+                                  const out = await res.json().catch(() => ({}));
+                                  if (!res.ok || !out.sent) {
+                                    console.warn('[NARP] Test push not delivered:', res.status, out);
+                                    alert(
+                                      'Notifications are enabled, but the confirmation push could not be sent' +
+                                      (out.error ? ` (${out.error})` : '') +
+                                      '. Double-check the VAPID_* keys in the Netlify environment variables.'
+                                    );
+                                  }
+                                }
+                              } catch (e) {
+                                console.warn('[NARP] Test push request failed:', e);
+                              }
                             } else {
                               console.warn('[NARP] Notifications enabled but no push subscription was created (check VAPID config / service worker).');
                             }
