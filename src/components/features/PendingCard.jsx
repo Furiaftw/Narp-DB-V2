@@ -881,16 +881,12 @@ export function PendingJutsuCard({
                               ? (isMe ? 'self-end' : 'self-start') + ' opacity-60 bg-slate-100 border border-slate-200 text-slate-400'
                               : isMe
                                 ? isPrivate
-                                  ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500 cursor-pointer'
-                                  : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500 cursor-pointer'
+                                  ? 'self-end bg-amber-600 text-white rounded-tr-none border border-amber-500'
+                                  : 'self-end bg-indigo-600 text-white rounded-tr-none border border-indigo-500'
                                 : isPrivate
                                   ? 'self-start bg-amber-50 border border-amber-100 text-amber-900 rounded-tl-none'
                                   : 'self-start bg-white border border-slate-200 text-slate-800 rounded-tl-none'
                           }`}
-                          onClick={() => {
-                            if (!isMe || isDeleted || isEditingThis || deletingMsgId === msg.id) return;
-                            setActiveMsgId(prev => prev === msg.id ? null : msg.id);
-                          }}
                         >
                           <div className="flex items-center gap-1.5 mb-1 flex-wrap">
                             {msg.profiles?.avatar_url && !isDeleted && (
@@ -947,6 +943,17 @@ export function PendingJutsuCard({
                             )}
                             {!isDeleted && isEdited && (
                               <span className={`text-[9px] italic ${isMe ? 'text-white/60' : 'text-slate-400'}`}>edited</span>
+                            )}
+                            {isMe && !isDeleted && !isEditingThis && deletingMsgId !== msg.id && (
+                              <button
+                                type="button"
+                                className="ml-auto shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-white/60 hover:text-white hover:bg-white/20 active:bg-white/30 transition-colors"
+                                onClick={(e) => { e.stopPropagation(); setActiveMsgId(prev => prev === msg.id ? null : msg.id); }}
+                              >
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                                  <circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/>
+                                </svg>
+                              </button>
                             )}
                           </div>
                           {isDeleted ? (
