@@ -1,6 +1,6 @@
 export const SPECIALIZATION_OPTIONS = ['Bukijutsu', 'Fuinjutsu', 'Genjutsu', 'Medical Ninjutsu', 'Ninjutsu', 'Nintaijutsu', 'Taijutsu', 'Kinjutsu'];
 export const NATURES                = ['Fire', 'Water', 'Lightning', 'Earth', 'Wind', 'Yang', 'Yin', 'Sound'];
-export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode'];
+export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode', 'Defensive'];
 export const RANKS                  = ['E', 'D', 'C', 'B', 'A', 'S'];
 export const ORIGIN                 = ['Canon', 'Custom'];
 export const BL_CATS                = ['Canon', 'Custom'];

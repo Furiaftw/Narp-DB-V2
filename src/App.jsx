@@ -74,7 +74,7 @@ const STORAGE = {
    --------------------------------------------------------------------------- */
 const SPECIALIZATION_OPTIONS = ['Bukijutsu', 'Fuinjutsu', 'Genjutsu', 'Medical Ninjutsu', 'Ninjutsu', 'Nintaijutsu', 'Taijutsu', 'Kinjutsu'];
 const NATURES                = ['Fire', 'Water', 'Lightning', 'Earth', 'Wind', 'Yang', 'Yin', 'Sound'];
-const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode'];
+const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode', 'Defensive'];
 const RANKS                  = ['E', 'D', 'C', 'B', 'A', 'S'];
 const ORIGIN                 = ['Canon', 'Custom'];
 const BL_CATS                = ['Canon', 'Custom'];
