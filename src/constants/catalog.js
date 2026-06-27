@@ -1,6 +1,6 @@
 export const SPECIALIZATION_OPTIONS = ['Bukijutsu', 'Fuinjutsu', 'Genjutsu', 'Medical Ninjutsu', 'Ninjutsu', 'Nintaijutsu', 'Taijutsu', 'Kinjutsu'];
 export const NATURES                = ['Fire', 'Water', 'Lightning', 'Earth', 'Wind', 'Yang', 'Yin', 'Sound'];
-export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode'];
+export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode', 'Defensive'];
 export const RANKS                  = ['E', 'D', 'C', 'B', 'A', 'S'];
 export const ORIGIN                 = ['Canon', 'Custom'];
 export const BL_CATS                = ['Canon', 'Custom'];
@@ -66,7 +66,7 @@ export const MANAGE_TABLES = {
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
-      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited'], multi: true, col: 1 },
+      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited', 'Pve'], multi: true, col: 1 },
       { k: 'spec',        l: 'Specialization',  t: 'spec-dd', col: 1 },
       { k: 'bloodline',   l: 'Bloodline',       t: 'bl-select', col: 1 },
       { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },

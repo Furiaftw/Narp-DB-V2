@@ -24,6 +24,7 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
     ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
+    j.pve                          && { l: 'Pve',                    c: 'bg-green-50 text-green-700 border-green-300' },
     j.limited &&  showAskStaff     && { l: 'Ask a Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
     j.limited && !showAskStaff     && { l: 'Limited',  ic: 'Alert', c: 'bg-rose-100 text-rose-800 border-rose-200' },
     j.limited && j.slots           && { l: remaining > 0 ? `${remaining} open` : 'Full',

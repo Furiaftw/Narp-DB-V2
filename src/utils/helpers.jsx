@@ -160,6 +160,7 @@ export const formatSessionList = (items) => {
       if (j.multiRank && !isBm) tags.push('Multi-Rank');
       if (j.locked)             tags.push('Locked');
       if (j.limited)            tags.push('Limited');
+      if (j.pve)                tags.push('Pve');
 
       const display = j.link && j.link !== '#' ? `[${j.name}](${j.link})` : j.name;
       const tagPart = tags.length ? ` · ${tags.join(' · ')}` : '';
