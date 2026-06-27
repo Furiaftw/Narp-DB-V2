@@ -42,6 +42,7 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
       const conds = [];
       if (eRow.locked)  conds.push('Locked');
       if (eRow.limited) conds.push('Limited');
+      if (eRow.pve)     conds.push('Pve');
       if (conds.length) next.conditions = conds.join(', ');
       next._cCost = !!(eRow._id && eRow.cost && !toArray(eRow.types).includes('Battlemode'));
     }
@@ -88,6 +89,7 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
         bloodline:   p.bloodline || '',
         limited:     conds.includes('Limited'),
         locked:      conds.includes('Locked'),
+        pve:         conds.includes('Pve'),
         multiRank:   rank.length > 1 && !isBm,
         slots:       conds.includes('Limited') ? (p.slots || '') : '',
         bm_tier:     bmTier,

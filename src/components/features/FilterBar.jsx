@@ -7,6 +7,7 @@ import { NATURES, JUTSU_TYPES, BM_TIERS, RANKS, ORIGIN } from '../../constants/c
 const TOGGLE_PAIRS = [
   { showKey: 'lck', hideKey: 'hLck', label: 'Locked'     },
   { showKey: 'lim', hideKey: 'hLim', label: 'Limited'    },
+  { showKey: 'pve', hideKey: 'hPve', label: 'Pve'        },
   { showKey: 'mul', hideKey: 'hMul', label: 'Multi-Rank' },
 ];
 const HIDE_ONLY = [

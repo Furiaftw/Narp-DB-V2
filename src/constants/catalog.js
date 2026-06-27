@@ -66,7 +66,7 @@ export const MANAGE_TABLES = {
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
-      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited'], multi: true, col: 1 },
+      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited', 'Pve'], multi: true, col: 1 },
       { k: 'spec',        l: 'Specialization',  t: 'spec-dd', col: 1 },
       { k: 'bloodline',   l: 'Bloodline',       t: 'bl-select', col: 1 },
       { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },

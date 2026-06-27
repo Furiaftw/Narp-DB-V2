@@ -1233,6 +1233,7 @@ function SessionListCart({ list, onClear, onRemove }) {
 const TOGGLE_PAIRS = [
   { showKey: 'lck', hideKey: 'hLck', label: 'Locked'     },
   { showKey: 'lim', hideKey: 'hLim', label: 'Limited'    },
+  { showKey: 'pve', hideKey: 'hPve', label: 'Pve'        },
   { showKey: 'mul', hideKey: 'hMul', label: 'Multi-Rank' },
 ];
 const HIDE_ONLY = [
@@ -3371,14 +3372,14 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
 const INITIAL_FILTER_STATE = {
   q: '',
   nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [],
-  lck: false, lim: false, mul: false,
-  hLck: false, hLim: false, hMul: false, hMP: false, hAsk: false,
+  lck: false, lim: false, pve: false, mul: false,
+  hLck: false, hLim: false, hPve: false, hMul: false, hMP: false, hAsk: false,
   showFilters: false,
   sort: 'az',
 };
 
 const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'];
-const BOOL_FILTER_KEYS  = ['lck', 'lim', 'mul', 'hLck', 'hLim', 'hMul', 'hMP', 'hAsk'];
+const BOOL_FILTER_KEYS  = ['lck', 'lim', 'pve', 'mul', 'hLck', 'hLim', 'hPve', 'hMul', 'hMP', 'hAsk'];
 
 export default function App() {
   const headerRef = useRef(null);
@@ -4330,8 +4331,8 @@ export default function App() {
       (!f.rnk.length || f.rnk.some(r => toArray(j.rank).includes(r))) &&
       (!f.bm.length  || f.bm.includes(j.bm_tier)) &&
       (!f.bl.length  || f.bl.includes(j.bloodline)) &&
-      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.mul || j.multiRank) &&
-      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hMul || !j.multiRank) &&
+      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.pve || j.pve)    && (!f.mul || j.multiRank) &&
+      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hPve || !j.pve)  && (!f.hMul || !j.multiRank) &&
       (!f.hMP  || !toArray(j.types).includes('Multi-Post')) &&
       (!f.hAsk || !getSlotStatus(j.slots).showAskStaff)
     ).sort(sortByJutsu);
