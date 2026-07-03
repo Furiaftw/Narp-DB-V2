@@ -28,11 +28,17 @@ export default async (req) => {
   if (authError || !user) return json({ error: 'Invalid token' }, 401);
 
   const { VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY } = process.env;
-  if (!VAPID_SUBJECT || !VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
+  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
     return json({ error: 'VAPID not configured', sent: 0 }, 500);
   }
+  // web-push requires a mailto:/http(s) subject and throws on a bare email —
+  // normalize instead of failing (same logic as send-chat-push).
+  const raw = (VAPID_SUBJECT || '').trim();
+  const subject = /^(mailto:|https?:\/\/)/i.test(raw) ? raw
+    : raw.includes('@') ? `mailto:${raw}`
+    : process.env.URL || 'https://narp-db-v2.netlify.app';
   try {
-    webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
+    webpush.setVapidDetails(subject, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
   } catch (e) {
     return json({ error: 'Invalid VAPID config: ' + e.message, sent: 0 }, 500);
   }
