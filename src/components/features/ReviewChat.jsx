@@ -323,7 +323,14 @@ export default function ReviewChat({
               Authorization: `Bearer ${session.access_token}`,
             },
             body: JSON.stringify({ pending_id: pending.id, message: text }),
-          }).catch(() => {});
+          }).then(async (res) => {
+            if (!res.ok) {
+              const out = await res.json().catch(() => ({}));
+              console.warn('[NARP] send-chat-push failed:', res.status, out);
+            }
+          }).catch((e) => {
+            console.warn('[NARP] send-chat-push request error:', e);
+          });
         }
       } catch {}
     } catch (err) {
