@@ -41,7 +41,7 @@ import {
   saveWebhookConfig,
   fetchSubmissionControls,
   updateSubmissionControl,
-  fetchRecentChats,
+  fetchChatOverview,
   fetchMyParticipatingChatIds,
   updateMySiteNickname,
   savePushSubscription,
@@ -51,7 +51,9 @@ import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermis
 import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
+import MessagesPage from './pages/MessagesPage';
 import ReviewChat from './components/features/ReviewChat';
+import useIsDesktop from './hooks/useIsDesktop';
 
 
 /* ============================================================================
@@ -67,6 +69,7 @@ const STORAGE = {
   TAGS:       'narp_tags_v1',
   VIEW_MODE:  'narp_view_mode_v1',
   CART:       'narp_cart_v1',
+  CHAT_READ:  'narp_chat_read_v1',
 };
 
 /* ---------------------------------------------------------------------------
@@ -3069,6 +3072,8 @@ function PendingJutsuCard({
   currentUserProfile = null,
   refreshPending = null,
   isApproving = false,
+  chatMeta = null,
+  onChatOpened = null,
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -3160,6 +3165,18 @@ function PendingJutsuCard({
               {pending.status === 'pending_review' ? 'Pending Review' : 'Pending Approval'}
             </span>
             {isMine && <span className="text-[10px] font-bold uppercase text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Yours</span>}
+            {chatMeta?.turn === 'you' && (
+              <span className="text-[10px] font-bold uppercase text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                Awaiting Your Response
+              </span>
+            )}
+            {chatMeta?.turn === 'them' && (
+              <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                {isMine ? 'Awaiting Reviewer' : 'Awaiting Player'}
+              </span>
+            )}
             {pending.assignee && (
               <span className="text-[10px] font-bold uppercase text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded flex items-center gap-1">
                 Claimed by
@@ -3271,14 +3288,17 @@ function PendingJutsuCard({
             )}
             {(isReviewerOrAdmin || isMine) && (
               <button
-                onClick={() => setIsChatOpen(true)}
-                className="bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                onClick={() => { setIsChatOpen(true); onChatOpened?.(); }}
+                className="relative bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
                 title="Open Chat"
               >
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
                 Review Chat
+                {chatMeta?.hasUnread && (
+                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 border-2 border-white animate-pulse" title="Unread messages" />
+                )}
               </button>
             )}
             {isStrictSubmitter && pending.status === 'pending_approval' && (
@@ -3326,6 +3346,7 @@ function PendingJutsuCard({
           refreshTrigger={refreshTrigger}
           refreshPending={refreshPending}
           onClose={() => setIsChatOpen(false)}
+          onRead={onChatOpened}
         />
       )}
     </div>
@@ -3445,6 +3466,23 @@ const INITIAL_FILTER_STATE = {
 const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'];
 const BOOL_FILTER_KEYS  = ['lck', 'lim', 'pve', 'mul', 'hLck', 'hLim', 'hPve', 'hMul', 'hMP', 'hAsk'];
 
+const getPendingAssignedId = (p) => {
+  if (!p?.assigned_to) return null;
+  return typeof p.assigned_to === 'object' ? p.assigned_to.id : p.assigned_to;
+};
+
+/*
+ * Whose turn is it in a review chat, from the viewer's perspective.
+ * Submitters: any message not from them means the reviewer spoke last → your turn.
+ * Reviewers: turn is role-based (did the player speak last?), so one reviewer's
+ * reply also clears the "awaiting you" flag for the rest of the team.
+ */
+const getChatTurn = (lastMsg, myId, iAmSubmitter) => {
+  if (!lastMsg) return null;
+  if (iAmSubmitter) return lastMsg.sender_id === myId ? 'them' : 'you';
+  return ['staff', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
+};
+
 export default function App() {
   const headerRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(72);
@@ -3478,8 +3516,23 @@ export default function App() {
   const tabRef = useRef('jutsus');
   const [expandedPendingId, setExpandedPendingId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
-  const [recentChats, setRecentChats] = useState([]);
+  const [chatThreads, setChatThreads] = useState([]);
+  const [chatReadMap, setChatReadMap] = useState(() => LS.get(STORAGE.CHAT_READ, {}));
+  const [messagesSelectedId, setMessagesSelectedId] = useState(null);
   const [myParticipatingIds, setMyParticipatingIds] = useState(() => new Set());
+  const isDesktop = useIsDesktop();
+
+  const markChatRead = useCallback((pendingId) => {
+    if (!pendingId) return;
+    setChatReadMap(prev => {
+      const prevTs = prev[pendingId] ? new Date(prev[pendingId]).getTime() : 0;
+      // Skip no-op updates (called on every chat render) to avoid churn
+      if (Date.now() - prevTs < 1000) return prev;
+      const next = { ...prev, [pendingId]: new Date().toISOString() };
+      LS.set(STORAGE.CHAT_READ, next);
+      return next;
+    });
+  }, []);
   const [appNotifEnabled, setAppNotifEnabled] = useState(() => isNotifEnabled());
   const [appNotifPermission, setAppNotifPermission] = useState(() => getNotifPermission());
   const [appNotifDenied, setAppNotifDenied] = useState(false);
@@ -3778,10 +3831,10 @@ export default function App() {
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
   useEffect(() => {
-    if (!supabaseReady || !isStaff || !profile?.id) return;
-    fetchRecentChats().then(setRecentChats).catch(() => {});
-    fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
-  }, [supabaseReady, isStaff]);
+    if (!supabaseReady || !profile?.id) return;
+    fetchChatOverview().then(setChatThreads).catch(() => {});
+    if (isStaff) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+  }, [supabaseReady, isStaff, profile?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
@@ -3823,19 +3876,22 @@ export default function App() {
           clearTimeout(catalogDebounce);
           catalogDebounce = setTimeout(() => refreshDB(), 500);
         }
-        // pending_chats: fire browser notification and refresh recent chat list
-        if (table === 'pending_chats' && eventType === 'INSERT' && payload?.new?.sender_id !== profile?.id) {
-          const submission =
-            pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id) ||
-            myOwnSubmissionsRef.current.find(p => p.id === payload.new?.pending_id);
-          const subName = submission?.data?.name || 'a submission';
-          showChatNotification({
-            title: `New message — ${subName}`,
-            body: (payload.new?.message || '').slice(0, 80),
-            tag: `pending-${payload.new?.pending_id}`,
-          });
-          fetchRecentChats().then(setRecentChats).catch(() => {});
-          if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+        // pending_chats: keep the inbox overview fresh on any change (sends,
+        // edits, deletes) and fire a browser notification for others' messages
+        if (table === 'pending_chats') {
+          fetchChatOverview().then(setChatThreads).catch(() => {});
+          if (eventType === 'INSERT' && payload?.new?.sender_id !== profile?.id) {
+            const submission =
+              pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id) ||
+              myOwnSubmissionsRef.current.find(p => p.id === payload.new?.pending_id);
+            const subName = submission?.data?.name || 'a submission';
+            showChatNotification({
+              title: `New message — ${subName}`,
+              body: (payload.new?.message || '').slice(0, 80),
+              tag: `pending-${payload.new?.pending_id}`,
+            });
+            if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+          }
         }
         if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
       });
@@ -4402,6 +4458,77 @@ export default function App() {
     ).sort(sortByJutsu);
   }, [db.jutsus, f, sortByJutsu]);
 
+  /* ---- Messages inbox: join chat threads with their pending submissions ---- */
+  const chatThreadById = useMemo(
+    () => new Map(chatThreads.map(t => [t.pending_id, t])),
+    [chatThreads]
+  );
+
+  // Most recent public message per submission (feeds Recent Chat Activity)
+  const recentChats = useMemo(
+    () => chatThreads
+      .map(t => t.lastMessage)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 20),
+    [chatThreads]
+  );
+
+  const conversations = useMemo(() => {
+    if (!profile?.id) return [];
+    const seen = new Set();
+    const source = [];
+    for (const p of [...myOwnSubmissions, ...(isStaff ? pendingJutsus : [])]) {
+      if (!seen.has(p.id)) { seen.add(p.id); source.push(p); }
+    }
+    return source
+      .map(p => {
+        const thread = chatThreadById.get(p.id);
+        if (!thread?.lastMessage) return null;
+        const iAmSubmitter = p.submitted_by === profile.id;
+        // Reviewers (non-admin) only see conversations they claimed or joined;
+        // admins/owners see everything. Own submissions always show.
+        if (!iAmSubmitter && role === 'staff') {
+          const claimedByMe = getPendingAssignedId(p) === profile.id;
+          if (!claimedByMe && !myParticipatingIds.has(p.id)) return null;
+        }
+        const turn = getChatTurn(thread.lastMessage, profile.id, iAmSubmitter);
+        const readAt = chatReadMap[p.id] ? new Date(chatReadMap[p.id]).getTime() : 0;
+        const unreadCount = thread.messages.filter(m =>
+          m.sender_id !== profile.id && new Date(m.created_at).getTime() > readAt
+        ).length;
+        const status = p.status === 'pending_approval'
+          ? 'ready'
+          : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
+        return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
+      })
+      .filter(Boolean);
+  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, role, myParticipatingIds, chatReadMap]);
+
+  const messagesUnreadThreads = useMemo(
+    () => conversations.filter(c => c.unreadCount > 0).length,
+    [conversations]
+  );
+
+  const resolvePendingName = useCallback((p) => {
+    if (p.operation === 'delete') {
+      const original = (db.jutsus || []).find(j => j._id === p.target_id);
+      return original?.name ? `Delete: ${original.name}` : '(deletion request)';
+    }
+    return p.data?.name || '(no name)';
+  }, [db.jutsus]);
+
+  // Turn + unread metadata for a pending item, from the current user's view
+  const getPendingChatMeta = useCallback((p) => {
+    const thread = chatThreadById.get(p.id);
+    const last = thread?.lastMessage;
+    if (!last) return null;
+    const iAmSubmitter = p.submitted_by === profile?.id;
+    const turn = getChatTurn(last, profile?.id, iAmSubmitter);
+    const readAt = chatReadMap[p.id] ? new Date(chatReadMap[p.id]).getTime() : 0;
+    const hasUnread = last.sender_id !== profile?.id && new Date(last.created_at).getTime() > readAt;
+    return { turn, hasUnread, lastMessage: last };
+  }, [chatThreadById, profile?.id, chatReadMap]);
 
   if (loading) {
     return (
@@ -4415,6 +4542,7 @@ export default function App() {
   const TABS = [
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
+    ...(profile ? [{ id: 'messages', label: 'Messages', count: conversations.length, unread: messagesUnreadThreads }] : []),
     ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
     ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
@@ -4430,10 +4558,6 @@ export default function App() {
     setF(p => ({ ...p, sort: 'az', showFilters: false }));
   };
 
-  const getPendingAssignedId = (p) => {
-    if (!p.assigned_to) return null;
-    return typeof p.assigned_to === 'object' ? p.assigned_to.id : p.assigned_to;
-  };
   const pendingGroupClaimedByMe = pendingJutsus.filter(p => getPendingAssignedId(p) === profile?.id);
   const pendingGroupRest = pendingJutsus.filter(p => getPendingAssignedId(p) !== profile?.id);
   const pendingGroupApproval = pendingGroupRest.filter(p => p.status === 'pending_approval');
@@ -4445,16 +4569,12 @@ export default function App() {
     { key: 'needs',    label: 'Needs Reviewer',     emoji: '🟡', items: pendingGroupNeeds },
     { key: 'others',   label: 'Claimed by Others',  emoji: '⬜', items: pendingGroupOthers },
   ].filter(g => g.items.length > 0);
+  const expandedPending = pendingJutsus.find(p => p.id === expandedPendingId) || null;
   const pendingOpColors = {
     insert: 'bg-emerald-100 text-emerald-800 border-emerald-300',
     update: 'bg-amber-100 text-amber-800 border-amber-300',
     delete: 'bg-rose-100 text-rose-800 border-rose-300',
   };
-  const awaitingReplyIds = new Set(
-    recentChats
-      .filter(c => !['staff', 'admin', 'owner'].includes(c.profiles?.role))
-      .map(c => c.pending_id)
-  );
   // For staff, only surface recent chats for submissions they claimed or messaged in.
   // Admins and owners see all.
   const visibleRecentChats = ['admin', 'owner'].includes(role)
@@ -4630,6 +4750,11 @@ export default function App() {
                 {t.count !== undefined && (
                   <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${tab === t.id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
                 )}
+                {t.unread > 0 && (
+                  <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm" title={`${t.unread} conversation${t.unread === 1 ? '' : 's'} with unread messages`}>
+                    {t.unread}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -4690,6 +4815,21 @@ export default function App() {
           />
         )}
 
+        {tab === 'messages' && profile && (
+          <MessagesPage
+            conversations={conversations}
+            profile={profile}
+            role={role}
+            selectedId={messagesSelectedId}
+            onSelect={setMessagesSelectedId}
+            onMarkRead={markChatRead}
+            resolveName={resolvePendingName}
+            refreshTrigger={refreshTrigger}
+            refreshPending={refreshPending}
+            headerOffset={headerHeight + 54}
+          />
+        )}
+
         {tab === 'pending' && isStaff && (
           <div className="max-w-6xl mx-auto">
             {!pendingLoaded ? (
@@ -4723,6 +4863,9 @@ export default function App() {
 
                 <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{pendingJutsus.length} Pending</div>
 
+                {/* Desktop: split view (list left, detail panel right). Mobile: inline expansion. */}
+                <div className={isDesktop ? 'grid grid-cols-5 gap-4 items-start' : ''}>
+                <div className={isDesktop ? 'col-span-2 min-w-0' : ''}>
                 {pendingGroups.map(({ key, label, emoji, items }) => (
                   <div key={key} className="mb-4">
                     <button
@@ -4748,22 +4891,37 @@ export default function App() {
                           const diffMs = Date.now() - new Date(p.submitted_at || 0).getTime();
                           const hrs = Math.floor(diffMs / 3600000);
                           const elapsedStr = hrs < 48 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
+                          const chatMeta = getPendingChatMeta(p);
+                          const rowBorder = isExpanded && isDesktop
+                            ? 'border-indigo-400 ring-2 ring-indigo-200'
+                            : chatMeta?.turn === 'you'
+                              ? 'border-rose-300'
+                              : 'border-slate-200';
 
                           return (
-                            <div key={p.id} id={`pending-row-${p.id}`} className={`rounded-xl overflow-hidden border bg-white shadow-xs ${awaitingReplyIds.has(p.id) ? 'border-orange-300' : 'border-slate-200'}`}>
+                            <div key={p.id} id={`pending-row-${p.id}`} className={`rounded-xl overflow-hidden border bg-white shadow-xs ${rowBorder}`}>
                               <button
                                 type="button"
                                 onClick={() => setExpandedPendingId(prev => prev === p.id ? null : p.id)}
                                 className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
                               >
+                                {chatMeta?.hasUnread && (
+                                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" title="Unread messages" />
+                                )}
                                 <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 ${pendingOpColors[op] || ''}`}>
                                   {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Del'}
                                 </span>
                                 <span className="flex-1 font-semibold text-slate-900 text-sm truncate min-w-0">{rowName}</span>
-                                {awaitingReplyIds.has(p.id) && (
-                                  <span className="flex items-center gap-1 text-[10px] font-bold text-orange-600 bg-orange-50 border border-orange-200 px-1.5 py-0.5 rounded-full shrink-0">
-                                    <svg viewBox="0 0 24 24" width="10" height="10" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
-                                    Reply needed
+                                {chatMeta?.turn === 'you' && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-full shrink-0 uppercase">
+                                    <svg viewBox="0 0 24 24" width="8" height="8" fill="currentColor" className="animate-pulse"><circle cx="12" cy="12" r="10"/></svg>
+                                    Awaiting You
+                                  </span>
+                                )}
+                                {chatMeta?.turn === 'them' && (
+                                  <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full shrink-0 uppercase">
+                                    <svg viewBox="0 0 24 24" width="8" height="8" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
+                                    Awaiting Player
                                   </span>
                                 )}
                                 <span className="text-[11px] text-slate-500 shrink-0 hidden sm:block">by {rowSubmitter}</span>
@@ -4771,10 +4929,10 @@ export default function App() {
                                   {p.status === 'pending_review' ? 'Review' : 'Approval'}
                                 </span>
                                 <span className="text-[11px] text-slate-400 shrink-0">{elapsedStr}</span>
-                                <Icon n={isExpanded ? 'Up' : 'Down'} size={13} className="text-slate-400 shrink-0" />
+                                {!isDesktop && <Icon n={isExpanded ? 'Up' : 'Down'} size={13} className="text-slate-400 shrink-0" />}
                               </button>
 
-                              {isExpanded && (
+                              {isExpanded && !isDesktop && (
                                 <div className="border-t border-slate-100">
                                   <PendingJutsuCard
                                     pending={p}
@@ -4793,6 +4951,8 @@ export default function App() {
                                     currentUserProfile={profile}
                                     refreshPending={refreshPending}
                                     isApproving={approvingIds.has(p.id)}
+                                    chatMeta={chatMeta}
+                                    onChatOpened={() => markChatRead(p.id)}
                                   />
                                 </div>
                               )}
@@ -4803,6 +4963,42 @@ export default function App() {
                     )}
                   </div>
                 ))}
+                </div>
+
+                {isDesktop && (
+                  <div className="col-span-3 sticky" style={{ top: `${headerHeight + 62}px` }}>
+                    {expandedPending ? (
+                      <div className="overflow-y-auto custom-scrollbar pr-1" style={{ maxHeight: `calc(100vh - ${headerHeight + 78}px)` }}>
+                        <PendingJutsuCard
+                          pending={expandedPending}
+                          originalJutsu={expandedPending.target_id ? (db.jutsus || []).find(j => j._id === expandedPending.target_id) : null}
+                          currentUserId={profile?.id}
+                          isAdmin={isAdmin}
+                          onApprove={handleApprovePending}
+                          onCancel={handleCancelPending}
+                          onSubmitterCancel={handleSubmitterCancelPending}
+                          onReview={handleReviewPending}
+                          onEdit={handleEditPending}
+                          currentUserRole={role}
+                          refreshTrigger={refreshTrigger}
+                          onClaim={handleClaimPending}
+                          isMySubmissionsView={false}
+                          currentUserProfile={profile}
+                          refreshPending={refreshPending}
+                          isApproving={approvingIds.has(expandedPending.id)}
+                          chatMeta={getPendingChatMeta(expandedPending)}
+                          onChatOpened={() => markChatRead(expandedPending.id)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="bg-white/60 rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-3 py-24">
+                        <Icon n="Eye" size={36} className="text-slate-300" />
+                        <p className="text-sm font-semibold">Select a submission to review it here</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+                </div>
               </>
             )}
           </div>
@@ -4841,7 +5037,9 @@ export default function App() {
                         isMySubmissionsView={true}
                         currentUserProfile={profile}
                         refreshPending={refreshPending}
-                        isApproving={approvingIds.has(p.id)} />
+                        isApproving={approvingIds.has(p.id)}
+                        chatMeta={getPendingChatMeta(p)}
+                        onChatOpened={() => markChatRead(p.id)} />
                     );
                   })}
                 </div>

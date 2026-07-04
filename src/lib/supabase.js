@@ -573,6 +573,40 @@ export const fetchRecentChats = async (limit = 20) => {
   }
 };
 
+/*
+ * Chat overview for the Messages inbox. Scans the most recent public messages
+ * and groups them per pending submission, keeping up to `perThread` of the
+ * newest messages for each thread so the UI can show previews and unread
+ * counts without a query per submission. RLS limits players to threads on
+ * their own submissions.
+ */
+export const fetchChatOverview = async (scanLimit = 300, perThread = 5) => {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('pending_chats')
+      .select('id, pending_id, message, created_at, is_staff_only, sender_id, is_deleted, profiles(username, site_nickname, avatar_url, role)')
+      .eq('is_staff_only', false)
+      .order('created_at', { ascending: false })
+      .limit(scanLimit);
+    if (error) return [];
+    const byThread = new Map();
+    for (const msg of data || []) {
+      if (msg.is_deleted) continue;
+      let thread = byThread.get(msg.pending_id);
+      if (!thread) {
+        thread = { pending_id: msg.pending_id, messages: [] };
+        byThread.set(msg.pending_id, thread);
+      }
+      if (thread.messages.length < perThread) thread.messages.push(msg);
+    }
+    // messages are newest-first; lastMessage is the most recent public message
+    return [...byThread.values()].map(t => ({ ...t, lastMessage: t.messages[0] || null }));
+  } catch {
+    return [];
+  }
+};
+
 /* --- Role change audit log ------------------------------------------------- */
 
 export const fetchRoleChangeLog = async (limit = 100) => {
