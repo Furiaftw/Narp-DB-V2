@@ -66,6 +66,23 @@ const JINCHURIKI_ACCENT = { accent: '#f97316', accentFaint: 'rgba(249,115,22,0.0
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 function isAdmin(role) { return role === 'admin' || role === 'owner'; }
+function isReviewer(role) { return role === 'staff'; }
+
+// Double-approval: Reviewers (staff) insert rows with status 'pending';
+// a DIFFERENT Reviewer or an Admin performs the second step (approve).
+// Admins keep writing directly (rows default to 'approved').
+function canModifyRow(perms, row) {
+  return perms.admin || (perms.reviewer && row.status === 'pending' && row.created_by === perms.userId);
+}
+function canApproveRow(perms, row) {
+  return row.status === 'pending' && (perms.admin || (perms.reviewer && row.created_by !== perms.userId));
+}
+async function approveRows(table, ids, userId) {
+  const { error } = await supabase.from(table)
+    .update({ status: 'approved', approved_by: userId })
+    .in('id', ids);
+  if (error) throw error;
+}
 
 function useSortSensors() {
   return useSensors(
@@ -200,7 +217,7 @@ function SaveBtn({ loading, onClick, label = 'Save' }) {
 
 // ─── ENTRY EDIT MODAL ─────────────────────────────────────────────────────────
 
-function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword = '', initialBeastId = '' }) {
+function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword = '', initialBeastId = '', asPending = false }) {
   const isEdit = !!entry;
   const meta   = entry?.meta || {};
 
@@ -235,7 +252,10 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
       meta: buildMeta(),
       updated_by: userId,
     };
-    if (!isEdit) payload.created_by = userId;
+    if (!isEdit) {
+      payload.created_by = userId;
+      if (asPending) payload.status = 'pending';
+    }
 
     const { error: err } = isEdit
       ? await supabase.from('roster_entries').update(payload).eq('id', entry.id)
@@ -250,6 +270,12 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
 
   return (
     <Modal title={modalTitle} onClose={onClose}>
+      {asPending && !isEdit && (
+        <p className="text-[10px] text-amber-400/90 mb-3 leading-relaxed rounded-sm px-2.5 py-2"
+           style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)' }}>
+          This addition needs a second approval — another Reviewer or an Admin must approve it before it appears on the public roster.
+        </p>
+      )}
       <Field label="Character Name" value={name} onChange={setName} placeholder="OC Name" />
       <Field label="Discord Link" value={link} onChange={setLink} placeholder="https://discord.com/channels/..." />
 
@@ -320,7 +346,7 @@ function EntryModal({ rosterType, entry, userId, onClose, onSaved, initialSword 
 // ─── CREATE SQUAD MODAL ───────────────────────────────────────────────────────
 // Single-step squad creation: number + optional captain + member slots
 
-function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads, userId, onSaved, onClose }) {
+function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads, userId, onSaved, onClose, asPending = false }) {
   const [numStr, setNumStr]           = useState(String(suggestedNumber));
   const [captainName, setCaptainName] = useState('');
   const [captainLink, setCaptainLink] = useState('');
@@ -371,7 +397,8 @@ function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads
     });
 
     setSaving(true);
-    const { error: err } = await supabase.from('roster_squads').insert(rows);
+    const finalRows = asPending ? rows.map(r => ({ ...r, status: 'pending' })) : rows;
+    const { error: err } = await supabase.from('roster_squads').insert(finalRows);
     setSaving(false);
     if (err) { console.error(err); setError(err.message); return; }
     onSaved();
@@ -381,6 +408,12 @@ function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads
 
   return (
     <Modal title={`New ${memberLabel} Squad`} onClose={onClose}>
+      {asPending && (
+        <p className="text-[10px] text-amber-400/90 mb-3 leading-relaxed rounded-sm px-2.5 py-2"
+           style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)' }}>
+          This squad needs a second approval — another Reviewer or an Admin must approve it before it appears on the public roster.
+        </p>
+      )}
       <Field label={`Squad Number (default: ${suggestedNumber})`} value={numStr} onChange={setNumStr}
              type="number" placeholder={String(suggestedNumber)} />
 
@@ -463,7 +496,7 @@ function CreateSquadModal({ village, squadType, suggestedNumber, entries, squads
 
 // ─── SQUAD MEMBER MODAL ───────────────────────────────────────────────────────
 
-function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, member, userId, onClose, onSaved, availableMentors = [] }) {
+function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, member, userId, onClose, onSaved, availableMentors = [], asPending = false }) {
   const isEdit = !!member;
 
   // Normalise: 'part_time' stored in DB is treated as the squad's base role + partTime flag
@@ -486,7 +519,10 @@ function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, memb
       name: name.trim(), discord_link: link.trim() || null,
       updated_by: userId,
     };
-    if (!isEdit) payload.created_by = userId;
+    if (!isEdit) {
+      payload.created_by = userId;
+      if (asPending) payload.status = 'pending';
+    }
 
     const { error: err } = isEdit
       ? await supabase.from('roster_squads').update(payload).eq('id', member.id)
@@ -500,6 +536,12 @@ function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, memb
   const roleLabel = baseRole === 'captain' ? 'Captain' : baseRole === 'member' ? 'Chunin Member' : 'Genin';
   return (
     <Modal title={`${isEdit ? 'Edit' : 'Add'} ${roleLabel} — Squad ${squadNumber}`} onClose={onClose}>
+      {asPending && !isEdit && (
+        <p className="text-[10px] text-amber-400/90 mb-3 leading-relaxed rounded-sm px-2.5 py-2"
+           style={{ background: 'rgba(251,191,36,0.08)', border: '1px solid rgba(251,191,36,0.2)' }}>
+          This addition needs a second approval — another Reviewer or an Admin must approve it before it appears on the public roster.
+        </p>
+      )}
       {baseRole === 'captain' && squadType === 'genin' && availableMentors.length > 0 && (
         <div className="mb-4">
           <label className="block text-[10px] font-black uppercase tracking-[0.15em] text-slate-500 mb-1.5">Available Mentors</label>
@@ -540,6 +582,13 @@ function SquadMemberModal({ village, squadType, squadNumber, role: rawRole, memb
 
 // ─── SHARED DISPLAY PRIMITIVES ────────────────────────────────────────────────
 
+const PendingBadge = () => (
+  <span className="text-[8px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-sm shrink-0"
+        style={{ background: 'rgba(251,191,36,0.12)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.3)' }}>
+    Pending
+  </span>
+);
+
 const AdminBtn = ({ icon: IconComp, onClick, color = '#64748b', title, loading = false }) => (
   <button onClick={onClick} title={title} disabled={loading}
     className="p-1 rounded-sm transition-colors hover:opacity-100 opacity-40 hover:opacity-80 disabled:cursor-wait"
@@ -548,7 +597,7 @@ const AdminBtn = ({ icon: IconComp, onClick, color = '#64748b', title, loading =
   </button>
 );
 
-const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta, deleteLoading = false }) => {
+const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta, deleteLoading = false, pending = false, onApprove = null, approveLoading = false }) => {
   const nameEl = link
     ? <a href={link} target="_blank" rel="noopener noreferrer"
          style={{ color: t.accent }}
@@ -569,11 +618,17 @@ const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta, deleteLoading 
             ANBU
           </span>
         )}
+        {pending && <PendingBadge />}
       </div>
-      {canEdit && (
+      {(canEdit || onApprove) && (
         <div className="flex gap-1 shrink-0 ml-2">
-          <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
-          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" loading={deleteLoading} />
+          {onApprove && <AdminBtn icon={CheckCircle} onClick={onApprove} color="#34d399" title="Approve" loading={approveLoading} />}
+          {canEdit && (
+            <>
+              <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
+              <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title={pending ? 'Reject / Remove' : 'Remove'} loading={deleteLoading} />
+            </>
+          )}
         </div>
       )}
     </div>
@@ -649,7 +704,7 @@ const SlotTracker = ({ filled, cap, accent }) => (
 
 // ─── MEMBER ROW (used inside SquadCard) ──────────────────────────────────────
 
-const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false }) => (
+const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false, onApprove = null, approveLoading = false }) => (
   <div className="flex items-center justify-between py-2 px-3 border-b border-white/5 group"
        onMouseEnter={e => e.currentTarget.style.background = t.accentFaint}
        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
@@ -671,10 +726,12 @@ const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false }) =
           Part Time
         </span>
       )}
+      {m.status === 'pending' && <PendingBadge />}
+      {onApprove && <AdminBtn icon={CheckCircle} onClick={onApprove} color="#34d399" title="Approve" loading={approveLoading} />}
       {canEdit && (
         <>
           <AdminBtn icon={Pencil} onClick={onEdit} title="Edit" />
-          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title="Remove" loading={deleteLoading} />
+          <AdminBtn icon={Trash2} onClick={onDelete} color="#f87171" title={m.status === 'pending' ? 'Reject / Remove' : 'Remove'} loading={deleteLoading} />
         </>
       )}
     </div>
@@ -683,9 +740,28 @@ const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false }) =
 
 // ─── SQUAD CARD ───────────────────────────────────────────────────────────────
 
-function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, onRefresh, entries = [], squads = [] }) {
+function SquadCard({ village, squadType, squadNumber, rows, t, perms, onRefresh, entries = [], squads = [] }) {
   const [modal, setModal]           = useState(null); // { role } or { role, member }
   const [editingNum, setEditingNum] = useState(false);
+
+  const canEdit = perms.admin;                 // squad-level ops (renumber, delete squad, reorder)
+  const canAdd  = perms.admin || perms.reviewer;
+  const [approvingId, setApprovingId] = useState(null);
+  const [approvingSquad, setApprovingSquad] = useState(false);
+  const approvableIds = rows.filter(r => canApproveRow(perms, r)).map(r => r.id);
+
+  const handleApprove = async (ids) => {
+    if (ids.length > 1) setApprovingSquad(true); else setApprovingId(ids[0]);
+    try {
+      await approveRows('roster_squads', ids, perms.userId);
+      onRefresh();
+    } catch (e) {
+      alert('Approve failed: ' + (e.message || e));
+    } finally {
+      setApprovingSquad(false);
+      setApprovingId(null);
+    }
+  };
 
   const captain = rows.find(r => r.role === 'captain');
   const members = rows.filter(r => r.role !== 'captain' && r.role !== 'sentinel');
@@ -778,9 +854,19 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               {canEdit && (renumbering ? <Loader2 size={8} className="inline animate-spin" /> : <Pencil size={8} className="inline opacity-40" />)}
             </span>
           )}
-          {canEdit && (
-            <AdminBtn icon={Trash2} onClick={handleDeleteSquad} color="#f87171" title="Delete squad" loading={deletingSquad} />
-          )}
+          <div className="flex items-center gap-1.5">
+            {rows.some(r => r.status === 'pending') && <PendingBadge />}
+            {approvableIds.length > 1 && (
+              <button onClick={() => handleApprove(approvableIds)} disabled={approvingSquad}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider transition-all hover:brightness-110 disabled:cursor-wait"
+                style={{ background: 'rgba(52,211,153,0.12)', color: '#34d399', border: '1px solid rgba(52,211,153,0.25)' }}>
+                {approvingSquad ? <Loader2 size={8} className="animate-spin" /> : <CheckCircle size={8} />} Approve All
+              </button>
+            )}
+            {canEdit && (
+              <AdminBtn icon={Trash2} onClick={handleDeleteSquad} color="#f87171" title="Delete squad" loading={deletingSquad} />
+            )}
+          </div>
         </div>
 
         {captain && (
@@ -803,10 +889,14 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               </div>
             </div>
             <div className="flex items-center gap-1 shrink-0 ml-2">
-              {canEdit && (
+              {captain.status === 'pending' && <PendingBadge />}
+              {canApproveRow(perms, captain) && (
+                <AdminBtn icon={CheckCircle} onClick={() => handleApprove([captain.id])} color="#34d399" title="Approve" loading={approvingId === captain.id} />
+              )}
+              {(canModifyRow(perms, captain) || canApproveRow(perms, captain)) && (
                 <>
                   <AdminBtn icon={Pencil} onClick={() => setModal({ role: 'captain', member: captain })} title="Edit" />
-                  <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title="Remove" loading={deletingMemberId === captain.id} />
+                  <AdminBtn icon={Trash2} onClick={() => handleDelete(captain.id)} color="#f87171" title={captain.status === 'pending' ? 'Reject / Remove' : 'Remove'} loading={deletingMemberId === captain.id} />
                 </>
               )}
             </div>
@@ -819,7 +909,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
                style={{ color: 'rgba(251,146,60,0.8)' }}>
               Looking for Captain
             </p>
-            {canEdit && (
+            {canAdd && (
               <button onClick={() => setModal({ role: 'captain' })}
                 className="flex items-center gap-1 px-1.5 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider"
                 style={{ background: 'rgba(251,146,60,0.12)', color: '#fb923c', border: '1px solid rgba(251,146,60,0.25)' }}>
@@ -834,21 +924,25 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
               <SortableContext items={orderedMembers.map(m => m.id)} strategy={verticalListSortingStrategy}>
                 {orderedMembers.map(m => (
                   <SortableRow key={m.id} id={m.id} t={t} canEdit={canEdit}>
-                    <MemberRow m={m} t={t} canEdit={canEdit}
+                    <MemberRow m={m} t={t} canEdit={canModifyRow(perms, m) || canApproveRow(perms, m)}
                       onEdit={() => setModal({ role: m.role, member: m })}
-                      onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id} />
+                      onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id}
+                      onApprove={canApproveRow(perms, m) ? () => handleApprove([m.id]) : null}
+                      approveLoading={approvingId === m.id} />
                   </SortableRow>
                 ))}
               </SortableContext>
             </DndContext>
           : orderedMembers.map(m => (
-              <MemberRow key={m.id} m={m} t={t} canEdit={canEdit}
+              <MemberRow key={m.id} m={m} t={t} canEdit={canModifyRow(perms, m) || canApproveRow(perms, m)}
                 onEdit={() => setModal({ role: m.role, member: m })}
-                onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id} />
+                onDelete={() => handleDelete(m.id)} deleteLoading={deletingMemberId === m.id}
+                onApprove={canApproveRow(perms, m) ? () => handleApprove([m.id]) : null}
+                approveLoading={approvingId === m.id} />
             ))
         }
 
-        {canEdit && (
+        {canAdd && (
           <button onClick={() => setModal({ role: squadType === 'chunin' ? 'member' : 'genin' })}
             className="flex items-center gap-1 mt-2 px-2 py-1 rounded-sm text-[9px] font-black uppercase tracking-wider w-full justify-center transition-all hover:brightness-110"
             style={{ background: 'rgba(255,255,255,0.03)', color: '#475569', border: '1px dashed rgba(255,255,255,0.08)' }}>
@@ -860,7 +954,8 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
       {modal && (
         <SquadMemberModal
           village={village} squadType={squadType} squadNumber={squadNumber}
-          role={modal.role} member={modal.member || null} userId={userId}
+          role={modal.role} member={modal.member || null} userId={perms.userId}
+          asPending={!perms.admin}
           availableMentors={modal.role === 'captain' ? availableMentors : []}
           onClose={() => setModal(null)}
           onSaved={async () => {
@@ -882,12 +977,16 @@ function SquadCard({ village, squadType, squadNumber, rows, t, canEdit, userId, 
 // ─── ENTRY LIST SECTION ───────────────────────────────────────────────────────
 // Handles any flat roster_entries list with add/edit/delete
 
-function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, onRefresh, sublabel = false }) {
+function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, sublabel = false }) {
   const [modal, setModal] = useState(null); // null | 'add' | entry object
   const [orderedEntries, setOrderedEntries] = useState(entries);
   const [deletingId, setDeletingId] = useState(null);
+  const [approvingId, setApprovingId] = useState(null);
   useEffect(() => setOrderedEntries(entries), [entries]);
   const sensors = useSortSensors();
+
+  const canReorder = perms.admin; // only admins may touch approved rows
+  const canAdd = perms.admin || perms.reviewer;
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
@@ -900,6 +999,18 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
     }
   };
 
+  const handleApprove = async (id) => {
+    setApprovingId(id);
+    try {
+      await approveRows('roster_entries', [id], perms.userId);
+      onRefresh();
+    } catch (e) {
+      alert('Approve failed: ' + (e.message || e));
+    } finally {
+      setApprovingId(null);
+    }
+  };
+
   const handleDragEnd = ({ active, over }) => {
     if (!over || active.id === over.id) return;
     const oldIndex = orderedEntries.findIndex(e => e.id === active.id);
@@ -909,35 +1020,43 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
     saveEntryOrder(next.map(e => e.id));
   };
 
+  const rowProps = (e) => ({
+    name: e.name, link: e.discord_link, t, meta: e.meta,
+    pending: e.status === 'pending',
+    canEdit: canModifyRow(perms, e) || canApproveRow(perms, e),
+    onEdit: () => setModal(e),
+    onDelete: () => handleDelete(e.id),
+    deleteLoading: deletingId === e.id,
+    onApprove: canApproveRow(perms, e) ? () => handleApprove(e.id) : null,
+    approveLoading: approvingId === e.id,
+  });
+
   const Header = sublabel
-    ? <SubLabel t={t} canEdit={canEdit} onAdd={() => setModal('add')}>{title}</SubLabel>
-    : <SectionHeader icon={icon} title={title} t={t} canEdit={canEdit} onAdd={() => setModal('add')} />;
+    ? <SubLabel t={t} canEdit={canAdd} onAdd={() => setModal('add')}>{title}</SubLabel>
+    : <SectionHeader icon={icon} title={title} t={t} canEdit={canAdd} onAdd={() => setModal('add')} />;
 
   return (
     <>
       {Header}
       {orderedEntries.length === 0
         ? <EmptyNote />
-        : canEdit && orderedEntries.length > 1
+        : canReorder && orderedEntries.length > 1
           ? <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
               <SortableContext items={orderedEntries.map(e => e.id)} strategy={verticalListSortingStrategy}>
                 {orderedEntries.map(e => (
-                  <SortableRow key={e.id} id={e.id} t={t} canEdit={canEdit}>
-                    <Person name={e.name} link={e.discord_link} t={t} meta={e.meta}
-                      canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} deleteLoading={deletingId === e.id} />
+                  <SortableRow key={e.id} id={e.id} t={t} canEdit={canReorder}>
+                    <Person {...rowProps(e)} />
                   </SortableRow>
                 ))}
               </SortableContext>
             </DndContext>
-          : orderedEntries.map(e => (
-              <Person key={e.id} name={e.name} link={e.discord_link} t={t} meta={e.meta}
-                canEdit={canEdit} onEdit={() => setModal(e)} onDelete={() => handleDelete(e.id)} />
-            ))
+          : orderedEntries.map(e => <Person key={e.id} {...rowProps(e)} />)
       }
       {modal && (
         <EntryModal
           rosterType={rosterType} entry={modal === 'add' ? null : modal}
-          userId={userId}
+          userId={perms.userId}
+          asPending={!perms.admin}
           onClose={() => setModal(null)}
           onSaved={() => { setModal(null); onRefresh(); }}
         />
@@ -948,12 +1067,28 @@ function EntrySection({ icon, title, rosterType, entries, t, canEdit, userId, on
 
 // ─── WANDERER SECTION ─────────────────────────────────────────────────────────
 
-function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal, setWandererModal }) {
+function WandererSection({ wanderers, perms, onRefresh, wandererModal, setWandererModal }) {
   const ta = WANDERER_ACCENT;
   const [ordered, setOrdered] = useState(wanderers);
   const [deletingId, setDeletingId] = useState(null);
+  const [approvingId, setApprovingId] = useState(null);
   useEffect(() => setOrdered(wanderers), [wanderers]);
   const sensors = useSortSensors();
+
+  const canEdit = perms.admin;
+  const canAdd  = perms.admin || perms.reviewer;
+
+  const handleApprove = async (id) => {
+    setApprovingId(id);
+    try {
+      await approveRows('roster_entries', [id], perms.userId);
+      onRefresh();
+    } catch (e) {
+      alert('Approve failed: ' + (e.message || e));
+    } finally {
+      setApprovingId(null);
+    }
+  };
 
   const handleDragEnd = ({ active, over }) => {
     if (!over || active.id === over.id) return;
@@ -974,11 +1109,15 @@ function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal,
                  style={{ color: ta.accent }}
                  className="text-sm font-bold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline truncate">{w.name}</a>
             : <span className="text-sm font-bold tracking-wide text-slate-200 truncate">{w.name}</span>}
+          {w.status === 'pending' && <PendingBadge />}
         </div>
-        {canEdit && (
+        {(canModifyRow(perms, w) || canApproveRow(perms, w)) && (
           <div className="flex gap-1 shrink-0">
+            {canApproveRow(perms, w) && (
+              <AdminBtn icon={CheckCircle} onClick={() => handleApprove(w.id)} color="#34d399" title="Approve" loading={approvingId === w.id} />
+            )}
             <AdminBtn icon={Pencil} onClick={() => setWandererModal(w)} title="Edit" />
-            <AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingId(w.id); try { await supabase.from('roster_entries').delete().eq('id', w.id); onRefresh(); } finally { setDeletingId(null); } }}} color="#f87171" title="Remove" loading={deletingId === w.id} />
+            <AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingId(w.id); try { await supabase.from('roster_entries').delete().eq('id', w.id); onRefresh(); } finally { setDeletingId(null); } }}} color="#f87171" title={w.status === 'pending' ? 'Reject / Remove' : 'Remove'} loading={deletingId === w.id} />
           </div>
         )}
       </div>
@@ -991,7 +1130,7 @@ function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal,
 
   return (
     <div className="rounded-sm p-4 md:p-5" style={{ background: 'rgba(15,23,42,0.7)', border: '1px solid rgba(255,255,255,0.05)', borderLeft: `3px solid ${ta.accent}` }}>
-      <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canEdit} onAdd={() => setWandererModal('add')} />
+      <SectionHeader icon={Compass} title="Wanderer Roster" t={ta} canEdit={canAdd} onAdd={() => setWandererModal('add')} />
       <SlotTracker filled={wanderers.length} cap={6} accent={ta.accent} />
       <p className="text-[10px] italic text-slate-500 px-1 mb-5">Staff Request required, not guaranteed to get.</p>
       {ordered.length === 0 ? <EmptyNote /> : (
@@ -1014,7 +1153,8 @@ function WandererSection({ wanderers, canEdit, userId, onRefresh, wandererModal,
       {wandererModal && (
         <EntryModal rosterType="wanderer"
           entry={wandererModal === 'add' ? null : wandererModal}
-          userId={userId}
+          userId={perms.userId}
+          asPending={!perms.admin}
           onClose={() => setWandererModal(null)}
           onSaved={() => { setWandererModal(null); onRefresh(); }} />
       )}
@@ -1319,8 +1459,25 @@ export default function RosterPage({ userRole, userId }) {
   const [activeVillage, setActiveVillage] = useState('konoha');
   const [mainTab, setMainTab]         = useState('roster');
   const [deletingRosterId, setDeletingRosterId] = useState(null);
+  const [approvingRosterId, setApprovingRosterId] = useState(null);
 
-  const canEdit = isAdmin(userRole);
+  const canEdit   = isAdmin(userRole);
+  const reviewer  = isReviewer(userRole);
+  const canAdd    = canEdit || reviewer;
+  const staffView = canEdit || reviewer;
+  const perms = useMemo(() => ({ admin: canEdit, reviewer, userId }), [canEdit, reviewer, userId]);
+
+  const handleApproveEntry = async (id) => {
+    setApprovingRosterId(id);
+    try {
+      await approveRows('roster_entries', [id], userId);
+      fetchData();
+    } catch (e) {
+      alert('Approve failed: ' + (e.message || e));
+    } finally {
+      setApprovingRosterId(null);
+    }
+  };
 
   const fetchData = useCallback(async () => {
     const [{ data: e }, { data: s }] = await Promise.all([
@@ -1376,12 +1533,18 @@ export default function RosterPage({ userRole, userId }) {
   const kanjiChar  = mainTab === 'rogue' ? '罪' : mainTab === 'wanderer' ? '旅' : mainTab === 'swords' ? '刀' : mainTab === 'jinchuriki' ? '獣' : mainTab === 'data' ? '忍' : v.kanji;
   const kanjiColor = mainTab === 'rogue' ? '#ef4444' : mainTab === 'wanderer' ? '#a78bfa' : mainTab === 'swords' ? '#38bdf8' : mainTab === 'jinchuriki' ? '#f97316' : mainTab === 'data' ? '#7dd3fc' : t.accent;
 
+  // Pending rows are staff-only until approved; stats always count approved rows only.
+  const visibleEntries  = useMemo(() => staffView ? entries : entries.filter(e => e.status !== 'pending'), [entries, staffView]);
+  const visibleSquads   = useMemo(() => staffView ? squads  : squads.filter(s => s.status !== 'pending'),  [squads, staffView]);
+  const approvedEntries = useMemo(() => entries.filter(e => e.status !== 'pending'), [entries]);
+  const approvedSquads  = useMemo(() => squads.filter(s => s.status !== 'pending'),  [squads]);
+
   // Helper: filter entries by roster_type
-  const ofType = (type) => entries.filter(e => e.roster_type === type);
+  const ofType = (type) => visibleEntries.filter(e => e.roster_type === type);
 
   // Squads: group by village + type + squad_number
   const getSquadGroups = (villageId, squadType) => {
-    const rows = squads.filter(s => s.village === villageId && s.squad_type === squadType);
+    const rows = visibleSquads.filter(s => s.village === villageId && s.squad_type === squadType);
     const nums = [...new Set(rows.map(s => s.squad_number))].sort((a, b) => a - b);
     return nums.map(n => ({ squadNumber: n, rows: rows.filter(s => s.squad_number === n) }));
   };
@@ -1463,14 +1626,14 @@ export default function RosterPage({ userRole, userId }) {
           <div className="space-y-4">
             <Block t={t}>
               <EntrySection icon={Crown} title="Jonin Council" rosterType={`${activeVillage}_council`}
-                entries={ofType(`${activeVillage}_council`)} t={t} canEdit={canEdit} userId={userId} onRefresh={fetchData} />
+                entries={ofType(`${activeVillage}_council`)} t={t} perms={perms} onRefresh={fetchData} />
             </Block>
             <Block t={t}>
               <SectionHeader icon={BookOpen} title="Elite Shinobi" t={t} canEdit={false} />
               <EntrySection title="Jonin" rosterType={`${activeVillage}_jonin`}
-                entries={ofType(`${activeVillage}_jonin`)} t={t} canEdit={canEdit} userId={userId} onRefresh={fetchData} sublabel />
+                entries={ofType(`${activeVillage}_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
               <EntrySection title="Special Jonin" rosterType={`${activeVillage}_special_jonin`}
-                entries={ofType(`${activeVillage}_special_jonin`)} t={t} canEdit={canEdit} userId={userId} onRefresh={fetchData} sublabel />
+                entries={ofType(`${activeVillage}_special_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
             </Block>
 
             {/* Chunin Squads */}
@@ -1481,7 +1644,7 @@ export default function RosterPage({ userRole, userId }) {
                 </div>
                 <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300">Chunin Squads</h2>
                 <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${t.accentBorder}, transparent)` }} />
-                {canEdit && (
+                {canAdd && (
                   <button onClick={() => handleAddSquad(activeVillage, 'chunin')}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-sm text-[9px] font-black uppercase tracking-wider transition-all hover:brightness-110"
                     style={{ background: t.accentFaint, color: t.accent, border: `1px solid ${t.accentBorder}` }}>
@@ -1495,8 +1658,8 @@ export default function RosterPage({ userRole, userId }) {
                     {getSquadGroups(activeVillage, 'chunin').map(g => (
                       <SquadCard key={g.squadNumber} village={activeVillage} squadType="chunin"
                         squadNumber={g.squadNumber} rows={g.rows} t={t}
-                        canEdit={canEdit} userId={userId} onRefresh={fetchData}
-                        entries={entries} squads={squads} />
+                        perms={perms} onRefresh={fetchData}
+                        entries={approvedEntries} squads={squads} />
                     ))}
                   </div>
               }
@@ -1510,7 +1673,7 @@ export default function RosterPage({ userRole, userId }) {
                 </div>
                 <h2 className="text-xs font-black uppercase tracking-[0.2em] text-slate-300">Genin Squads</h2>
                 <div className="flex-1 h-px" style={{ background: `linear-gradient(to right, ${t.accentBorder}, transparent)` }} />
-                {canEdit && (
+                {canAdd && (
                   <button onClick={() => handleAddSquad(activeVillage, 'genin')}
                     className="flex items-center gap-1 px-2.5 py-1 rounded-sm text-[9px] font-black uppercase tracking-wider transition-all hover:brightness-110"
                     style={{ background: t.accentFaint, color: t.accent, border: `1px solid ${t.accentBorder}` }}>
@@ -1524,8 +1687,8 @@ export default function RosterPage({ userRole, userId }) {
                     {getSquadGroups(activeVillage, 'genin').map(g => (
                       <SquadCard key={g.squadNumber} village={activeVillage} squadType="genin"
                         squadNumber={g.squadNumber} rows={g.rows} t={t}
-                        canEdit={canEdit} userId={userId} onRefresh={fetchData}
-                        entries={entries} squads={squads} />
+                        perms={perms} onRefresh={fetchData}
+                        entries={approvedEntries} squads={squads} />
                     ))}
                   </div>
               }
@@ -1542,7 +1705,7 @@ export default function RosterPage({ userRole, userId }) {
               <SectionHeader icon={Skull} title="Rogue Roster" t={ta} canEdit={false} />
               <SlotTracker filled={rogues.length} cap={6} accent={ta.accent} />
               <p className="text-[10px] italic text-slate-500 px-1 mb-5">Must become a rogue in-character.</p>
-              <EntrySection title="" rosterType="rogue" entries={rogues} t={ta} canEdit={canEdit} userId={userId} onRefresh={fetchData} sublabel={false} icon={Skull} />
+              <EntrySection title="" rosterType="rogue" entries={rogues} t={ta} perms={perms} onRefresh={fetchData} sublabel={false} icon={Skull} />
             </div>
           );
         })()}
@@ -1551,7 +1714,7 @@ export default function RosterPage({ userRole, userId }) {
         {mainTab === 'wanderer' && (
           <WandererSection
             wanderers={ofType('wanderer')}
-            canEdit={canEdit} userId={userId} onRefresh={fetchData}
+            perms={perms} onRefresh={fetchData}
             wandererModal={wandererModal} setWandererModal={setWandererModal}
           />
         )}
@@ -1572,18 +1735,22 @@ export default function RosterPage({ userRole, userId }) {
                     <div key={sword} className="flex items-center gap-3 py-2.5 px-3 rounded-sm" style={{ background: 'rgba(15,23,42,0.5)', border: '1px solid rgba(255,255,255,0.04)', borderLeft: `2px solid ${bearer ? ta.accent : 'rgba(255,255,255,0.06)'}` }}>
                       <span className="text-[9px] font-black w-4 shrink-0 text-right" style={{ color: ta.accent, opacity: 0.45 }}>{i + 1}</span>
                       <span className="text-[10px] font-black uppercase tracking-[0.12em] w-36 shrink-0" style={{ color: bearer ? ta.accent : '#334155' }}>{sword}</span>
-                      <div className="flex-1 min-w-0">
+                      <div className="flex-1 min-w-0 flex items-center gap-2">
                         {bearer
                           ? bearer.discord_link
                             ? <a href={bearer.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0' }} className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline block">{bearer.name}</a>
                             : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate block">{bearer.name}</span>
                           : <span className="text-xs italic text-slate-600">Vacant</span>
                         }
+                        {bearer?.status === 'pending' && <PendingBadge />}
                       </div>
-                      {canEdit && (
+                      {canAdd && (
                         <div className="flex gap-1 shrink-0">
                           {bearer
-                            ? <><AdminBtn icon={Pencil} onClick={() => setSwordsModal({ sword: bearer.meta?.sword, entry: bearer })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(bearer.id); try { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title="Remove" loading={deletingRosterId === bearer.id} /></>
+                            ? <>
+                                {canApproveRow(perms, bearer) && <AdminBtn icon={CheckCircle} onClick={() => handleApproveEntry(bearer.id)} color="#34d399" title="Approve" loading={approvingRosterId === bearer.id} />}
+                                {(canModifyRow(perms, bearer) || canApproveRow(perms, bearer)) && <><AdminBtn icon={Pencil} onClick={() => setSwordsModal({ sword: bearer.meta?.sword, entry: bearer })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(bearer.id); try { await supabase.from('roster_entries').delete().eq('id', bearer.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title={bearer.status === 'pending' ? 'Reject / Remove' : 'Remove'} loading={deletingRosterId === bearer.id} /></>}
+                              </>
                             : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setSwordsModal({ sword, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>
@@ -1601,6 +1768,7 @@ export default function RosterPage({ userRole, userId }) {
             entry={swordsModal.entry}
             initialSword={swordsModal.entry ? '' : swordsModal.sword}
             userId={userId}
+            asPending={!canEdit}
             onClose={() => setSwordsModal(null)}
             onSaved={() => { setSwordsModal(null); fetchData(); }} />
         )}
@@ -1628,19 +1796,23 @@ export default function RosterPage({ userRole, userId }) {
                         <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: host ? bColor : '#334155' }}>
                           {beast.label} <span className="text-[8px] normal-case tracking-normal font-semibold opacity-50">· {beast.sub}</span>
                         </p>
-                        <div className="mt-0.5">
+                        <div className="mt-0.5 flex items-center gap-2">
                           {host
                             ? host.discord_link
                               ? <a href={host.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0' }} className="text-sm font-semibold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline">{host.name}</a>
                               : <span className="text-sm font-semibold text-slate-200 tracking-wide">{host.name}</span>
                             : <span className="text-xs italic text-slate-600">No host</span>
                           }
+                          {host?.status === 'pending' && <PendingBadge />}
                         </div>
                       </div>
-                      {canEdit && (
+                      {canAdd && (
                         <div className="flex gap-1 shrink-0">
                           {host
-                            ? <><AdminBtn icon={Pencil} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: host })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(host.id); try { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title="Remove" loading={deletingRosterId === host.id} /></>
+                            ? <>
+                                {canApproveRow(perms, host) && <AdminBtn icon={CheckCircle} onClick={() => handleApproveEntry(host.id)} color="#34d399" title="Approve" loading={approvingRosterId === host.id} />}
+                                {(canModifyRow(perms, host) || canApproveRow(perms, host)) && <><AdminBtn icon={Pencil} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: host })} title="Edit" /><AdminBtn icon={Trash2} onClick={async () => { if (window.confirm('Remove?')) { setDeletingRosterId(host.id); try { await supabase.from('roster_entries').delete().eq('id', host.id); fetchData(); } finally { setDeletingRosterId(null); } }}} color="#f87171" title={host.status === 'pending' ? 'Reject / Remove' : 'Remove'} loading={deletingRosterId === host.id} /></>}
+                              </>
                             : <button className="flex items-center gap-1 px-2 py-0.5 rounded-sm text-[8px] font-black uppercase tracking-wider" style={{ background: ta.accentFaint, color: ta.accent, border: `1px solid ${ta.accentBorder}` }} onClick={() => setJinchurikiModal({ beastId: beast.id, entry: null })}><Plus size={8} /> Assign</button>
                           }
                         </div>
@@ -1657,11 +1829,12 @@ export default function RosterPage({ userRole, userId }) {
             entry={jinchurikiModal.entry}
             initialBeastId={jinchurikiModal.entry ? '' : jinchurikiModal.beastId}
             userId={userId}
+            asPending={!canEdit}
             onClose={() => setJinchurikiModal(null)}
             onSaved={() => { setJinchurikiModal(null); fetchData(); }} />
         )}
 
-        {mainTab === 'data' && <DataTab entries={entries} squads={squads} />}
+        {mainTab === 'data' && <DataTab entries={approvedEntries} squads={approvedSquads} />}
 
       </div>
 
@@ -1670,9 +1843,10 @@ export default function RosterPage({ userRole, userId }) {
           village={newSquadConfig.village}
           squadType={newSquadConfig.squadType}
           suggestedNumber={newSquadConfig.suggestedNumber}
-          entries={entries}
+          entries={approvedEntries}
           squads={squads}
           userId={userId}
+          asPending={!canEdit}
           onSaved={() => { setNewSquadConfig(null); fetchData(); }}
           onClose={() => setNewSquadConfig(null)}
         />

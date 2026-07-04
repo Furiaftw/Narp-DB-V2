@@ -1777,7 +1777,7 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
           {bl.proprietary_ability_link && (
             <a href={bl.proprietary_ability_link} target="_blank" rel="noopener noreferrer"
                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest px-2.5 py-1 bg-purple-50 text-purple-700 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors">
-              <Icon n="ExtLink" size={10} /> Ability
+              <Icon n="ExtLink" size={10} /> Exclusive Ability
             </a>
           )}
         </div>
@@ -1822,9 +1822,25 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
   const ORDER = ['Dojutsu', 'KKG', 'Hiden', 'Specialization', 'Other'];
   const SUBCAT_LABELS = { Dojutsu: 'Dojutsu', KKG: 'Kekkei Genkai', Hiden: 'Hiden', Specialization: 'Specialization', Other: 'Other' };
 
+  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [statsOpen, setStatsOpen] = useState(true);
+
   const toggleCat = (v) => setBF(p => ({ ...p, cat: p.cat.includes(v) ? p.cat.filter(x => x !== v) : [...p.cat, v] }));
   const toggleSub = (v) => setBF(p => ({ ...p, sub: p.sub.includes(v) ? p.sub.filter(x => x !== v) : [...p.sub, v] }));
   const activeCount = (bF?.cat?.length || 0) + (bF?.sub?.length || 0) + (bF?.q ? 1 : 0);
+
+  // Whole-database statistics (not affected by the filters)
+  const blStats = useMemo(() => {
+    const all = bloodlines || [];
+    const bySub = ORDER.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
+    all.forEach(b => { bySub[ORDER.includes(b.subcategory) ? b.subcategory : 'Other'] += 1; });
+    return {
+      total:  all.length,
+      canon:  all.filter(b => b.category === 'Canon').length,
+      custom: all.filter(b => b.category === 'Custom').length,
+      bySub,
+    };
+  }, [bloodlines]);
 
   const filtB = useMemo(() => {
     let list = bloodlines || [];
@@ -1856,10 +1872,52 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
     );
   }
 
+  const STAT_TILES = [
+    { label: 'Total',                     value: blStats.total,                 accent: 'text-slate-800' },
+    { label: 'Canon',                     value: blStats.canon,                 accent: 'text-indigo-600' },
+    { label: 'Custom',                    value: blStats.custom,                accent: 'text-purple-600' },
+    ...ORDER.map(s => ({ label: SUBCAT_LABELS[s], value: blStats.bySub[s], accent: 'text-slate-800' })),
+  ];
+
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      {/* Filter row */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 space-y-4 shadow-sm">
+      {/* Bloodline statistics */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+        <button onClick={() => setStatsOpen(o => !o)}
+                className="w-full flex items-center justify-between p-4 text-left">
+          <span className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+            <Icon n="Info" size={14} className="text-indigo-400" /> Bloodline Statistics
+          </span>
+          <Icon n={statsOpen ? 'Up' : 'Down'} size={16} className="text-slate-400" />
+        </button>
+        {statsOpen && (
+          <div className="px-4 pb-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+            {STAT_TILES.map(tile => (
+              <div key={tile.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
+                <p className={`text-xl font-black leading-tight ${tile.accent}`}>{tile.value}</p>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{tile.label}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Filter row (foldable) */}
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm">
+        <button onClick={() => setFiltersOpen(o => !o)}
+                className="w-full flex items-center justify-between p-4 text-left">
+          <span className="flex items-center gap-2 text-xs font-bold text-slate-500 uppercase tracking-widest">
+            <Icon n="Filter" size={14} className="text-indigo-400" /> Filters
+            {activeCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 text-[10px] font-black tracking-normal normal-case">
+                {activeCount} active
+              </span>
+            )}
+          </span>
+          <Icon n={filtersOpen ? 'Up' : 'Down'} size={16} className="text-slate-400" />
+        </button>
+        {filtersOpen && (
+        <div className="px-4 pb-4 space-y-4">
         <div className="flex flex-wrap gap-3 items-center">
           {/* Search */}
           <div className="relative flex-1 min-w-[160px]">
@@ -1916,6 +1974,8 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
             </button>
           ))}
         </div>
+        </div>
+        )}
       </div>
 
       {filtB.length === 0 ? (
@@ -1957,7 +2017,11 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [askSecondApproval, setAskSecondApproval] = useState(false);
+  // Admins creating a NEW jutsu default to requesting a second approval;
+  // they can still switch the toggle off for a direct write.
+  const [askSecondApproval, setAskSecondApproval] = useState(
+    () => isAdmin && tab === 'jutsus' && !isPendingEdit && !eRow?._id
+  );
 
   // FIX: Lock the document body scroll so iOS Safari doesn't crash on unmount
   useEffect(() => {
