@@ -230,6 +230,8 @@ export default function ReviewChat({
   refreshTrigger,
   refreshPending,
   onClose,
+  variant = 'drawer',
+  onRead = null,
 }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
@@ -301,6 +303,14 @@ export default function ReviewChat({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Report that the thread is being viewed so unread badges clear — on open
+  // and again whenever new messages arrive while the chat stays open.
+  const onReadRef = useRef(onRead);
+  onReadRef.current = onRead;
+  useEffect(() => {
+    onReadRef.current?.();
+  }, [pending.id, messages.length]);
 
   const handleSend = async (e) => {
     e?.preventDefault();
@@ -439,16 +449,8 @@ export default function ReviewChat({
     } catch { alert("Couldn't send the nudge. Please try again in a moment."); }
   };
 
-  return (
+  const inner = (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-40 bg-black/60 animate-in fade-in" onClick={onClose} />
-
-      {/* Drawer */}
-      <div
-        className="fixed inset-y-0 right-0 z-50 w-full md:w-[500px] bg-white flex flex-col shadow-2xl animate-in slide-in-from-right duration-200"
-        onClick={e => e.stopPropagation()}
-      >
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
@@ -740,6 +742,30 @@ export default function ReviewChat({
             </div>
           </>
         )}
+    </>
+  );
+
+  // Inline variant fills its parent (the split-view panel) — no backdrop, no
+  // fixed positioning. The parent supplies borders, rounding, and height.
+  if (variant === 'inline') {
+    return (
+      <div className="w-full h-full bg-white flex flex-col overflow-hidden">
+        {inner}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/60 animate-in fade-in" onClick={onClose} />
+
+      {/* Drawer */}
+      <div
+        className="fixed inset-y-0 right-0 z-50 w-full md:w-[500px] bg-white flex flex-col shadow-2xl animate-in slide-in-from-right duration-200"
+        onClick={e => e.stopPropagation()}
+      >
+        {inner}
       </div>
     </>
   );
