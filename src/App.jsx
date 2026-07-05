@@ -3074,6 +3074,7 @@ function PendingJutsuCard({
   isApproving = false,
   chatMeta = null,
   onChatOpened = null,
+  chatVariant = 'drawer',
 }) {
   const currentUser = { id: currentUserId, role: currentUserRole };
   const pendingItem = pending;
@@ -3334,7 +3335,25 @@ function PendingJutsuCard({
         )}
       </div>
 
-      {isChatOpen && (
+      {isChatOpen && chatVariant === 'inline' && (
+        <div className="border-t border-slate-200 mt-1 -mx-4 -mb-4 rounded-b-2xl overflow-hidden h-[70vh] min-h-[420px]">
+          <ReviewChat
+            pending={pending}
+            name={name}
+            currentUserId={currentUserId}
+            currentUserProfile={currentUserProfile}
+            isStaff={isStaff}
+            isStrictSubmitter={isStrictSubmitter}
+            isClaimed={isClaimed}
+            refreshTrigger={refreshTrigger}
+            refreshPending={refreshPending}
+            onClose={() => setIsChatOpen(false)}
+            onRead={onChatOpened}
+            variant="inline"
+          />
+        </div>
+      )}
+      {isChatOpen && chatVariant !== 'inline' && (
         <ReviewChat
           pending={pending}
           name={name}
@@ -4988,6 +5007,7 @@ export default function App() {
                           isApproving={approvingIds.has(expandedPending.id)}
                           chatMeta={getPendingChatMeta(expandedPending)}
                           onChatOpened={() => markChatRead(expandedPending.id)}
+                          chatVariant="inline"
                         />
                       </div>
                     ) : (
