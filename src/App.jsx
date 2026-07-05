@@ -9,6 +9,7 @@ import {
   upsertBloodline,
   deleteBloodline,
   setSpecializations as saveSpecializationsToSupabase,
+  setJutsuTypeTags as saveJutsuTypeTagsToSupabase,
   signInWithDiscord,
   signInWithDevAccess,
   signOut,
@@ -77,7 +78,8 @@ const STORAGE = {
    --------------------------------------------------------------------------- */
 const SPECIALIZATION_OPTIONS = ['Bukijutsu', 'Fuinjutsu', 'Genjutsu', 'Medical Ninjutsu', 'Ninjutsu', 'Nintaijutsu', 'Taijutsu', 'Kinjutsu'];
 const NATURES                = ['Fire', 'Water', 'Lightning', 'Earth', 'Wind', 'Yang', 'Yin', 'Sound'];
-const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode', 'Defensive'];
+const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode'];
+const JUTSU_TYPE_TAG_OPTIONS = ['Offensive', 'Defensive', 'Mobility', 'Utility', 'Sensory', 'Multi-Purpose'];
 const RANKS                  = ['E', 'D', 'C', 'B', 'A', 'S'];
 const ORIGIN                 = ['Canon', 'Custom'];
 const BL_CATS                = ['Canon', 'Custom'];
@@ -447,6 +449,7 @@ const STATIC_SEED = {
   jutsus:          multiplyData(baseJutsus, 'j', 8),
   bloodlines:      multiplyData(baseBloodlines, 'bl', 8),
   specializations: SPECIALIZATION_OPTIONS,
+  jutsuTypeTags:   JUTSU_TYPE_TAG_OPTIONS,
 };
 
 /* ---------------------------------------------------------------------------
@@ -459,7 +462,8 @@ const MANAGE_TABLES = {
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
       { k: 'link',        l: 'Doc Link',                               col: 1 },
       { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
-      { k: 'types',       l: 'Jutsu Types',     t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
+      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', col: 1 },
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
@@ -504,6 +508,7 @@ const normalizeDB = (d) => ({
       nature:      j.nature || '',
       rank:        rArr,
       types:       toArray(j.types),
+      jutsu_type:  toArray(j.jutsu_type),
       origin:      j.origin || '',
       spec:        toArray(j.spec),
       link:        j.link || '',
@@ -536,6 +541,7 @@ const normalizeDB = (d) => ({
     : STATIC_SEED.bloodlines,
 
   specializations: Array.isArray(d.specializations) ? d.specializations : STATIC_SEED.specializations,
+  jutsuTypeTags:   Array.isArray(d.jutsuTypeTags) ? d.jutsuTypeTags : STATIC_SEED.jutsuTypeTags,
 });
 
 const loadDB = async () => {
@@ -961,6 +967,11 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
         <div className="flex flex-wrap gap-1.5 mb-5 items-center">
           {[...toArray(j.spec), ...tArr, ...cTags].map((s, i) => (
             <span key={i} className="text-xs font-semibold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
+              {s}
+            </span>
+          ))}
+          {toArray(j.jutsu_type).map((s, i) => (
+            <span key={`jty-${i}`} className="text-xs font-semibold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-200">
               {s}
             </span>
           ))}
@@ -1401,7 +1412,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
           {activeFilterCount > 0 && (
             <div className="flex flex-wrap items-center gap-2 pt-1 pb-1">
               <span className="text-xs font-bold text-slate-400 mr-1 shrink-0 uppercase tracking-widest">Active:</span>
-              {['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'].map(k =>
+              {['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm', 'jty'].map(k =>
                 f[k].map(v => <ActiveChip key={`${k}-${v}`} label={v} onRemove={() => toggleArr(k, v)} />)
               )}
               {TOGGLE_PAIRS.map(p => f[p.showKey] && (
@@ -1426,7 +1437,7 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
    This eliminates layout reflow on open (scroll delay) and lets the fixed-
    position dropdown panels escape the viewport freely.
    ============================================================================ */
-function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
+function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions, jutsuTypeTagOptions }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
@@ -1457,8 +1468,8 @@ function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
         <div>
           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Basic Properties</h3>
           <div className="space-y-6">
-            <ChipFilter title="Nature"      values={NATURES}     fKey="nat" />
-            <ChipFilter title="Jutsu Types" values={JUTSU_TYPES} fKey="typ" />
+            <ChipFilter title="Nature"        values={NATURES}     fKey="nat" />
+            <ChipFilter title="Jutsu Category" values={JUTSU_TYPES} fKey="typ" />
             {f.typ.includes('Battlemode') && (
               <div className="p-3 bg-indigo-50 border border-indigo-100 rounded-xl">
                 <ChipFilter title="Battlemode Tiers" values={BM_TIERS} fKey="bm" />
@@ -1473,12 +1484,17 @@ function FilterBarPanel({ tab, f, setF, bloodlinesDb, specOptions }) {
 
         <div>
           <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-5 border-b border-slate-200 pb-2">Detailed Tags</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl">
             <GenericDropdown
               l="Specialization" placeholder="Any Specialization"
               opts={specOptions.map(s => ({ value: s, label: s }))}
               sel={f.spc} onChange={v => setF(p => ({ ...p, spc: v }))}
               isOpen={ddOpen === 'f_spc'} onToggle={() => setDdOpen(ddOpen === 'f_spc' ? null : 'f_spc')} />
+            <GenericDropdown
+              l="Jutsu Type" placeholder="Any Jutsu Type"
+              opts={jutsuTypeTagOptions.map(s => ({ value: s, label: s }))}
+              sel={f.jty} onChange={v => setF(p => ({ ...p, jty: v }))}
+              isOpen={ddOpen === 'f_jty'} onToggle={() => setDdOpen(ddOpen === 'f_jty' ? null : 'f_jty')} />
             <BloodlineDropdown
               l="Bloodlines" placeholder="Any Bloodline"
               bloodlinesDb={bloodlinesDb}
@@ -1825,8 +1841,8 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
   const ORDER = ['Dojutsu', 'KKG', 'Hiden', 'Specialization', 'Other'];
   const SUBCAT_LABELS = { Dojutsu: 'Dojutsu', KKG: 'Kekkei Genkai', Hiden: 'Hiden', Specialization: 'Specialization', Other: 'Other' };
 
-  const [filtersOpen, setFiltersOpen] = useState(true);
-  const [statsOpen, setStatsOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const toggleCat = (v) => setBF(p => ({ ...p, cat: p.cat.includes(v) ? p.cat.filter(x => x !== v) : [...p.cat, v] }));
   const toggleSub = (v) => setBF(p => ({ ...p, sub: p.sub.includes(v) ? p.sub.filter(x => x !== v) : [...p.sub, v] }));
@@ -2091,6 +2107,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         rank,
         cost:        p.cost || '',
         types,
+        jutsu_type:  toArray(p.jutsu_type),
         origin:      p.origin || '',
         spec:        toArray(p.spec),
         custom_tags: toArray(p.custom_tags),
@@ -2195,6 +2212,14 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
                   <GenericDropdown
                     l="" placeholder="Select Specializations"
                     opts={(db.specializations || []).map(s => ({ value: s, label: s }))}
+                    sel={toArray(fd[field.k])}
+                    onChange={v => setFd({ ...fd, [field.k]: v.join(', ') })}
+                    isOpen={ddOpen === field.k}
+                    onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
+                ) : field.t === 'ttag-dd' ? (
+                  <GenericDropdown
+                    l="" placeholder="Select Jutsu Type(s)"
+                    opts={(db.jutsuTypeTags || []).map(s => ({ value: s, label: s }))}
                     sel={toArray(fd[field.k])}
                     onChange={v => setFd({ ...fd, [field.k]: v.join(', ') })}
                     isOpen={ddOpen === field.k}
@@ -2374,6 +2399,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [newTtag, setNewTtag] = useState('');
+  const [pendingDelTtag, setPendingDelTtag] = useState(null);
   const [togglePending, setTogglePending] = useState({});
 
   const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
@@ -2442,6 +2469,30 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
     });
     setMsg(`Removed '${pendingDel}'.`);
     setPendingDel(null);
+  };
+
+  const addTtag = () => {
+    const v = newTtag.trim();
+    if (!v) return;
+    if (db.jutsuTypeTags.includes(v)) { setMsg(`'${v}' is already in the list.`); return; }
+    setDb(d => {
+      const next = [...d.jutsuTypeTags, v];
+      if (isSupabaseConfigured()) saveJutsuTypeTagsToSupabase(next).catch(e => console.warn('[NARP] save jutsu type tags failed:', e));
+      return { ...d, jutsuTypeTags: next };
+    });
+    setNewTtag('');
+    setMsg(`Added '${v}'.`);
+  };
+
+  const confirmDelTtag = () => {
+    if (!pendingDelTtag) return;
+    setDb(d => {
+      const next = d.jutsuTypeTags.filter(x => x !== pendingDelTtag);
+      if (isSupabaseConfigured()) saveJutsuTypeTagsToSupabase(next).catch(e => console.warn('[NARP] save jutsu type tags failed:', e));
+      return { ...d, jutsuTypeTags: next };
+    });
+    setMsg(`Removed '${pendingDelTtag}'.`);
+    setPendingDelTtag(null);
   };
 
   const exportJson = () => {
@@ -2635,6 +2686,33 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               </div>
             </div>
 
+            {/* Manage Jutsu Type Tags */}
+            <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+              <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+                <Icon n="Tag" size={20} className="text-sky-500" /> Manage Jutsu Type Tags
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the Jutsu Type list (Offensive, Defensive, Mobility, etc.).</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {(db.jutsuTypeTags || []).map(s => (
+                  <span key={s} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-2 shadow-sm">
+                    {s}
+                    <button onClick={() => setPendingDelTtag(s)} className="text-red-400 hover:text-red-600">
+                      <Icon n="X" size={14}/>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newTtag} onChange={e => setNewTtag(e.target.value)}
+                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTtag(); } }}
+                       placeholder="New jutsu type tag..."
+                       className="flex-1 border rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                <button onClick={addTtag} className="bg-sky-600 hover:bg-sky-700 text-white px-6 py-2 rounded-xl font-bold transition-colors">
+                  Add
+                </button>
+              </div>
+            </div>
+
             {/* Webhook Config — owner only */}
             {isOwner && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
@@ -2674,6 +2752,20 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               <div className="flex gap-3">
                 <button onClick={() => setPendingDel(null)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Cancel</button>
                 <button onClick={confirmDelSpec}            className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-md">Remove</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Confirm-delete sub-modal for jutsu type tags */}
+        {pendingDelTtag && (
+          <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4" onClick={() => setPendingDelTtag(null)}>
+            <div className="bg-white p-6 rounded-3xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold text-xl mb-2 text-slate-900">Remove jutsu type tag?</h3>
+              <p className="text-sm text-slate-600 mb-6">Remove '{pendingDelTtag}' from the global list? Existing jutsus that already use it will keep the value.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setPendingDelTtag(null)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Cancel</button>
+                <button onClick={confirmDelTtag}                className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-md">Remove</button>
               </div>
             </div>
           </div>
@@ -3475,14 +3567,14 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
    ============================================================================ */
 const INITIAL_FILTER_STATE = {
   q: '',
-  nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [],
+  nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [], jty: [],
   lck: false, lim: false, pve: false, mul: false,
   hLck: false, hLim: false, hPve: false, hMul: false, hMP: false, hAsk: false,
   showFilters: false,
   sort: 'az',
 };
 
-const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm'];
+const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm', 'jty'];
 const BOOL_FILTER_KEYS  = ['lck', 'lim', 'pve', 'mul', 'hLck', 'hLim', 'hPve', 'hMul', 'hMP', 'hAsk'];
 
 const getPendingAssignedId = (p) => {
@@ -3507,7 +3599,7 @@ export default function App() {
   const [headerHeight, setHeaderHeight] = useState(72);
   const [visibleCount, setVisibleCount] = useState(200);
 
-  const [db, setDb]           = useState({ jutsus: [], bloodlines: [], specializations: [] });
+  const [db, setDb]           = useState({ jutsus: [], bloodlines: [], specializations: [], jutsuTypeTags: [] });
   const [loading, setLoading] = useState(true);
 
   const [profile, setProfile] = useState(null);
@@ -4457,6 +4549,14 @@ export default function App() {
     return [...specs].sort((a, b) => a.localeCompare(b));
   }, [db.specializations, f.sort]);
 
+  const sortedJutsuTypeTags = useMemo(() => {
+    const tags = db.jutsuTypeTags || [];
+    if (f.sort === 'za')     return [...tags].sort((a, b) => b.localeCompare(a));
+    if (f.sort === 'oldest') return [...tags];
+    if (f.sort === 'newest') return [...tags].reverse();
+    return [...tags].sort((a, b) => a.localeCompare(b));
+  }, [db.jutsuTypeTags, f.sort]);
+
   const filtJ = useMemo(() => {
     const lowerQ = f.q.toLowerCase();
     return (db.jutsus || []).filter(j =>
@@ -4467,6 +4567,7 @@ export default function App() {
       (!f.org.length || f.org.includes(j.origin)) &&
       (!f.spc.length || f.spc.some(s => toArray(j.spec).includes(s))) &&
       (!f.typ.length || f.typ.some(t => toArray(j.types).includes(t))) &&
+      (!f.jty.length || f.jty.some(t => toArray(j.jutsu_type).includes(t))) &&
       (!f.rnk.length || f.rnk.some(r => toArray(j.rank).includes(r))) &&
       (!f.bm.length  || f.bm.includes(j.bm_tier)) &&
       (!f.bl.length  || f.bl.includes(j.bloodline)) &&
@@ -4750,7 +4851,8 @@ export default function App() {
         <FilterBarPanel
           tab={tab} f={f} setF={setF}
           bloodlinesDb={sortedBloodlines}
-          specOptions={sortedSpecs} />
+          specOptions={sortedSpecs}
+          jutsuTypeTagOptions={sortedJutsuTypeTags} />
       )}
 
       {/* TAB BAR */}
