@@ -644,6 +644,7 @@ export const fromRowJutsu = (row) => ({
   rank:        row.rank || [],
   cost:        row.cost || '',
   types:       row.types || [],
+  jutsu_type:  row.jutsu_type || [],
   origin:      row.origin || '',
   spec:        row.spec || [],
   link:        row.link || '',
@@ -667,6 +668,7 @@ const toRowJutsu = (j, withId = true) => {
     rank:        j.rank || [],
     cost:        j.cost || null,
     types:       j.types || [],
+    jutsu_type:  j.jutsu_type || [],
     origin:      j.origin || null,
     spec:        j.spec || [],
     link:        j.link || null,
@@ -720,19 +722,21 @@ export const buildJutsuPayload = (j, includeId = false) => toRowJutsu(j, include
 export const fetchAllFromSupabase = async () => {
   if (!supabase) return null;
 
-  const [jRes, bRes, sRes] = await Promise.all([
+  const [jRes, bRes, sRes, ttRes] = await Promise.all([
     supabase.from('jutsus').select('*').order('created_at', { ascending: false }),
     supabase.from('bloodlines').select('*').order('created_at', { ascending: false }),
     supabase.from('specializations').select('*').order('created_at', { ascending: true }),
+    supabase.from('jutsu_type_tags').select('*').order('created_at', { ascending: true }),
   ]);
 
-  const errs = [jRes, bRes, sRes].filter(r => r.error).map(r => r.error.message);
+  const errs = [jRes, bRes, sRes, ttRes].filter(r => r.error).map(r => r.error.message);
   if (errs.length) throw new Error('Supabase fetch failed: ' + errs.join('; '));
 
   return {
     jutsus:          (jRes.data || []).map(fromRowJutsu),
     bloodlines:      (bRes.data || []).map(fromRowBloodline),
     specializations: (sRes.data || []).map(s => s.name),
+    jutsuTypeTags:   (ttRes.data || []).map(t => t.name),
   };
 };
 
@@ -768,6 +772,15 @@ export const setSpecializations = async (names) => {
   if (delError) throw delError;
   if (names.length === 0) return;
   const { error } = await supabase.from('specializations').insert(names.map(name => ({ name })));
+  if (error) throw error;
+};
+
+export const setJutsuTypeTags = async (names) => {
+  if (!supabase) return;
+  const { error: delError } = await supabase.from('jutsu_type_tags').delete().neq('name', '___never___');
+  if (delError) throw delError;
+  if (names.length === 0) return;
+  const { error } = await supabase.from('jutsu_type_tags').insert(names.map(name => ({ name })));
   if (error) throw error;
 };
 
