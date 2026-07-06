@@ -729,14 +729,21 @@ export const fetchAllFromSupabase = async () => {
     supabase.from('jutsu_type_tags').select('*').order('created_at', { ascending: true }),
   ]);
 
-  const errs = [jRes, bRes, sRes, ttRes].filter(r => r.error).map(r => r.error.message);
+  // The core catalog tables are required — without them there is nothing to show.
+  const errs = [jRes, bRes].filter(r => r.error).map(r => r.error.message);
   if (errs.length) throw new Error('Supabase fetch failed: ' + errs.join('; '));
+
+  // The tag catalogs are optional: if one is missing (e.g. its migration hasn't
+  // been applied yet) return null for it so normalizeDB falls back to the
+  // built-in defaults instead of the whole site dropping to the local cache.
+  if (sRes.error) console.warn('[NARP] Could not load specializations; using built-in defaults.', sRes.error.message);
+  if (ttRes.error) console.warn('[NARP] Could not load jutsu_type_tags; using built-in defaults.', ttRes.error.message);
 
   return {
     jutsus:          (jRes.data || []).map(fromRowJutsu),
     bloodlines:      (bRes.data || []).map(fromRowBloodline),
-    specializations: (sRes.data || []).map(s => s.name),
-    jutsuTypeTags:   (ttRes.data || []).map(t => t.name),
+    specializations: sRes.error ? null : (sRes.data || []).map(s => s.name),
+    jutsuTypeTags:   ttRes.error ? null : (ttRes.data || []).map(t => t.name),
   };
 };
 
