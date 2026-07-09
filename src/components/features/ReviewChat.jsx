@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   supabase,
   fetchReviewChats,
@@ -8,8 +8,22 @@ import {
   updatePendingJutsuData,
   getCurrentSession,
 } from '../../lib/supabase';
-import { renderMessageWithLinks, getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
 import Icon from '../ui/Icon';
+import ConfirmButton from '../ui/ConfirmButton';
+import useIsDesktop from '../../hooks/useIsDesktop';
+
+/*
+ * System message posted when a reviewer joins a claimed chat. Also acts as the
+ * persistence for join state: anyone with a message in the thread (join marker
+ * included) counts as having entered the chat.
+ */
+export const JOIN_PREFIX = '[SYSTEM_JOIN]';
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Website display name: custom site nickname wins over the Discord username.
+const displayNameOf = (p) => p?.site_nickname || p?.username || 'Unknown User';
 
 /* ---- SystemFinalStepBlock -------------------------------------------------- */
 
@@ -242,12 +256,76 @@ export default function ReviewChat({
   const [deletingId, setDeletingId] = useState(null);
   const [isActivating, setIsActivating] = useState(false);
   const [nudgeCooldown, setNudgeCooldown] = useState(false);
+  const [isJoiningChat, setIsJoiningChat] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
+  const [mentionIndex, setMentionIndex] = useState(0);
   const messagesEndRef = useRef(null);
   const profileCacheRef = useRef({});
+  const inputRef = useRef(null);
+  const isDesktop = useIsDesktop();
 
   const visibleMessages = messages.filter(m =>
     isStaff || m.is_staff_only === false || m.is_staff_only === null || m.is_staff_only === undefined
   );
+
+  const assignedId = pending?.assigned_to && typeof pending.assigned_to === 'object'
+    ? pending.assigned_to.id
+    : pending?.assigned_to;
+
+  /* Everyone who entered this chat: submitter, claimer, and message senders
+     (a join marker is a message, so joined reviewers are included). Feeds the
+     @mention picker and the mention-highlight renderer. */
+  const participants = useMemo(() => {
+    const map = new Map();
+    const add = (id, prof) => {
+      if (!id || !prof) return;
+      const existing = map.get(id);
+      // Prefer entries that carry a discord_id so mention pings can be delivered
+      if (!existing || (!existing.discord_id && prof.discord_id)) map.set(id, { id, ...prof });
+    };
+    add(pending?.submitted_by, pending?.submitter);
+    add(assignedId, pending?.assignee);
+    messages.forEach(m => add(m.sender_id, m.profiles));
+    return [...map.values()];
+  }, [messages, pending, assignedId]);
+
+  const hasJoined =
+    isStrictSubmitter ||
+    currentUserId === assignedId ||
+    messages.some(m => m.sender_id === currentUserId);
+
+  // Highlights any "@Website Name" / "@discordname" of a chat participant.
+  const mentionRegex = useMemo(() => {
+    const names = [...new Set(participants.flatMap(p => [p.site_nickname, p.username]).filter(Boolean))]
+      .sort((a, b) => b.length - a.length)
+      .map(escapeRegex);
+    return names.length ? new RegExp(`@(${names.join('|')})`, 'gi') : null;
+  }, [participants]);
+
+  const renderMessageBody = (text, isMe) => {
+    if (!text) return '';
+    const urlParts = String(text).split(/(https?:\/\/[^\s]+)/g);
+    return urlParts.map((part, i) => {
+      if (/^https?:\/\//.test(part)) {
+        return (
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 hover:underline">
+            {part}
+          </a>
+        );
+      }
+      if (!mentionRegex) return part;
+      const segs = part.split(mentionRegex);
+      if (segs.length === 1) return part;
+      return segs.map((seg, j) => j % 2 === 1
+        ? (
+          <span key={`${i}-${j}`} className={`font-bold rounded px-1 ${isMe ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+            @{seg}
+          </span>
+        )
+        : seg
+      );
+    });
+  };
 
   // Load messages on open / parent refresh
   useEffect(() => {
@@ -272,7 +350,7 @@ export default function ReviewChat({
             try {
               const { data, error } = await supabase
                 .from('profiles')
-                .select('username, site_nickname, avatar_url, role')
+                .select('username, site_nickname, avatar_url, role, discord_id')
                 .eq('id', newChat.sender_id)
                 .single();
               if (!error && data) {
@@ -312,14 +390,129 @@ export default function ReviewChat({
     onReadRef.current?.();
   }, [pending.id, messages.length]);
 
+  /* ---- @mention picker ------------------------------------------------- */
+
+  const updateMentionState = (value, caret) => {
+    const before = value.slice(0, caret ?? value.length);
+    const m = before.match(/(^|\s)@([^\n@]*)$/);
+    setMentionQuery(m ? m[2] : null);
+    setMentionIndex(0);
+  };
+
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return participants
+      .filter(p => p.id !== currentUserId)
+      .filter(p => !q
+        || (p.site_nickname || '').toLowerCase().includes(q)
+        || (p.username || '').toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionQuery, participants, currentUserId]);
+
+  // Inserts the participant's *website* display name, even when the query
+  // matched their Discord username.
+  const insertMention = (p) => {
+    const el = inputRef.current;
+    const caret = el ? el.selectionStart : input.length;
+    const before = input.slice(0, caret);
+    const after = input.slice(caret);
+    const m = before.match(/(^|\s)@([^\n@]*)$/);
+    if (!m) { setMentionQuery(null); return; }
+    const start = before.length - m[2].length - 1; // index of the '@'
+    const display = displayNameOf(p);
+    setInput(input.slice(0, start) + '@' + display + ' ' + after);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      if (el) {
+        el.focus();
+        const pos = start + display.length + 2;
+        el.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const handleInputKeyDown = (e) => {
+    if (mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % mentionMatches.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIndex(i => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(mentionMatches[mentionIndex]); return; }
+      if (e.key === 'Escape') { setMentionQuery(null); return; }
+    }
+    // Desktop: Enter sends, Shift+Enter adds a line. Mobile: Enter adds a line;
+    // sending happens via the Send button.
+    if (e.key === 'Enter' && !e.shiftKey && isDesktop) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const autoResizeInput = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  };
+
+  // Keep the textarea height in sync when input changes programmatically
+  // (mention insertion, clearing after send).
+  useEffect(() => { autoResizeInput(inputRef.current); }, [input]);
+
+  // Discord-DM every @mentioned participant (fire-and-forget).
+  const sendMentionPings = async (text) => {
+    const lower = text.toLowerCase();
+    const mentioned = participants.filter(p => {
+      if (p.id === currentUserId || !p.discord_id) return false;
+      return [p.site_nickname, p.username]
+        .filter(Boolean)
+        .some(n => lower.includes('@' + n.toLowerCase()));
+    });
+    if (!mentioned.length) return;
+    try {
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      const senderName = displayNameOf(currentUserProfile) || 'Someone';
+      const excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+      mentioned.forEach(p => {
+        fetch('/.netlify/functions/discord-dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHdr },
+          body: JSON.stringify({
+            discordUserId: p.discord_id,
+            message: `💬 **${senderName}** mentioned you in the Review Chat for **${name}**:\n> ${excerpt}`,
+          }),
+        }).catch(err => console.warn('[NARP] Mention ping failed:', err));
+      });
+    } catch (err) {
+      console.warn('[NARP] Mention ping skipped:', err);
+    }
+  };
+
+  const handleJoinChat = async () => {
+    if (isJoiningChat || hasJoined) return;
+    setIsJoiningChat(true);
+    try {
+      const dn = displayNameOf(currentUserProfile) || 'A reviewer';
+      await sendReviewChat(pending.id, `${JOIN_PREFIX} ${dn} joined the review chat`, false);
+      const fresh = await fetchReviewChats(pending.id);
+      if (fresh) setMessages(fresh);
+    } catch (err) {
+      alert('Could not join the chat: ' + (err.message || err));
+    } finally {
+      setIsJoiningChat(false);
+    }
+  };
+
   const handleSend = async (e) => {
     e?.preventDefault();
     const text = input.trim();
     if (!text || isSending) return;
     setIsSending(true);
+    setMentionQuery(null);
     try {
       await sendReviewChat(pending.id, text, false);
       setInput('');
+      if (inputRef.current) inputRef.current.style.height = 'auto';
+      sendMentionPings(text);
       const fresh = await fetchReviewChats(pending.id);
       if (fresh) setMessages(fresh);
       // Fire-and-forget push notification to other participants
@@ -511,6 +704,18 @@ export default function ReviewChat({
                 </div>
               ) : (
                 visibleMessages.map((msg) => {
+                  if (msg.message?.startsWith(JOIN_PREFIX)) {
+                    return (
+                      <div key={msg.id} className="flex justify-center my-1">
+                        <span className="text-[11px] font-semibold text-slate-500 bg-slate-200/80 border border-slate-300/60 px-3 py-1 rounded-full flex items-center gap-1.5">
+                          👋 {msg.message.replace(JOIN_PREFIX, '').trim()}
+                          <span className="text-slate-400 font-normal">
+                            · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  }
                   if (msg.message?.startsWith('[SYSTEM_FINAL_STEP]')) {
                     return (
                       <SystemFinalStepBlock
@@ -645,7 +850,7 @@ export default function ReviewChat({
                               )}
                             </div>
                             <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                              {renderMessageWithLinks(msg.message)}
+                              {renderMessageBody(msg.message, isMe)}
                             </p>
                           </>
                         )}
@@ -703,7 +908,7 @@ export default function ReviewChat({
                       {nudgeReviewerLocked ? 'Nudge available in ~30 min' : nudgeCooldown ? 'Nudge Sent!' : 'Nudge Reviewer'}
                     </button>
                   )}
-                  {isStaff && (
+                  {isStaff && hasJoined && (
                     <button
                       type="button"
                       onClick={handleNudgeSubmitter}
@@ -719,26 +924,104 @@ export default function ReviewChat({
                   )}
                 </div>
               )}
-              <form onSubmit={handleSend} className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  disabled={isSending}
-                  placeholder={isStaff ? 'Type a message to the player...' : 'Type a message to the team...'}
-                  className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-60"
-                />
-                <button
-                  type="submit"
-                  disabled={isSending}
-                  className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60"
-                >
-                  {isSending
-                    ? <><Icon n="Refresh" size={14} className="animate-spin" /> Sending</>
-                    : <>Send <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg></>
-                  }
-                </button>
-              </form>
+              {isStaff && !hasJoined ? (
+                /* Spectator mode: reviewers can read the chat, but must join
+                   before sending messages or taking review actions. */
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-slate-500 text-center font-medium">
+                    You're viewing this chat as a spectator. Join to send messages and take review actions.
+                  </p>
+                  <ConfirmButton
+                    onConfirm={handleJoinChat}
+                    disabled={isJoiningChat}
+                    armedLabel="Click again to join"
+                    armedClassName="ring-2 ring-indigo-300 animate-pulse"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-1.5 disabled:opacity-60 transition-all"
+                    title="Join this review chat"
+                  >
+                    {isJoiningChat
+                      ? <><Icon n="Refresh" size={14} className="animate-spin" /> Joining…</>
+                      : <>👋 Join Chat</>}
+                  </ConfirmButton>
+                </div>
+              ) : (
+                <div className="relative">
+                  {mentionMatches.length > 0 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10">
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        In this chat
+                      </div>
+                      {mentionMatches.map((p, i) => {
+                        const display = displayNameOf(p);
+                        const showDiscord = p.username && p.username !== display;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); insertMention(p); }}
+                            onMouseEnter={() => setMentionIndex(i)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                              i === mentionIndex ? 'bg-indigo-50' : 'bg-white'
+                            }`}
+                          >
+                            {p.avatar_url ? (
+                              <img
+                                src={getNetlifyImageUrl(p.avatar_url, 24)}
+                                srcSet={getNetlifyImageSrcSet(p.avatar_url)}
+                                alt=""
+                                className="w-6 h-6 rounded-full object-cover shrink-0"
+                                width={24} height={24} loading="lazy"
+                              />
+                            ) : (
+                              <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500 shrink-0">
+                                {display.slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                            <span className="text-sm font-bold text-slate-800 truncate">{display}</span>
+                            {showDiscord && (
+                              <span className="text-xs text-slate-400 truncate">@{p.username}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <form onSubmit={handleSend} className="flex gap-2 items-end">
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      rows={1}
+                      onChange={e => {
+                        setInput(e.target.value);
+                        autoResizeInput(e.target);
+                        updateMentionState(e.target.value, e.target.selectionStart);
+                      }}
+                      onKeyDown={handleInputKeyDown}
+                      onClick={e => updateMentionState(e.target.value, e.target.selectionStart)}
+                      onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
+                      disabled={isSending}
+                      placeholder={isStaff ? 'Type a message to the player... (@ to ping)' : 'Type a message to the team... (@ to ping)'}
+                      className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-60 resize-none overflow-y-auto leading-relaxed"
+                      style={{ maxHeight: 140 }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSending}
+                      className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60"
+                    >
+                      {isSending
+                        ? <><Icon n="Refresh" size={14} className="animate-spin" /> Sending</>
+                        : <>Send <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg></>
+                      }
+                    </button>
+                  </form>
+                  {isDesktop && (
+                    <p className="text-[10px] text-slate-400 mt-1.5 px-1 select-none">
+                      Enter to send · Shift+Enter for a new line · @ to ping someone in this chat
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}

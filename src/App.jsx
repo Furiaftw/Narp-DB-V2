@@ -28,6 +28,7 @@ import {
   removeFromWhitelist,
   fetchPendingJutsus,
   submitPendingJutsu,
+  sendReviewChat,
   reviewPendingJutsu,
   updatePendingJutsuData,
   subscribeToDatabaseChanges,
@@ -53,7 +54,8 @@ import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
 import MessagesPage from './pages/MessagesPage';
-import ReviewChat from './components/features/ReviewChat';
+import ReviewChat, { JOIN_PREFIX } from './components/features/ReviewChat';
+import ConfirmButton from './components/ui/ConfirmButton';
 import useIsDesktop from './hooks/useIsDesktop';
 
 
@@ -3195,7 +3197,8 @@ function PendingJutsuCard({
   const name = display.name || originalJutsu?.name || '(no name)';
 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [hasSubmitterChatted, setHasSubmitterChatted] = useState(false);
+  const [chatSenderIds, setChatSenderIds] = useState(() => new Set());
+  const [isJoiningChat, setIsJoiningChat] = useState(false);
 
   const isClaimed = !!(
     pendingItem.assigned_to !== null &&
@@ -3232,17 +3235,44 @@ function PendingJutsuCard({
       ? 'text-yellow-500'
       : 'text-green-500';
 
-  // For non-admin staff: check if the submitter has ever sent a message
+  // For staff: scan who has sent messages in this chat. Feeds two gates:
+  // whether the submitter ever chatted, and whether the current reviewer has
+  // entered the chat (a [SYSTEM_JOIN] marker is a message from the joiner).
   useEffect(() => {
-    if (!hasStaffPrivileges || ['admin', 'owner'].includes(currentUser.role) || !pending?.id || !supabase) return;
+    if (!hasStaffPrivileges || !pending?.id || !supabase) return;
     supabase
       .from('pending_chats')
-      .select('id')
+      .select('sender_id')
       .eq('pending_id', pending.id)
-      .eq('sender_id', pending.submitted_by)
-      .limit(1)
-      .then(({ data }) => { setHasSubmitterChatted((data || []).length > 0); });
-  }, [pending.id, pending.submitted_by, hasStaffPrivileges, currentUser.role, refreshTrigger]);
+      .then(({ data }) => { setChatSenderIds(new Set((data || []).map(r => r.sender_id))); });
+  }, [pending.id, hasStaffPrivileges, refreshTrigger]);
+
+  const hasSubmitterChatted = chatSenderIds.has(pending.submitted_by);
+
+  const assignedId = pendingItem.assigned_to && typeof pendingItem.assigned_to === 'object'
+    ? pendingItem.assigned_to.id
+    : pendingItem.assigned_to;
+  const iAmAssignee = isClaimed && assignedId === currentUserId;
+  const hasEnteredChat = iAmAssignee || chatSenderIds.has(currentUserId);
+  // Once someone else claims the entry, other reviewers must join the review
+  // chat before they can review, approve, deny, or edit it. Reading stays open.
+  const mustJoinToAct = isClaimed && hasStaffPrivileges && !hasEnteredChat;
+
+  const handleJoinChat = async () => {
+    if (isJoiningChat || hasEnteredChat) return;
+    setIsJoiningChat(true);
+    try {
+      const dn = currentUserProfile?.site_nickname || currentUserProfile?.username || 'A reviewer';
+      await sendReviewChat(pending.id, `${JOIN_PREFIX} ${dn} joined the review chat`, false);
+      setChatSenderIds(prev => new Set([...prev, currentUserId]));
+      setIsChatOpen(true);
+      onChatOpened?.();
+    } catch (err) {
+      alert('Could not join the chat: ' + (err.message || err));
+    } finally {
+      setIsJoiningChat(false);
+    }
+  };
 
   return (
     <div className={`bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3 transition-all duration-500 ${isApproving ? 'opacity-40 scale-95 pointer-events-none' : ''}`}>
@@ -3322,62 +3352,96 @@ function PendingJutsuCard({
       <div className="flex gap-2 mt-1 flex-wrap">
         {isClaimed ? (
           <>
-            {/* ── All action buttons — only visible once the entry is claimed ── */}
-            {pending.status === 'pending_review' ? (
-              hasStaffPrivileges ? (
-                <>
-                  <button onClick={() => onReview(pending.id)}
-                          className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                    <Icon n="Check" size={14}/> Begin Second Review
-                  </button>
-                  {['admin', 'owner'].includes(currentUser.role) && (
-                    <button onClick={() => onApprove(pending.id)}
-                            disabled={isApproving}
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+            {mustJoinToAct ? (
+              /* ── Claimed by someone else and not in the chat yet: reviewing,
+                    approving, denying, and editing are locked behind joining. ── */
+              <ConfirmButton
+                onConfirm={handleJoinChat}
+                disabled={isJoiningChat}
+                armedLabel={<><Icon n="Check" size={14}/> Click again to join</>}
+                armedClassName="ring-2 ring-indigo-300 animate-pulse"
+                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60"
+                title="Join the review chat to act on this entry"
+              >
+                {isJoiningChat
+                  ? <><Icon n="Refresh" size={14} className="animate-spin"/> Joining…</>
+                  : <>👋 Join Chat</>}
+              </ConfirmButton>
+            ) : (
+              <>
+                {/* ── All action buttons — only visible once the entry is claimed ── */}
+                {pending.status === 'pending_review' ? (
+                  hasStaffPrivileges ? (
+                    <>
+                      <ConfirmButton
+                        onConfirm={() => onReview(pending.id)}
+                        armedLabel={<><Icon n="Check" size={14}/> Confirm second review?</>}
+                        armedClassName="ring-2 ring-slate-400 animate-pulse"
+                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                        <Icon n="Check" size={14}/> Begin Second Review
+                      </ConfirmButton>
+                      {['admin', 'owner'].includes(currentUser.role) && (
+                        <ConfirmButton
+                          onConfirm={() => onApprove(pending.id)}
+                          disabled={isApproving}
+                          armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
+                          armedClassName="ring-2 ring-emerald-300 animate-pulse"
+                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                          {isApproving
+                            ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                            : <><Icon n="Check" size={14}/> Admin Approve</>}
+                        </ConfirmButton>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      {isMine && !hasStaffPrivileges && (
+                        <ConfirmButton
+                          onConfirm={() => onSubmitterCancel(pending.id)}
+                          armedLabel={<><Icon n="X" size={14}/> Confirm cancel?</>}
+                          armedClassName="ring-2 ring-rose-300 animate-pulse !bg-rose-50 !text-rose-700"
+                          className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
+                          <Icon n="X" size={14}/> Cancel Submission
+                        </ConfirmButton>
+                      )}
+                      {isStrictSubmitter && (
+                        <div className="text-[10px] text-slate-400 italic self-center">
+                          Another Reviewer must perform Begin Second Review
+                        </div>
+                      )}
+                    </>
+                  )
+                ) : (
+                  hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
+                    <ConfirmButton
+                      onConfirm={() => onApprove(pending.id)}
+                      disabled={isApproving}
+                      armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
+                      armedClassName="ring-2 ring-emerald-300 animate-pulse"
+                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
                       {isApproving
                         ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                        : <><Icon n="Check" size={14}/> Admin Approve</>}
-                    </button>
-                  )}
-                </>
-              ) : (
-                <>
-                  {isMine && !hasStaffPrivileges && (
-                    <button onClick={() => onSubmitterCancel(pending.id)}
-                            className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                      <Icon n="X" size={14}/> Cancel Submission
-                    </button>
-                  )}
-                  {isStrictSubmitter && (
-                    <div className="text-[10px] text-slate-400 italic self-center">
-                      Another Reviewer must perform Begin Second Review
-                    </div>
-                  )}
-                </>
-              )
-            ) : (
-              hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-                <button onClick={() => onApprove(pending.id)}
-                        disabled={isApproving}
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
-                  {isApproving
-                    ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                    : <><Icon n="Check" size={14}/> Approve</>}
-                </button>
-              )
-            )}
-            {onEdit && (!isStrictSubmitter || !isClaimed) && (
-              <button onClick={() => onEdit(pending)}
-                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                      title="Edit pending payload">
-                <Icon n="Edit" size={14}/> Edit
-              </button>
-            )}
-            {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || hasSubmitterChatted) && (
-              <button onClick={() => onCancel(pending.id)}
-                      className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-                <Icon n="X" size={14}/> Cancel Submission
-              </button>
+                        : <><Icon n="Check" size={14}/> Approve</>}
+                    </ConfirmButton>
+                  )
+                )}
+                {onEdit && (!isStrictSubmitter || !isClaimed) && (
+                  <button onClick={() => onEdit(pending)}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                          title="Edit pending payload">
+                    <Icon n="Edit" size={14}/> Edit
+                  </button>
+                )}
+                {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || hasSubmitterChatted) && (
+                  <ConfirmButton
+                    onConfirm={() => onCancel(pending.id)}
+                    armedLabel={<><Icon n="X" size={14}/> Confirm deny?</>}
+                    armedClassName="ring-2 ring-rose-300 animate-pulse !bg-rose-50 !text-rose-700"
+                    className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
+                    <Icon n="X" size={14}/> Cancel Submission
+                  </ConfirmButton>
+                )}
+              </>
             )}
             {(isReviewerOrAdmin || isMine) && (
               <button
@@ -3394,12 +3458,17 @@ function PendingJutsuCard({
                 )}
               </button>
             )}
-            {isStrictSubmitter && pending.status === 'pending_approval' && (
+            {mustJoinToAct && (
+              <div className="text-[10px] text-slate-400 italic self-center basis-full">
+                Claimed by another Reviewer. Join the review chat to review, approve, or deny — you can still read the chat.
+              </div>
+            )}
+            {!mustJoinToAct && isStrictSubmitter && pending.status === 'pending_approval' && (
               <div className="text-[10px] text-slate-400 italic self-center">
                 Another Reviewer must approve
               </div>
             )}
-            {!['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
+            {!mustJoinToAct && !['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
               <div className="text-[10px] text-slate-400 italic self-center">
                 You reviewed this. Another Reviewer must approve.
               </div>
@@ -3409,14 +3478,17 @@ function PendingJutsuCard({
           <>
             {/* ── Unclaimed: only show "Assign to Me" for staff, and info text ── */}
             {hasStaffPrivileges && (
-              <button onClick={() => onClaim(pending.id)}
-                      className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                      title="Assign to Me">
+              <ConfirmButton
+                onConfirm={() => onClaim(pending.id)}
+                armedLabel={<><Icon n="Check" size={14}/> Confirm claim?</>}
+                armedClassName="ring-2 ring-teal-300 animate-pulse"
+                className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
+                title="Assign to Me">
                 <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
                 </svg>
                 Assign to Me
-              </button>
+              </ConfirmButton>
             )}
             {isStrictSubmitter && (
               <div className="text-[10px] text-slate-400 italic self-center">
@@ -3996,9 +4068,12 @@ export default function App() {
               pendingJutsusRef.current.find(p => p.id === payload.new?.pending_id) ||
               myOwnSubmissionsRef.current.find(p => p.id === payload.new?.pending_id);
             const subName = submission?.data?.name || 'a submission';
+            const rawMsg = payload.new?.message || '';
             showChatNotification({
               title: `New message — ${subName}`,
-              body: (payload.new?.message || '').slice(0, 80),
+              body: rawMsg.startsWith(JOIN_PREFIX)
+                ? `👋 ${rawMsg.replace(JOIN_PREFIX, '').trim()}`.slice(0, 80)
+                : rawMsg.slice(0, 80),
               tag: `pending-${payload.new?.pending_id}`,
             });
             if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});

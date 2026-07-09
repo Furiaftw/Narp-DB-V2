@@ -62,6 +62,7 @@ function elapsedLabel(ts) {
 function previewText(msg) {
   if (!msg?.message) return '';
   if (msg.message.startsWith('[SYSTEM_FINAL_STEP]')) return '📋 Final approval instructions sent';
+  if (msg.message.startsWith('[SYSTEM_JOIN]')) return `👋 ${msg.message.replace('[SYSTEM_JOIN]', '').trim()}`;
   return msg.message;
 }
 
@@ -213,12 +214,16 @@ export default function MessagesPage({
             const stale = last && (Date.now() - new Date(last.created_at).getTime()) > 72 * 3600 * 1000;
             const typeLabel = p.data?.type || 'Jutsu';
 
+            const docLink = p.data?.link;
+
             return (
-              <button
+              <div
                 key={p.id}
-                type="button"
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(isSelected && isDesktop ? null : p.id)}
-                className={`w-full text-left bg-white rounded-2xl border shadow-sm px-4 py-3 flex items-start gap-3 transition-all hover:shadow-md ${
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(isSelected && isDesktop ? null : p.id); } }}
+                className={`w-full text-left cursor-pointer bg-white rounded-2xl border shadow-sm px-4 py-3 flex items-start gap-3 transition-all hover:shadow-md ${
                   isSelected
                     ? 'border-indigo-400 ring-2 ring-indigo-200'
                     : conv.unreadCount > 0
@@ -251,6 +256,21 @@ export default function MessagesPage({
                       {previewText(last)}
                     </p>
                   )}
+                  {docLink && (
+                    <a
+                      href={docLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={e => e.stopPropagation()}
+                      className="inline-flex items-center gap-1 mt-1.5 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 px-2 py-0.5 rounded-lg max-w-full"
+                      title={docLink}
+                    >
+                      <svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" />
+                      </svg>
+                      <span className="truncate">Google Doc</span>
+                    </a>
+                  )}
                 </div>
 
                 <div className="flex flex-col items-end gap-1 shrink-0">
@@ -263,7 +283,7 @@ export default function MessagesPage({
                     {elapsedLabel(last?.created_at)}
                   </span>
                 </div>
-              </button>
+              </div>
             );
           })}
         </div>
