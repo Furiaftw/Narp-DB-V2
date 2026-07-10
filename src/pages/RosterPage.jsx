@@ -103,6 +103,11 @@ async function saveSquadMemberOrder(ids) {
   );
 }
 
+// Population counts intentionally look only at `_jonin` / `_special_jonin`
+// (plus squads). Council seats (`_council`), Sannin (`_sannin`), and Elite
+// Jonin (`_elite_jonin`) are separate roster_type rows and are deliberately
+// excluded here — a councilor is already counted once via their Jonin entry,
+// so folding in `_council` would double-count them in every chart/total below.
 function getCounts(entries, squads, villageId) {
   const ofType = (t) => entries.filter(e => e.roster_type === t).length;
   const jonin        = ofType(`${villageId}_jonin`);
