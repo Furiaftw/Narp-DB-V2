@@ -388,7 +388,7 @@ export const fetchReviewChats = async (pendingId) => {
   try {
     const { data, error } = await supabase
       .from('pending_chats')
-      .select('*, profiles(username, site_nickname, avatar_url, role)')
+      .select('*, profiles(username, site_nickname, avatar_url, role, discord_id)')
       .eq('pending_id', pendingId)
       .order('created_at', { ascending: true });
 
@@ -561,6 +561,7 @@ export const fetchRecentChats = async (limit = 20) => {
     const seen = new Set();
     const recent = [];
     for (const msg of data) {
+      if (msg.message?.startsWith('[SYSTEM_JOIN]')) continue;
       if (!seen.has(msg.pending_id)) {
         seen.add(msg.pending_id);
         recent.push(msg);
@@ -593,6 +594,9 @@ export const fetchChatOverview = async (scanLimit = 300, perThread = 5) => {
     const byThread = new Map();
     for (const msg of data || []) {
       if (msg.is_deleted) continue;
+      // Join markers are presentation-only; keeping them out of the overview
+      // stops them from flipping turn state or triggering unread badges.
+      if (msg.message?.startsWith('[SYSTEM_JOIN]')) continue;
       let thread = byThread.get(msg.pending_id);
       if (!thread) {
         thread = { pending_id: msg.pending_id, messages: [] };

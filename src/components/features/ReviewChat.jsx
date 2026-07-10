@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   supabase,
   fetchReviewChats,
@@ -8,14 +8,30 @@ import {
   updatePendingJutsuData,
   getCurrentSession,
 } from '../../lib/supabase';
-import { renderMessageWithLinks, getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
 import Icon from '../ui/Icon';
+import ConfirmButton from '../ui/ConfirmButton';
+import useIsDesktop from '../../hooks/useIsDesktop';
+
+/*
+ * System message posted when a reviewer joins a claimed chat. Also acts as the
+ * persistence for join state: anyone with a message in the thread (join marker
+ * included) counts as having entered the chat.
+ */
+export const JOIN_PREFIX = '[SYSTEM_JOIN]';
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Website display name: custom site nickname wins over the Discord username.
+const displayNameOf = (p) => p?.site_nickname || p?.username || 'Unknown User';
 
 /* ---- SystemFinalStepBlock -------------------------------------------------- */
 
 function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) {
-  const [myLink, setMyLink] = useState(pending?.data?.myCharactersLink || '');
-  const [upgLink, setUpgLink] = useState(pending?.data?.upgradesLink || '');
+  const d = pending?.data || {};
+  const [myLink, setMyLink] = useState(d.myCharactersLink || '');
+  const [areaChecked, setAreaChecked] = useState(!!d.myCharactersLink);
+  const [upgradesChecked, setUpgradesChecked] = useState(!!(d.upgradesConfirmed || d.upgradesLink));
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -25,21 +41,32 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) 
   const isSubmitter = currentUserId === pending?.submitted_by;
 
   const myLinkValid = !myLink || myLink.includes('1473338902264676424');
-  const upgLinkValid = !upgLink || upgLink.includes('1473338902264676425');
+  const myLinkComplete = !!myLink.trim() && myLink.includes('1473338902264676424');
 
+  // Older entries stored an upgradesLink; either that or the new checkbox
+  // confirmation counts as the upgrades thread being done.
   const linksSavedAndVerified =
-    pending?.data?.myCharactersLink &&
-    pending.data.myCharactersLink.includes('1473338902264676424') &&
-    pending?.data?.upgradesLink &&
-    pending.data.upgradesLink.includes('1473338902264676425');
+    d.myCharactersLink &&
+    d.myCharactersLink.includes('1473338902264676424') &&
+    (d.upgradesConfirmed || d.upgradesLink);
 
-  const templateText = `Character name | @tagyourself
-Village: [If not in village put wanderer or rogue]
-Rank: [As per character sheet]
-Bloodline/hidden: [Name of bloodline, if there is one]
-Approved by: [Tag the reviewers involved]
-Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
-Character Doc: [Link your approved character's google doc here]`;
+  // Discord mentions of the reviewers involved: the claimer / first reviewer
+  // and the reviewer who activated this final step (second reviewer).
+  const reviewerMentions = [...new Set([
+    pending?.assignee?.discord_id,
+    pending?.first_reviewer?.discord_id,
+    d.second_reviewer_discord_id,
+  ].filter(Boolean))].map(id => `<@${id}>`).join(' ');
+
+  // Template pre-filled from the OC entry — paste-ready for Discord.
+  const ocName = d.name && d.name !== 'OC Submission' ? d.name : 'Character name';
+  const templateText = `${ocName} | @tagyourself
+Village: ${d.village || '[If not in village put wanderer or rogue]'}
+Rank: ${d.ninja_rank || '[As per character sheet]'}
+Clan/KKG/hidden: ${d.bloodline || '[Name of clan, if there is one]'}
+Approved by: ${reviewerMentions || '[Tag the reviewers involved]'}
+Other: [For Jinchuriki/Sage/seven sword, other non clan things]
+Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
 
   const handleCopy = () => {
     copyText(templateText, () => {
@@ -49,15 +76,14 @@ Character Doc: [Link your approved character's google doc here]`;
   };
 
   const handleSave = async () => {
-    if (!myLink.trim() || !upgLink.trim()) { setError('Both links are required.'); return; }
-    if (!myLink.includes('1473338902264676424')) { setError('Invalid link — paste a link from the #my-characters forum on the server.'); return; }
-    if (!upgLink.includes('1473338902264676425')) { setError('Invalid link — paste a link from the #character-upgrades forum on the server.'); return; }
+    if (!myLinkComplete) { setError('Paste your Character Area thread link from the #my-characters forum.'); return; }
+    if (!areaChecked || !upgradesChecked) { setError('Check both boxes once the threads are created.'); return; }
     setError('');
     setSaving(true);
     try {
-      await onUpdatePending({ ...pending.data, myCharactersLink: myLink.trim(), upgradesLink: upgLink.trim() });
+      await onUpdatePending({ ...pending.data, myCharactersLink: myLink.trim(), upgradesConfirmed: true });
     } catch (err) {
-      setError('Failed to save links: ' + err.message);
+      setError('Failed to save: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -78,7 +104,7 @@ Character Doc: [Link your approved character's google doc here]`;
           submitterName: pending.submitter?.username || 'Player',
           reviewerDiscordId: pending.data.second_reviewer_discord_id,
           myCharactersLink: pending.data.myCharactersLink,
-          upgradesLink: pending.data.upgradesLink,
+          upgradesLink: pending.data.upgradesLink || '',
           docLink: pending.data.link,
         }),
       });
@@ -101,22 +127,26 @@ Character Doc: [Link your approved character's google doc here]`;
       </div>
 
       <div className="text-xs space-y-2 text-slate-300 leading-relaxed">
-        <p className="font-bold text-white text-sm">Your character is almost approved!</p>
-        <p>Please create a thread in the following forums on Discord:</p>
+        <p className="font-bold text-white text-sm">Your character is almost approved! There is one last step before you are all set.</p>
+        <p>Please create a thread in:</p>
         <div className="flex flex-col gap-1.5 pl-2 mt-1">
           <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
-            ◈ my-characters — your character RP log area
+            ◈ #my-characters → your character RP log area
           </a>
           <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
-            ◈ character-upgrades — your character upgrades log area
+            ◈ #character-upgrades → your character upgrades log area
           </a>
         </div>
-        <p className="mt-2">Use the template below for both threads. Once done, your character will be added to the rosters!</p>
+        <p className="mt-2">
+          Make sure to use the template below for your character area thread. Once done, your character will be added to
+          the rosters and you will receive your roles! If you need help, ping <strong className="text-indigo-300">@Reviewer</strong> on
+          Discord and we will guide you through it.
+        </p>
       </div>
 
       <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Thread Template</span>
+          <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Copy the template below for #my-characters</span>
           <button
             type="button"
             onClick={handleCopy}
@@ -133,28 +163,49 @@ Character Doc: [Link your approved character's google doc here]`;
       <div className="border-t border-slate-800/80 pt-4 flex flex-col gap-3">
         {isSubmitter ? (
           <>
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My-Characters Thread Link</label>
+            {/* Thread checklist: character area needs its Discord link to be
+                checkable; the upgrades thread is a simple confirmation. */}
+            <div className="flex flex-col gap-2 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id={`fs-area-${pending.id}`}
+                  checked={areaChecked}
+                  disabled={!myLinkComplete}
+                  onChange={e => { setAreaChecked(e.target.checked); setError(''); }}
+                  className="w-4 h-4 mt-0.5 rounded accent-indigo-500 disabled:opacity-40 shrink-0"
+                />
+                <label htmlFor={`fs-area-${pending.id}`} className="text-xs font-bold text-slate-200 cursor-pointer select-none">
+                  Character Area thread created (#my-characters)
+                  <span className="block text-[10px] font-semibold text-slate-500 mt-0.5">Paste the thread link below to unlock this checkbox.</span>
+                </label>
+              </div>
               <input
                 type="url"
                 value={myLink}
-                onChange={e => { setMyLink(e.target.value); setError(''); }}
+                onChange={e => {
+                  setMyLink(e.target.value);
+                  setError('');
+                  if (!e.target.value.includes('1473338902264676424')) setAreaChecked(false);
+                }}
                 placeholder="https://discord.com/channels/.../1473338902264676424"
-                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
               />
               {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the my-characters forum</p>}
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Character-Upgrades Thread Link</label>
+            <div className="flex items-start gap-2.5 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
               <input
-                type="url"
-                value={upgLink}
-                onChange={e => { setUpgLink(e.target.value); setError(''); }}
-                placeholder="https://discord.com/channels/.../1473338902264676425"
-                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                type="checkbox"
+                id={`fs-upg-${pending.id}`}
+                checked={upgradesChecked}
+                onChange={e => { setUpgradesChecked(e.target.checked); setError(''); }}
+                className="w-4 h-4 mt-0.5 rounded accent-indigo-500 shrink-0"
               />
-              {!upgLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the character-upgrades forum</p>}
+              <label htmlFor={`fs-upg-${pending.id}`} className="text-xs font-bold text-slate-200 cursor-pointer select-none">
+                Character Upgrades thread created (#character-upgrades)
+                <span className="block text-[10px] font-semibold text-slate-500 mt-0.5">No link needed — just confirm you created it.</span>
+              </label>
             </div>
 
             {error && <p className="text-red-400 text-xs font-bold bg-red-950/30 border border-red-900/50 p-2.5 rounded-xl">{error}</p>}
@@ -163,10 +214,10 @@ Character Doc: [Link your approved character's google doc here]`;
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={saving || !myLink.trim() || !upgLink.trim() || !myLinkValid || !upgLinkValid}
+                disabled={saving || !myLinkComplete || !areaChecked || !upgradesChecked}
                 className="w-full mt-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition-colors"
               >
-                {saving ? 'Verifying...' : 'Verify and Save Links'}
+                {saving ? 'Verifying...' : 'Complete Final Step'}
               </button>
             ) : (
               <div className="flex flex-col gap-2.5 mt-1 bg-emerald-950/20 border border-emerald-900/50 p-4 rounded-2xl">
@@ -174,7 +225,7 @@ Character Doc: [Link your approved character's google doc here]`;
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="3" className="shrink-0">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  <span>Links verified and saved successfully!</span>
+                  <span>Final step complete! A second reviewer will verify everything and approve.</span>
                 </div>
                 <button
                   type="button"
@@ -194,20 +245,27 @@ Character Doc: [Link your approved character's google doc here]`;
           <div className="text-xs space-y-3">
             {linksSavedAndVerified ? (
               <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800">
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Verified links provided by submitter:</p>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Final step completed by submitter:</p>
                 <div className="flex flex-col gap-2 pl-1">
                   <a href={pending.data.myCharactersLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
-                    My-Characters Thread Link
+                    ✓ Character Area Thread Link
                   </a>
-                  <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
-                    Character-Upgrades Thread Link
-                  </a>
+                  {pending.data.upgradesLink ? (
+                    <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
+                      ✓ Character Upgrades Thread Link
+                    </a>
+                  ) : (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      ✓ Upgrades thread confirmed by submitter
+                    </span>
+                  )}
                 </div>
+                <p className="text-slate-500 text-[10px] mt-3">Verify the threads, then approve the submission from the Pending tab.</p>
               </div>
             ) : (
               <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 flex items-center gap-2.5 text-slate-400">
                 <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                <span>Waiting for submitter to submit forum links...</span>
+                <span>Waiting for the submitter to create their threads and register the Character Area link...</span>
               </div>
             )}
           </div>
@@ -242,12 +300,76 @@ export default function ReviewChat({
   const [deletingId, setDeletingId] = useState(null);
   const [isActivating, setIsActivating] = useState(false);
   const [nudgeCooldown, setNudgeCooldown] = useState(false);
+  const [isJoiningChat, setIsJoiningChat] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
+  const [mentionIndex, setMentionIndex] = useState(0);
   const messagesEndRef = useRef(null);
   const profileCacheRef = useRef({});
+  const inputRef = useRef(null);
+  const isDesktop = useIsDesktop();
 
   const visibleMessages = messages.filter(m =>
     isStaff || m.is_staff_only === false || m.is_staff_only === null || m.is_staff_only === undefined
   );
+
+  const assignedId = pending?.assigned_to && typeof pending.assigned_to === 'object'
+    ? pending.assigned_to.id
+    : pending?.assigned_to;
+
+  /* Everyone who entered this chat: submitter, claimer, and message senders
+     (a join marker is a message, so joined reviewers are included). Feeds the
+     @mention picker and the mention-highlight renderer. */
+  const participants = useMemo(() => {
+    const map = new Map();
+    const add = (id, prof) => {
+      if (!id || !prof) return;
+      const existing = map.get(id);
+      // Prefer entries that carry a discord_id so mention pings can be delivered
+      if (!existing || (!existing.discord_id && prof.discord_id)) map.set(id, { id, ...prof });
+    };
+    add(pending?.submitted_by, pending?.submitter);
+    add(assignedId, pending?.assignee);
+    messages.forEach(m => add(m.sender_id, m.profiles));
+    return [...map.values()];
+  }, [messages, pending, assignedId]);
+
+  const hasJoined =
+    isStrictSubmitter ||
+    currentUserId === assignedId ||
+    messages.some(m => m.sender_id === currentUserId);
+
+  // Highlights any "@Website Name" / "@discordname" of a chat participant.
+  const mentionRegex = useMemo(() => {
+    const names = [...new Set(participants.flatMap(p => [p.site_nickname, p.username]).filter(Boolean))]
+      .sort((a, b) => b.length - a.length)
+      .map(escapeRegex);
+    return names.length ? new RegExp(`@(${names.join('|')})`, 'gi') : null;
+  }, [participants]);
+
+  const renderMessageBody = (text, isMe) => {
+    if (!text) return '';
+    const urlParts = String(text).split(/(https?:\/\/[^\s]+)/g);
+    return urlParts.map((part, i) => {
+      if (/^https?:\/\//.test(part)) {
+        return (
+          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 hover:underline">
+            {part}
+          </a>
+        );
+      }
+      if (!mentionRegex) return part;
+      const segs = part.split(mentionRegex);
+      if (segs.length === 1) return part;
+      return segs.map((seg, j) => j % 2 === 1
+        ? (
+          <span key={`${i}-${j}`} className={`font-bold rounded px-1 ${isMe ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+            @{seg}
+          </span>
+        )
+        : seg
+      );
+    });
+  };
 
   // Load messages on open / parent refresh
   useEffect(() => {
@@ -272,7 +394,7 @@ export default function ReviewChat({
             try {
               const { data, error } = await supabase
                 .from('profiles')
-                .select('username, site_nickname, avatar_url, role')
+                .select('username, site_nickname, avatar_url, role, discord_id')
                 .eq('id', newChat.sender_id)
                 .single();
               if (!error && data) {
@@ -312,14 +434,129 @@ export default function ReviewChat({
     onReadRef.current?.();
   }, [pending.id, messages.length]);
 
+  /* ---- @mention picker ------------------------------------------------- */
+
+  const updateMentionState = (value, caret) => {
+    const before = value.slice(0, caret ?? value.length);
+    const m = before.match(/(^|\s)@([^\n@]*)$/);
+    setMentionQuery(m ? m[2] : null);
+    setMentionIndex(0);
+  };
+
+  const mentionMatches = useMemo(() => {
+    if (mentionQuery === null) return [];
+    const q = mentionQuery.toLowerCase();
+    return participants
+      .filter(p => p.id !== currentUserId)
+      .filter(p => !q
+        || (p.site_nickname || '').toLowerCase().includes(q)
+        || (p.username || '').toLowerCase().includes(q))
+      .slice(0, 6);
+  }, [mentionQuery, participants, currentUserId]);
+
+  // Inserts the participant's *website* display name, even when the query
+  // matched their Discord username.
+  const insertMention = (p) => {
+    const el = inputRef.current;
+    const caret = el ? el.selectionStart : input.length;
+    const before = input.slice(0, caret);
+    const after = input.slice(caret);
+    const m = before.match(/(^|\s)@([^\n@]*)$/);
+    if (!m) { setMentionQuery(null); return; }
+    const start = before.length - m[2].length - 1; // index of the '@'
+    const display = displayNameOf(p);
+    setInput(input.slice(0, start) + '@' + display + ' ' + after);
+    setMentionQuery(null);
+    requestAnimationFrame(() => {
+      if (el) {
+        el.focus();
+        const pos = start + display.length + 2;
+        el.setSelectionRange(pos, pos);
+      }
+    });
+  };
+
+  const handleInputKeyDown = (e) => {
+    if (mentionMatches.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIndex(i => (i + 1) % mentionMatches.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIndex(i => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); insertMention(mentionMatches[mentionIndex]); return; }
+      if (e.key === 'Escape') { setMentionQuery(null); return; }
+    }
+    // Desktop: Enter sends, Shift+Enter adds a line. Mobile: Enter adds a line;
+    // sending happens via the Send button.
+    if (e.key === 'Enter' && !e.shiftKey && isDesktop) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  const autoResizeInput = (el) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = Math.min(el.scrollHeight, 140) + 'px';
+  };
+
+  // Keep the textarea height in sync when input changes programmatically
+  // (mention insertion, clearing after send).
+  useEffect(() => { autoResizeInput(inputRef.current); }, [input]);
+
+  // Discord-DM every @mentioned participant (fire-and-forget).
+  const sendMentionPings = async (text) => {
+    const lower = text.toLowerCase();
+    const mentioned = participants.filter(p => {
+      if (p.id === currentUserId || !p.discord_id) return false;
+      return [p.site_nickname, p.username]
+        .filter(Boolean)
+        .some(n => lower.includes('@' + n.toLowerCase()));
+    });
+    if (!mentioned.length) return;
+    try {
+      const sess = await getCurrentSession();
+      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
+      const senderName = displayNameOf(currentUserProfile) || 'Someone';
+      const excerpt = text.length > 140 ? text.slice(0, 140) + '…' : text;
+      mentioned.forEach(p => {
+        fetch('/.netlify/functions/discord-dm', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHdr },
+          body: JSON.stringify({
+            discordUserId: p.discord_id,
+            message: `💬 **${senderName}** mentioned you in the Review Chat for **${name}**:\n> ${excerpt}`,
+          }),
+        }).catch(err => console.warn('[NARP] Mention ping failed:', err));
+      });
+    } catch (err) {
+      console.warn('[NARP] Mention ping skipped:', err);
+    }
+  };
+
+  const handleJoinChat = async () => {
+    if (isJoiningChat || hasJoined) return;
+    setIsJoiningChat(true);
+    try {
+      const dn = displayNameOf(currentUserProfile) || 'A reviewer';
+      await sendReviewChat(pending.id, `${JOIN_PREFIX} ${dn} joined the review chat`, false);
+      const fresh = await fetchReviewChats(pending.id);
+      if (fresh) setMessages(fresh);
+    } catch (err) {
+      alert('Could not join the chat: ' + (err.message || err));
+    } finally {
+      setIsJoiningChat(false);
+    }
+  };
+
   const handleSend = async (e) => {
     e?.preventDefault();
     const text = input.trim();
     if (!text || isSending) return;
     setIsSending(true);
+    setMentionQuery(null);
     try {
       await sendReviewChat(pending.id, text, false);
       setInput('');
+      if (inputRef.current) inputRef.current.style.height = 'auto';
+      sendMentionPings(text);
       const fresh = await fetchReviewChats(pending.id);
       if (fresh) setMessages(fresh);
       // Fire-and-forget push notification to other participants
@@ -511,6 +748,18 @@ export default function ReviewChat({
                 </div>
               ) : (
                 visibleMessages.map((msg) => {
+                  if (msg.message?.startsWith(JOIN_PREFIX)) {
+                    return (
+                      <div key={msg.id} className="flex justify-center my-1">
+                        <span className="text-[11px] font-semibold text-slate-500 bg-slate-200/80 border border-slate-300/60 px-3 py-1 rounded-full flex items-center gap-1.5">
+                          👋 {msg.message.replace(JOIN_PREFIX, '').trim()}
+                          <span className="text-slate-400 font-normal">
+                            · {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </span>
+                      </div>
+                    );
+                  }
                   if (msg.message?.startsWith('[SYSTEM_FINAL_STEP]')) {
                     return (
                       <SystemFinalStepBlock
@@ -645,7 +894,7 @@ export default function ReviewChat({
                               )}
                             </div>
                             <p className="whitespace-pre-wrap break-words leading-relaxed text-sm">
-                              {renderMessageWithLinks(msg.message)}
+                              {renderMessageBody(msg.message, isMe)}
                             </p>
                           </>
                         )}
@@ -703,7 +952,7 @@ export default function ReviewChat({
                       {nudgeReviewerLocked ? 'Nudge available in ~30 min' : nudgeCooldown ? 'Nudge Sent!' : 'Nudge Reviewer'}
                     </button>
                   )}
-                  {isStaff && (
+                  {isStaff && hasJoined && (
                     <button
                       type="button"
                       onClick={handleNudgeSubmitter}
@@ -719,26 +968,104 @@ export default function ReviewChat({
                   )}
                 </div>
               )}
-              <form onSubmit={handleSend} className="flex gap-2 items-center">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  disabled={isSending}
-                  placeholder={isStaff ? 'Type a message to the player...' : 'Type a message to the team...'}
-                  className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-60"
-                />
-                <button
-                  type="submit"
-                  disabled={isSending}
-                  className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60"
-                >
-                  {isSending
-                    ? <><Icon n="Refresh" size={14} className="animate-spin" /> Sending</>
-                    : <>Send <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg></>
-                  }
-                </button>
-              </form>
+              {isStaff && !hasJoined ? (
+                /* Spectator mode: reviewers can read the chat, but must join
+                   before sending messages or taking review actions. */
+                <div className="flex flex-col gap-2">
+                  <p className="text-xs text-slate-500 text-center font-medium">
+                    You're viewing this chat as a spectator. Join to send messages and take review actions.
+                  </p>
+                  <ConfirmButton
+                    onConfirm={handleJoinChat}
+                    disabled={isJoiningChat}
+                    armedLabel="Click again to join"
+                    armedClassName="ring-2 ring-indigo-300 animate-pulse"
+                    className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2.5 rounded-xl text-sm flex items-center justify-center gap-1.5 disabled:opacity-60 transition-all"
+                    title="Join this review chat"
+                  >
+                    {isJoiningChat
+                      ? <><Icon n="Refresh" size={14} className="animate-spin" /> Joining…</>
+                      : <>👋 Join Chat</>}
+                  </ConfirmButton>
+                </div>
+              ) : (
+                <div className="relative">
+                  {mentionMatches.length > 0 && (
+                    <div className="absolute bottom-full left-0 right-0 mb-2 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden z-10">
+                      <div className="px-3 pt-2 pb-1 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                        In this chat
+                      </div>
+                      {mentionMatches.map((p, i) => {
+                        const display = displayNameOf(p);
+                        const showDiscord = p.username && p.username !== display;
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onMouseDown={e => { e.preventDefault(); insertMention(p); }}
+                            onMouseEnter={() => setMentionIndex(i)}
+                            className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${
+                              i === mentionIndex ? 'bg-indigo-50' : 'bg-white'
+                            }`}
+                          >
+                            {p.avatar_url ? (
+                              <img
+                                src={getNetlifyImageUrl(p.avatar_url, 24)}
+                                srcSet={getNetlifyImageSrcSet(p.avatar_url)}
+                                alt=""
+                                className="w-6 h-6 rounded-full object-cover shrink-0"
+                                width={24} height={24} loading="lazy"
+                              />
+                            ) : (
+                              <span className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-[10px] font-bold text-slate-500 shrink-0">
+                                {display.slice(0, 1).toUpperCase()}
+                              </span>
+                            )}
+                            <span className="text-sm font-bold text-slate-800 truncate">{display}</span>
+                            {showDiscord && (
+                              <span className="text-xs text-slate-400 truncate">@{p.username}</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  <form onSubmit={handleSend} className="flex gap-2 items-end">
+                    <textarea
+                      ref={inputRef}
+                      value={input}
+                      rows={1}
+                      onChange={e => {
+                        setInput(e.target.value);
+                        autoResizeInput(e.target);
+                        updateMentionState(e.target.value, e.target.selectionStart);
+                      }}
+                      onKeyDown={handleInputKeyDown}
+                      onClick={e => updateMentionState(e.target.value, e.target.selectionStart)}
+                      onBlur={() => setTimeout(() => setMentionQuery(null), 150)}
+                      disabled={isSending}
+                      placeholder={isStaff ? 'Type a message to the player... (@ to ping)' : 'Type a message to the team... (@ to ping)'}
+                      className="flex-1 border rounded-xl px-4 py-3 text-sm focus:outline-hidden focus:ring-2 transition-all text-slate-800 placeholder-slate-400 bg-white border-indigo-200 focus:ring-indigo-500 focus:border-indigo-500 disabled:opacity-60 resize-none overflow-y-auto leading-relaxed"
+                      style={{ maxHeight: 140 }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isSending}
+                      className="text-white px-5 py-3 rounded-xl font-bold text-sm flex items-center gap-1.5 shrink-0 shadow-sm transition-all hover:shadow-md bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 disabled:opacity-60"
+                    >
+                      {isSending
+                        ? <><Icon n="Refresh" size={14} className="animate-spin" /> Sending</>
+                        : <>Send <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></svg></>
+                      }
+                    </button>
+                  </form>
+                  {isDesktop && (
+                    <p className="text-[10px] text-slate-400 mt-1.5 px-1 select-none">
+                      Enter to send · Shift+Enter for a new line · @ to ping someone in this chat
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}

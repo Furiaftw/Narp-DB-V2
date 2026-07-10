@@ -103,6 +103,11 @@ async function saveSquadMemberOrder(ids) {
   );
 }
 
+// Population counts intentionally look only at `_jonin` / `_special_jonin`
+// (plus squads). Council seats (`_council`), Sannin (`_sannin`), and Elite
+// Jonin (`_elite_jonin`) are separate roster_type rows and are deliberately
+// excluded here — a councilor is already counted once via their Jonin entry,
+// so folding in `_council` would double-count them in every chart/total below.
 function getCounts(entries, squads, villageId) {
   const ofType = (t) => entries.filter(e => e.roster_type === t).length;
   const jonin        = ofType(`${villageId}_jonin`);
@@ -977,7 +982,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, perms, onRefresh,
 // ─── ENTRY LIST SECTION ───────────────────────────────────────────────────────
 // Handles any flat roster_entries list with add/edit/delete
 
-function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, sublabel = false }) {
+function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, sublabel = false, adminOnly = false }) {
   const [modal, setModal] = useState(null); // null | 'add' | entry object
   const [orderedEntries, setOrderedEntries] = useState(entries);
   const [deletingId, setDeletingId] = useState(null);
@@ -986,7 +991,8 @@ function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, s
   const sensors = useSortSensors();
 
   const canReorder = perms.admin; // only admins may touch approved rows
-  const canAdd = perms.admin || perms.reviewer;
+  // adminOnly sections (e.g. Sannin) can only be granted by admin+.
+  const canAdd = adminOnly ? perms.admin : (perms.admin || perms.reviewer);
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
@@ -1272,7 +1278,6 @@ function DataTab({ entries, squads }) {
     const totalRogue      = entries.filter(e => e.roster_type === 'rogue').length;
     const totalWanderer   = entries.filter(e => e.roster_type === 'wanderer').length;
     const totalSwordsmen  = entries.filter(e => e.roster_type === 'swordsmen').length;
-    const totalJinchuriki = entries.filter(e => e.roster_type === 'jinchuriki').length;
 
     const villagePopData = villages.map(v => ({
       name: v.name.replace('gakure', ''),
@@ -1280,12 +1285,12 @@ function DataTab({ entries, squads }) {
       color: VILLAGE_COLORS[v.id],
     }));
 
+    // Jinchuriki are deliberately excluded from the visual data charts.
     const pieData = [
       ...villagePopData,
       { name: 'Rogue',      value: totalRogue,      color: '#ef4444' },
       { name: 'Wanderer',   value: totalWanderer,   color: '#a78bfa' },
       { name: 'Swordsmen',  value: totalSwordsmen,  color: '#38bdf8' },
-      { name: 'Jinchuriki', value: totalJinchuriki, color: '#f97316' },
     ].filter(d => d.value > 0);
 
     const rankBarData = [
@@ -1296,7 +1301,6 @@ function DataTab({ entries, squads }) {
       { name: 'Rogue',       total: totalRogue,        fill: '#ef4444' },
       { name: 'Wanderer',    total: totalWanderer,     fill: '#a78bfa' },
       { name: 'Swordsmen',   total: totalSwordsmen,    fill: '#38bdf8' },
-      { name: 'Jinchuriki',  total: totalJinchuriki,   fill: '#f97316' },
     ].filter(d => d.total > 0);
 
     const serverTotal = pieData.reduce((s, d) => s + d.value, 0);
@@ -1624,12 +1628,24 @@ export default function RosterPage({ userRole, userId }) {
         {/* ── Village roster ── */}
         {isVillageTab && (
           <div className="space-y-4">
+            {/* Sannin — legendary rank above the council; granted by admin+ only */}
             <Block t={t}>
-              <EntrySection icon={Crown} title="Jonin Council" rosterType={`${activeVillage}_council`}
+              <EntrySection icon={Flame} title="Sannin" rosterType={`${activeVillage}_sannin`}
+                entries={ofType(`${activeVillage}_sannin`)} t={t} perms={perms} onRefresh={fetchData} adminOnly />
+              {ofType(`${activeVillage}_sannin`).length === 0 && (
+                <p className="text-[10px] italic text-slate-500 px-1 -mt-2">
+                  A legendary rank — cannot be started with, and only granted by an Admin.
+                </p>
+              )}
+            </Block>
+            <Block t={t}>
+              <EntrySection icon={Crown} title="Village Council" rosterType={`${activeVillage}_council`}
                 entries={ofType(`${activeVillage}_council`)} t={t} perms={perms} onRefresh={fetchData} />
             </Block>
             <Block t={t}>
               <SectionHeader icon={BookOpen} title="Elite Shinobi" t={t} canEdit={false} />
+              <EntrySection title="Elite Jonin" rosterType={`${activeVillage}_elite_jonin`}
+                entries={ofType(`${activeVillage}_elite_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
               <EntrySection title="Jonin" rosterType={`${activeVillage}_jonin`}
                 entries={ofType(`${activeVillage}_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
               <EntrySection title="Special Jonin" rosterType={`${activeVillage}_special_jonin`}

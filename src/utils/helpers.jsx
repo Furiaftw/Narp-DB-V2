@@ -174,19 +174,27 @@ export const formatSessionList = (items) => {
 /* ---------------------------------------------------------------------------
    DISCORD WEBHOOK LOGGING
    --------------------------------------------------------------------------- */
-export async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null) {
+export async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null, webhookConfig = {}) {
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return null; // Logging not configured — skip silently.
 
+  const cfg = webhookConfig || {};
   const isCharacter = itemData?.type === 'Character';
+  const isSummon = itemData?.type === 'Summon';
+  const isCustomItem = itemData?.type === 'Custom Item';
 
-  // Route to the correct forum thread based on the jutsu's type.
+  // Route to the correct forum thread per submission type. Thread IDs set in
+  // System Tools (webhook_config table) win; env vars are the fallback.
   let threadId = toArray(itemData?.types).includes('Battlemode')
-    ? import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID
-    : import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID;
+    ? (cfg.discord_battlemode_thread_id || import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID)
+    : (cfg.discord_jutsu_thread_id || import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID);
 
   if (isCharacter) {
-    threadId = import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+    threadId = cfg.discord_oc_thread_id || import.meta.env.VITE_DISCORD_OC_THREAD_ID;
+  } else if (isSummon) {
+    threadId = cfg.discord_summon_thread_id || import.meta.env.VITE_DISCORD_SUMMON_THREAD_ID || threadId;
+  } else if (isCustomItem) {
+    threadId = cfg.discord_custom_item_thread_id || import.meta.env.VITE_DISCORD_CUSTOM_ITEM_THREAD_ID || threadId;
   }
 
   const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
@@ -231,8 +239,14 @@ export async function sendDiscordLog(itemData, actionType, submitterProfile, fir
       '',
       '**OC Details:**',
       `Type of Submission: Character`,
-      `Link to sheet: ${linkVal}`,
     ];
+    if (itemData?.name && itemData.name !== 'OC Submission') {
+      characterDesc.push(`Character Name: ${itemData.name}`);
+    }
+    if (itemData?.ninja_rank) characterDesc.push(`Ninja Rank: ${itemData.ninja_rank}`);
+    if (itemData?.village)    characterDesc.push(`Village: ${itemData.village}`);
+    if (itemData?.bloodline)  characterDesc.push(`Bloodline: ${itemData.bloodline}`);
+    characterDesc.push(`Link to sheet: ${linkVal}`);
     if (itemData?.myCharactersLink) {
       characterDesc.push(`My-Characters Link: ${itemData.myCharactersLink}`);
     }
