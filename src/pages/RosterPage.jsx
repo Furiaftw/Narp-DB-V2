@@ -1272,7 +1272,6 @@ function DataTab({ entries, squads }) {
     const totalRogue      = entries.filter(e => e.roster_type === 'rogue').length;
     const totalWanderer   = entries.filter(e => e.roster_type === 'wanderer').length;
     const totalSwordsmen  = entries.filter(e => e.roster_type === 'swordsmen').length;
-    const totalJinchuriki = entries.filter(e => e.roster_type === 'jinchuriki').length;
 
     const villagePopData = villages.map(v => ({
       name: v.name.replace('gakure', ''),
@@ -1280,12 +1279,12 @@ function DataTab({ entries, squads }) {
       color: VILLAGE_COLORS[v.id],
     }));
 
+    // Jinchuriki are deliberately excluded from the visual data charts.
     const pieData = [
       ...villagePopData,
       { name: 'Rogue',      value: totalRogue,      color: '#ef4444' },
       { name: 'Wanderer',   value: totalWanderer,   color: '#a78bfa' },
       { name: 'Swordsmen',  value: totalSwordsmen,  color: '#38bdf8' },
-      { name: 'Jinchuriki', value: totalJinchuriki, color: '#f97316' },
     ].filter(d => d.value > 0);
 
     const rankBarData = [
@@ -1296,7 +1295,6 @@ function DataTab({ entries, squads }) {
       { name: 'Rogue',       total: totalRogue,        fill: '#ef4444' },
       { name: 'Wanderer',    total: totalWanderer,     fill: '#a78bfa' },
       { name: 'Swordsmen',   total: totalSwordsmen,    fill: '#38bdf8' },
-      { name: 'Jinchuriki',  total: totalJinchuriki,   fill: '#f97316' },
     ].filter(d => d.total > 0);
 
     const serverTotal = pieData.reduce((s, d) => s + d.value, 0);

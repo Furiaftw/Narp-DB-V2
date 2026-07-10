@@ -1374,6 +1374,22 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                       </button>
                     )}
                     <div className="border-t border-slate-100">
+                      {submissionControls?.character_paused ? (
+                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                          <span>OC Submission <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Character'); }}
+                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+                        >
+                          <Icon n="PlusCir" size={14} className="text-emerald-500" /> OC Submission
+                        </button>
+                      )}
+                    </div>
+                    <div className="border-t border-slate-100">
                       {submissionControls?.summon_paused ? (
                         <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
                           <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
@@ -1688,6 +1704,362 @@ function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpl
 }
 
 /* ============================================================================
+   MODAL: OCSubmissionModal — original character submissions.
+   Rank cards show server-wide need, village cards suggest where the picked
+   rank is scarcest, and the bloodline picker enforces slot capacity:
+   full bloodlines are blocked, bloodlines with ≤2 open slots turn the
+   submission into a "Réservation Request" that staff must grant.
+   ============================================================================ */
+const OC_RANKS = ['Genin', 'Chūnin', 'Special Jōnin', 'Jōnin'];
+const OC_RANK_KEY = { 'Genin': 'genin', 'Chūnin': 'chunin', 'Special Jōnin': 'specialJonin', 'Jōnin': 'jonin' };
+const OC_VILLAGES = [
+  { id: 'konoha', name: 'Konohagakure' },
+  { id: 'kumo',   name: 'Kumogakure' },
+  { id: 'kiri',   name: 'Kirigakure' },
+];
+const CLANLESS = 'Clanless';
+
+// Slot capacity summary for a bloodline row (app-shape, slots as JSON string).
+// Reserved placeholder slots have a username, so they count as occupied —
+// a bloodline whose last slot is reserved reads as full.
+const getBloodlineSlotInfo = (bl) => {
+  const { parsed } = getSlotStatus(bl.slots);
+  const unlimited = Number(bl.max_slots) === -1 || (bl.name || '').trim().toLowerCase() === 'clanless';
+  if (unlimited) return { unlimited: true, status: 'open', remaining: Infinity };
+  const capacity = parsed.length > 0 ? parsed.length : Number(bl.max_slots ?? 5);
+  const filled = parsed.filter(s => s?.username).length;
+  const remaining = Math.max(0, capacity - filled);
+  return {
+    unlimited: false,
+    capacity,
+    filled,
+    remaining,
+    status: capacity <= 0 ? 'open' : remaining === 0 ? 'full' : remaining <= 2 ? 'limited' : 'open',
+  };
+};
+
+const OC_NEED_BADGES = {
+  empty:    { label: 'Most Needed',    cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+  critical: { label: 'Most Needed',    cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+  moderate: { label: 'Could Use More', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
+  healthy:  { label: 'Healthy',        cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+  surplus:  { label: 'Well Stocked',   cls: 'bg-slate-100 text-slate-500 border-slate-200' },
+};
+
+const ocNeedLevel = (val, max) => {
+  if (val === 0) return 'empty';
+  const r = max > 0 ? val / max : 1;
+  if (r <= 0.4) return 'critical';
+  if (r <= 0.7) return 'moderate';
+  if (r <= 0.9) return 'healthy';
+  return 'surplus';
+};
+
+function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null }) {
+  const initial = editPending?.data || {};
+  const [name, setName] = useState(initial.name || '');
+  const [link, setLink] = useState(initial.link || '');
+  const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
+  const [village, setVillage] = useState(initial.village || '');
+  const [bloodline, setBloodline] = useState(initial.bloodline || CLANLESS);
+  const [submitting, setSubmitting] = useState(false);
+  const [rosterCounts, setRosterCounts] = useState(null);
+
+  const isEdit = !!editPending;
+
+  // Population per village per rank, straight from the public roster tables.
+  useEffect(() => {
+    if (!supabase) return;
+    (async () => {
+      try {
+        const [{ data: e }, { data: s }] = await Promise.all([
+          supabase.from('roster_entries').select('roster_type'),
+          supabase.from('roster_squads').select('village, squad_type, role'),
+        ]);
+        const counts = {};
+        for (const v of OC_VILLAGES) {
+          counts[v.id] = {
+            jonin:        (e || []).filter(x => x.roster_type === `${v.id}_jonin`).length,
+            specialJonin: (e || []).filter(x => x.roster_type === `${v.id}_special_jonin`).length,
+            chunin:       (s || []).filter(x => x.village === v.id && x.squad_type === 'chunin' && x.role === 'member').length,
+            genin:        (s || []).filter(x => x.village === v.id && x.squad_type === 'genin'  && x.role === 'genin').length,
+          };
+        }
+        setRosterCounts(counts);
+      } catch (err) {
+        console.warn('[NARP] OC roster stats fetch failed:', err);
+      }
+    })();
+  }, []);
+
+  const rankTotals = useMemo(() => {
+    if (!rosterCounts) return null;
+    const totals = {};
+    OC_RANKS.forEach(r => {
+      const key = OC_RANK_KEY[r];
+      totals[r] = OC_VILLAGES.reduce((sum, v) => sum + (rosterCounts[v.id]?.[key] || 0), 0);
+    });
+    return totals;
+  }, [rosterCounts]);
+  const rankMax = rankTotals ? Math.max(...Object.values(rankTotals)) : 0;
+
+  // Village with the fewest characters of the chosen rank = suggested pick.
+  const suggestedVillage = useMemo(() => {
+    if (!rosterCounts || !ninjaRank) return null;
+    const key = OC_RANK_KEY[ninjaRank];
+    let best = null;
+    for (const v of OC_VILLAGES) {
+      const val = rosterCounts[v.id]?.[key] || 0;
+      if (!best || val < best.val) best = { name: v.name, val };
+    }
+    return best?.name || null;
+  }, [rosterCounts, ninjaRank]);
+
+  // Deduplicate bloodlines by name and compute slot status for the picker.
+  const bloodlineOptions = useMemo(() => {
+    const seen = new Set([CLANLESS.toLowerCase()]);
+    const opts = [];
+    for (const bl of bloodlines || []) {
+      const key = (bl.name || '').trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      opts.push({ name: bl.name, info: getBloodlineSlotInfo(bl) });
+    }
+    return opts.sort((a, b) => a.name.localeCompare(b.name));
+  }, [bloodlines]);
+
+  const selectedInfo = bloodline === CLANLESS
+    ? { unlimited: true, status: 'open', remaining: Infinity }
+    : (bloodlineOptions.find(o => o.name === bloodline)?.info || { status: 'open', remaining: Infinity });
+
+  const needsReservation = !isEdit && selectedInfo.status === 'limited';
+  const bloodlineFull = selectedInfo.status === 'full';
+
+  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village || bloodlineFull || submitting;
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (submitDisabled) return;
+    setSubmitting(true);
+    try {
+      if (isEdit) {
+        // Reviewer edit: overwrite the entry fields, keep workflow fields
+        // (reservation state, final-step links, etc.) untouched.
+        await onSavedEdit({
+          ...editPending.data,
+          name: name.trim(),
+          link: link.trim(),
+          ninja_rank: ninjaRank,
+          village,
+          bloodline,
+        });
+        onClose();
+        return;
+      }
+
+      const data = {
+        type: 'Character',
+        name: name.trim(),
+        link: link.trim(),
+        ninja_rank: ninjaRank,
+        village,
+        bloodline,
+        ...(needsReservation ? { subType: 'reservation_request', reservationStatus: 'requested' } : {}),
+      };
+      await submitPendingJutsu('insert', null, data, 'pending_review');
+
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
+          itemType: 'Character',
+          submitterName: profile?.username || 'Unknown',
+        }),
+      }).catch((pingErr) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+      });
+
+      if (onAfterSubmit) onAfterSubmit();
+      onClose();
+    } catch (err) {
+      console.error('[NARP] Failed to submit OC:', err);
+      alert('Submission failed: ' + (err.message || err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+      <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Icon n="PlusCir" size={18} className="text-emerald-400 shrink-0" />
+            <h2 className="font-serif font-bold text-base truncate">{isEdit ? 'Edit OC Submission' : 'Submit Original Character'}</h2>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
+            <Icon n="X" size={18} />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">OC Name (Mandatory)</label>
+            <input
+              type="text"
+              required
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="e.g. Hana Yuki"
+              className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">OC Sheet — Google Doc Link (Mandatory)</label>
+            <input
+              type="url"
+              required
+              value={link}
+              onChange={e => setLink(e.target.value)}
+              placeholder="https://docs.google.com/..."
+              className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500"
+            />
+          </div>
+
+          {/* Ninja rank — each option shows how needed that rank is server-wide */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Ninja Rank (Mandatory)</label>
+            <div className="grid grid-cols-2 gap-2">
+              {OC_RANKS.map(r => {
+                const total = rankTotals ? rankTotals[r] : null;
+                const badge = rankTotals ? OC_NEED_BADGES[ocNeedLevel(rankTotals[r], rankMax)] : null;
+                const active = ninjaRank === r;
+                return (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setNinjaRank(r)}
+                    className={`text-left p-3 rounded-xl border-2 transition-all ${
+                      active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-1">
+                      <span className={`text-sm font-bold ${active ? 'text-emerald-800' : 'text-slate-800'}`}>{r}</span>
+                      {total !== null && <span className="text-[10px] font-bold text-slate-400 tabular-nums">{total} on server</span>}
+                    </div>
+                    {badge && (
+                      <span className={`inline-block mt-1.5 text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded border ${badge.cls}`}>
+                        {badge.label}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Village — revealed after a rank is picked, with a balance suggestion */}
+          {ninjaRank && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Village (Mandatory)</label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                {OC_VILLAGES.map(v => {
+                  const count = rosterCounts ? (rosterCounts[v.id]?.[OC_RANK_KEY[ninjaRank]] || 0) : null;
+                  const suggested = suggestedVillage === v.name;
+                  const active = village === v.name;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      onClick={() => setVillage(v.name)}
+                      className={`text-left p-3 rounded-xl border-2 transition-all ${
+                        active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <span className={`text-sm font-bold block ${active ? 'text-emerald-800' : 'text-slate-800'}`}>{v.name}</span>
+                      {count !== null && (
+                        <span className="text-[10px] text-slate-400 font-semibold">{count} {ninjaRank}{count === 1 ? '' : 's'}</span>
+                      )}
+                      {suggested && (
+                        <span className="block mt-1">
+                          <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-100 text-indigo-700 border-indigo-200">
+                            ★ Suggested for {ninjaRank}
+                          </span>
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Bloodline — full bloodlines are blocked, low bloodlines require a reservation */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Bloodline</label>
+            <select
+              value={bloodline}
+              onChange={e => setBloodline(e.target.value)}
+              className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2.5 text-slate-800 focus:outline-none focus:border-emerald-500"
+            >
+              <option value={CLANLESS}>Clanless — Unlimited</option>
+              {bloodlineOptions.map(({ name: blName, info }) => (
+                <option key={blName} value={blName} disabled={info.status === 'full'}>
+                  {blName}
+                  {info.unlimited ? ' — Unlimited'
+                    : info.status === 'full' ? ' — FULL'
+                    : info.status === 'limited' ? ` — ${info.remaining} left · Reservation Required`
+                    : ` — ${info.remaining} left`}
+                </option>
+              ))}
+            </select>
+            {bloodlineFull && (
+              <p className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl p-2.5 mt-2">
+                This bloodline is full — every slot is taken or reserved. Pick another bloodline, or check back when a slot opens.
+              </p>
+            )}
+            {needsReservation && (
+              <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl p-3 mt-2 space-y-1">
+                <p className="font-bold">⏳ Réservation Request</p>
+                <p>
+                  <strong>{bloodline}</strong> has only {selectedInfo.remaining} slot{selectedInfo.remaining === 1 ? '' : 's'} left, so this
+                  will be submitted as a reservation request. A reviewer must grant your reservation — once granted, you have{' '}
+                  <strong>48 hours</strong> to complete your OC sheet. Reviewers can extend the deadline if your sheet shows real progress.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-50 rounded-xl transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitDisabled}
+              className="px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-md bg-emerald-600 hover:bg-emerald-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {submitting
+                ? (isEdit ? 'Saving...' : 'Submitting...')
+                : isEdit ? 'Save Changes'
+                : needsReservation ? 'Submit Réservation Request'
+                : 'Submit for Review'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
    MODAL: SlotsViewModal
    ============================================================================ */
 function SlotsViewModal({ jutsu, onClose }) {
@@ -1759,9 +2131,13 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
   const hasSlots = total > 0;
   const effectiveMax = hasSlots ? total : (bl.max_slots || 0);
   const filledCount = hasSlots ? (total - remaining) : 0;
+  const isUnlimitedBl = Number(bl.max_slots) === -1 || (bl.name || '').trim().toLowerCase() === 'clanless';
 
   let badgeClass = null, badgeLabel = null;
-  if (effectiveMax > 0) {
+  if (isUnlimitedBl) {
+    badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-200';
+    badgeLabel = 'Open · Unlimited';
+  } else if (effectiveMax > 0) {
     if (hasSlots && remaining === 0) {
       badgeClass = 'bg-red-100 text-red-800 border-red-200';
       badgeLabel = 'Full';
@@ -2739,6 +3115,25 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     />
                   ))}
                 </div>
+                <h4 className="text-sm font-bold mt-6 mb-1 text-slate-700">Submission Log Threads</h4>
+                <p className="text-xs text-slate-500 mb-4">Paste the Discord thread ID each submission type should log to. These override the env-var defaults.</p>
+                <div className="space-y-3">
+                  {[
+                    { key: 'discord_jutsu_thread_id',       label: 'Jutsu Log Thread',          placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_battlemode_thread_id',  label: 'Battlemode Log Thread',     placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_oc_thread_id',          label: 'OC / Character Log Thread', placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_summon_thread_id',      label: 'Summon Log Thread',         placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_custom_item_thread_id', label: 'Custom Item Log Thread',    placeholder: 'Thread ID (17-20 digits)' },
+                  ].map(({ key, label, placeholder }) => (
+                    <WebhookConfigRow
+                      key={key}
+                      label={label}
+                      placeholder={placeholder}
+                      initialValue={webhookConfig[key] || ''}
+                      onSave={(value) => onWebhookConfigSave(key, value)}
+                    />
+                  ))}
+                </div>
                 <p className="text-[10px] text-slate-400 mt-4">Changes take effect immediately — no redeploy needed.</p>
               </div>
             )}
@@ -3147,6 +3542,175 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
 }
 
 /* ============================================================================
+   COMPONENT: ReservationControls — reviewer tools for a "Réservation Request"
+   OC entry: grant the 48h reservation (holds a bloodline slot), extend it by
+   another 48h when the sheet shows real progress, or release the slot and
+   deny the entry. Submitters see the countdown but no buttons.
+   ============================================================================ */
+function ReservationControls({ pending, canAct, onCancel, refreshPending }) {
+  const [busy, setBusy] = useState(false);
+  const data = pending.data || {};
+  const granted = data.reservationStatus === 'granted';
+  const expiresAt = data.reservationExpiresAt ? new Date(data.reservationExpiresAt) : null;
+  const msLeft = expiresAt ? expiresAt.getTime() - Date.now() : 0;
+  const expired = granted && expiresAt && msLeft <= 0;
+  const hoursLeft = Math.max(0, Math.floor(msLeft / 3600000));
+  const minsLeft = Math.max(0, Math.floor((msLeft % 3600000) / 60000));
+  const extensions = data.reservationExtensions || 0;
+
+  const callSlots = async (action) => {
+    const sess = await getCurrentSession();
+    const res = await fetch('/.netlify/functions/manage-bloodline-slot', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+      },
+      body: JSON.stringify({
+        action,
+        bloodline: data.bloodline,
+        pendingId: pending.id,
+        label: `Reserved — ${data.name || 'OC'}`,
+      }),
+    });
+    if (!res.ok) {
+      const out = await res.json().catch(() => ({}));
+      throw new Error(out.error || `Slot ${action} failed`);
+    }
+  };
+
+  const dmSubmitter = (message) => {
+    const discordId = pending.submitter?.discord_id;
+    if (!discordId) return;
+    getCurrentSession().then(sess => {
+      fetch('/.netlify/functions/discord-dm', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
+        body: JSON.stringify({ discordUserId: discordId, message }),
+      }).catch(err => console.warn('[NARP] Reservation DM failed:', err));
+    });
+  };
+
+  const handleGrant = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await callSlots('reserve');
+      await updatePendingJutsuData(pending.id, {
+        ...data,
+        reservationStatus: 'granted',
+        reservationGrantedAt: new Date().toISOString(),
+        reservationExpiresAt: new Date(Date.now() + 48 * 3600000).toISOString(),
+        reservationExtensions: 0,
+      });
+      dmSubmitter(`⏳ Your bloodline reservation for **${data.name || 'your OC'}** (${data.bloodline}) has been **granted**! You now have **48 hours** to complete your OC sheet.`);
+      if (refreshPending) await refreshPending();
+    } catch (err) {
+      alert('Could not grant the reservation: ' + (err.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleExtend = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await updatePendingJutsuData(pending.id, {
+        ...data,
+        reservationExpiresAt: new Date(Date.now() + 48 * 3600000).toISOString(),
+        reservationExtensions: extensions + 1,
+      });
+      dmSubmitter(`⏳ Your reservation for **${data.name || 'your OC'}** (${data.bloodline}) has been **extended by 48 hours**. Keep the progress going!`);
+      if (refreshPending) await refreshPending();
+    } catch (err) {
+      alert('Could not extend the reservation: ' + (err.message || err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRelease = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await callSlots('release');
+    } catch (err) {
+      console.warn('[NARP] Slot release failed (continuing with denial):', err);
+    } finally {
+      setBusy(false);
+    }
+    onCancel(pending.id); // full denial flow: Discord log, submitter DM, delete
+  };
+
+  return (
+    <div className="text-xs bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2 flex-wrap">
+        <span className="font-extrabold uppercase tracking-wider text-[10px] text-purple-700">⏳ Réservation Request — {data.bloodline}</span>
+        {granted && !expired && (
+          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded tabular-nums">
+            {hoursLeft}h {minsLeft}m left{extensions > 0 ? ` · extended ×${extensions}` : ''}
+          </span>
+        )}
+        {expired && (
+          <span className="text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded animate-pulse">
+            Expired — awaiting reviewer decision
+          </span>
+        )}
+        {!granted && (
+          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
+            Awaiting reservation grant
+          </span>
+        )}
+      </div>
+      <p className="text-purple-900/70">
+        {granted
+          ? expired
+            ? 'The 48h window has passed. Extend it if the sheet shows real progress (≥50% complete), or release the slot and deny the entry.'
+            : 'A slot is being held in this bloodline while the submitter completes their OC sheet.'
+          : 'This bloodline is nearly full. Granting the reservation holds a slot and starts the submitter’s 48-hour completion window.'}
+      </p>
+      {canAct && (
+        <div className="flex gap-2 flex-wrap pt-1">
+          {!granted ? (
+            <ConfirmButton
+              onConfirm={handleGrant}
+              disabled={busy}
+              armedLabel="Confirm grant?"
+              armedClassName="ring-2 ring-emerald-300 animate-pulse"
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
+              {busy ? 'Working…' : 'Grant Reservation (48h)'}
+            </ConfirmButton>
+          ) : (
+            <ConfirmButton
+              onConfirm={handleExtend}
+              disabled={busy}
+              armedLabel="Confirm +48h?"
+              armedClassName="ring-2 ring-amber-300 animate-pulse"
+              className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
+              {busy ? 'Working…' : 'Extend 48h'}
+            </ConfirmButton>
+          )}
+          {granted && (
+            <ConfirmButton
+              onConfirm={handleRelease}
+              disabled={busy}
+              armedLabel="Confirm release & deny?"
+              armedClassName="ring-2 ring-rose-300 animate-pulse"
+              className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
+              {busy ? 'Working…' : 'Release Slot & Deny'}
+            </ConfirmButton>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================================================================
    COMPONENT: PendingJutsuCard
    ============================================================================ */
 function PendingJutsuCard({
@@ -3288,6 +3852,11 @@ function PendingJutsuCard({
               {pending.status === 'pending_review' ? 'Pending Review' : 'Pending Approval'}
             </span>
             {isMine && <span className="text-[10px] font-bold uppercase text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Yours</span>}
+            {pending.data?.subType === 'reservation_request' && (
+              <span className="text-[10px] font-bold uppercase text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded">
+                Réservation Request
+              </span>
+            )}
             {chatMeta?.turn === 'you' && (
               <span className="text-[10px] font-bold uppercase text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
@@ -3333,6 +3902,8 @@ function PendingJutsuCard({
 
       {op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
+          {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}</div>}
+          {display.village                                 && <div><span className="font-semibold">Village:</span> {display.village}</div>}
           {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
           {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
@@ -3347,6 +3918,15 @@ function PendingJutsuCard({
             ? <>This will permanently delete <strong>{originalJutsu.name}</strong> from the database.</>
             : <>Target jutsu no longer exists. Cancel this pending entry.</>}
         </div>
+      )}
+
+      {pending.data?.subType === 'reservation_request' && (
+        <ReservationControls
+          pending={pending}
+          canAct={hasStaffPrivileges && isClaimed && !mustJoinToAct}
+          onCancel={onCancel}
+          refreshPending={refreshPending}
+        />
       )}
 
       <div className="flex gap-2 mt-1 flex-wrap">
@@ -3825,6 +4405,7 @@ export default function App() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
   const [statelessType, setStatelessType] = useState(null);
+  const [ocEdit, setOcEdit] = useState(null);
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
@@ -4222,6 +4803,32 @@ export default function App() {
 
         const isCharacter = item.data?.type === 'Character';
 
+        // Auto-insert the approved character into their bloodline's roster
+        // slots (name + character-area link). A granted reservation held for
+        // this entry is converted into the real slot. If the bloodline is
+        // genuinely full, abort the approval so the reviewers can resolve it.
+        if (isCharacter && item.data?.bloodline) {
+          const slotSess = await getCurrentSession();
+          const slotRes = await fetch('/.netlify/functions/manage-bloodline-slot', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(slotSess?.access_token ? { Authorization: `Bearer ${slotSess.access_token}` } : {}),
+            },
+            body: JSON.stringify({
+              action: 'fill',
+              bloodline: item.data.bloodline,
+              pendingId: id,
+              name: item.data.name || 'OC',
+              link: item.data.myCharactersLink || '',
+            }),
+          }).catch(() => null);
+          if (!slotRes || !slotRes.ok) {
+            const out = slotRes ? await slotRes.json().catch(() => ({})) : {};
+            throw new Error(out.error || 'Could not add the character to its bloodline roster. Approval aborted.');
+          }
+        }
+
         let logData = null;
         try {
           const chats = await fetchReviewChats(id);
@@ -4239,7 +4846,7 @@ export default function App() {
             }).join('\n\n') + '\n\n';
           }
           logData = await sendDiscordLog(
-            isCharacter ? { ...displayData, name: 'OC Submission' } : displayData,
+            displayData,
             isDelete ? 'Deleted' : 'Approved',
             item.submitter,
             item.first_reviewer,
@@ -4251,7 +4858,9 @@ export default function App() {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
         }
 
-        const approvalItemName = isCharacter ? 'OC Submission' : (displayData?.name || 'Unknown');
+        const approvalItemName = isCharacter
+          ? (displayData?.name && displayData.name !== 'OC Submission' ? displayData.name : 'OC Submission')
+          : (displayData?.name || 'Unknown');
         const approvalDocLink = displayData?.link || 'N/A';
         const mainLogUrl = logData
           ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
@@ -4337,6 +4946,8 @@ export default function App() {
       setTimeout(() => refreshPending(), 1500);
     } catch (e) {
       alert('Approve failed: ' + e.message);
+      // The optimistic removal already hid the card — restore the real state.
+      refreshPending();
     } finally {
       setApprovingIds(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
@@ -4370,6 +4981,26 @@ export default function App() {
     }
   }, [profile, webhookConfig]);
 
+  // Frees the bloodline slot held by a granted Réservation Request. Called
+  // before an entry is denied/retracted so reserved slots never leak.
+  const releaseReservedSlot = async (item) => {
+    if (item?.data?.subType !== 'reservation_request') return;
+    if (item.data?.reservationStatus !== 'granted' || !item.data?.bloodline) return;
+    try {
+      const sess = await getCurrentSession();
+      await fetch('/.netlify/functions/manage-bloodline-slot', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
+        body: JSON.stringify({ action: 'release', bloodline: item.data.bloodline, pendingId: item.id }),
+      });
+    } catch (err) {
+      console.warn('[NARP] Failed to release reserved bloodline slot:', err);
+    }
+  };
+
   const handleCancelPending = async (id) => {
     try {
       // Optimistic: remove immediately so the UI doesn't hang
@@ -4377,6 +5008,7 @@ export default function App() {
       // Log the denial to Discord before removing the pending entry.
       const item = pendingJutsus.find(p => p.id === id);
       if (item) {
+        await releaseReservedSlot(item);
         const isDelete = item.operation === 'delete';
         const displayData = isDelete
           ? ((db.jutsus || []).find(j => j._id === item.target_id) || { name: 'Unknown' })
@@ -4542,7 +5174,8 @@ export default function App() {
 
   const handleSubmitterCancelPending = async (id) => {
     try {
-      const item = pendingJutsus.find(p => p.id === id);
+      const item = pendingJutsus.find(p => p.id === id) || myOwnSubmissions.find(p => p.id === id);
+      await releaseReservedSlot(item);
       const itemName = (item?.data || {}).name || 'Unknown Submission';
       const itemType = 'Jutsu';
 
@@ -4561,6 +5194,11 @@ export default function App() {
   };
 
   const handleEditPending = (pendingItem) => {
+    // OC submissions get their own form; everything else uses the jutsu form.
+    if (pendingItem.data?.type === 'Character') {
+      setOcEdit(pendingItem);
+      return;
+    }
     setAdminForm({
       r: fromRowJutsu(pendingItem.data),
       tab: 'jutsus',
@@ -5559,7 +6197,15 @@ export default function App() {
         </div>
       )}
 
-      {statelessType && (
+      {statelessType === 'Character' && (
+        <OCSubmissionModal
+          profile={profile}
+          bloodlines={db.bloodlines || []}
+          onClose={() => setStatelessType(null)}
+          onAfterSubmit={refreshPending}
+        />
+      )}
+      {statelessType && statelessType !== 'Character' && (
         <StatelessSubmissionModal
           type={statelessType}
           profile={profile}
@@ -5567,6 +6213,18 @@ export default function App() {
           isAdmin={isAdmin}
           onDirectUpload={handleDirectSummonItemUpload}
           onAfterSubmit={refreshPending}
+        />
+      )}
+      {ocEdit && (
+        <OCSubmissionModal
+          profile={profile}
+          bloodlines={db.bloodlines || []}
+          editPending={ocEdit}
+          onClose={() => setOcEdit(null)}
+          onSavedEdit={async (newData) => {
+            await updatePendingJutsuData(ocEdit.id, newData);
+            await refreshPending();
+          }}
         />
       )}
 
