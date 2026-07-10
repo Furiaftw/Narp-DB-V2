@@ -48,13 +48,10 @@ import {
   deletePushSubscription,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
-import RecentChatActivity from './components/features/RecentChatActivity';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
-import MessagesPage from './pages/MessagesPage';
-import ReviewChat, { JOIN_PREFIX } from './components/features/ReviewChat';
-import ConfirmButton from './components/ui/ConfirmButton';
-import useIsDesktop from './hooks/useIsDesktop';
+import InboxPage from './pages/InboxPage';
+import { JOIN_PREFIX } from './components/features/ReviewChat';
 
 
 /* ============================================================================
@@ -3687,603 +3684,6 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
 }
 
 /* ============================================================================
-   COMPONENT: ReservationControls — reviewer tools for a "Réservation Request"
-   OC entry: grant the 48h reservation (holds a bloodline slot), extend it by
-   another 48h when the sheet shows real progress, or release the slot and
-   deny the entry. Submitters see the countdown but no buttons.
-   ============================================================================ */
-function ReservationControls({ pending, canAct, onCancel, refreshPending }) {
-  const [busy, setBusy] = useState(false);
-  const data = pending.data || {};
-  const granted = data.reservationStatus === 'granted';
-  const expiresAt = data.reservationExpiresAt ? new Date(data.reservationExpiresAt) : null;
-  const msLeft = expiresAt ? expiresAt.getTime() - Date.now() : 0;
-  const expired = granted && expiresAt && msLeft <= 0;
-  const hoursLeft = Math.max(0, Math.floor(msLeft / 3600000));
-  const minsLeft = Math.max(0, Math.floor((msLeft % 3600000) / 60000));
-  const extensions = data.reservationExtensions || 0;
-
-  const callSlots = async (action) => {
-    const sess = await getCurrentSession();
-    const res = await fetch('/.netlify/functions/manage-bloodline-slot', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
-      },
-      body: JSON.stringify({
-        action,
-        bloodline: data.bloodline,
-        pendingId: pending.id,
-        label: `Reserved — ${data.name || 'OC'}`,
-      }),
-    });
-    if (!res.ok) {
-      const out = await res.json().catch(() => ({}));
-      throw new Error(out.error || `Slot ${action} failed`);
-    }
-  };
-
-  const dmSubmitter = (message) => {
-    const discordId = pending.submitter?.discord_id;
-    if (!discordId) return;
-    getCurrentSession().then(sess => {
-      fetch('/.netlify/functions/discord-dm', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
-        },
-        body: JSON.stringify({ discordUserId: discordId, message }),
-      }).catch(err => console.warn('[NARP] Reservation DM failed:', err));
-    });
-  };
-
-  const handleGrant = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await callSlots('reserve');
-      await updatePendingJutsuData(pending.id, {
-        ...data,
-        reservationStatus: 'granted',
-        reservationGrantedAt: new Date().toISOString(),
-        reservationExpiresAt: new Date(Date.now() + 48 * 3600000).toISOString(),
-        reservationExtensions: 0,
-      });
-      dmSubmitter(`⏳ Your bloodline reservation for **${data.name || 'your OC'}** (${data.bloodline}) has been **granted**! You now have **48 hours** to complete your OC sheet.`);
-      if (refreshPending) await refreshPending();
-    } catch (err) {
-      alert('Could not grant the reservation: ' + (err.message || err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleExtend = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await updatePendingJutsuData(pending.id, {
-        ...data,
-        reservationExpiresAt: new Date(Date.now() + 48 * 3600000).toISOString(),
-        reservationExtensions: extensions + 1,
-      });
-      dmSubmitter(`⏳ Your reservation for **${data.name || 'your OC'}** (${data.bloodline}) has been **extended by 48 hours**. Keep the progress going!`);
-      if (refreshPending) await refreshPending();
-    } catch (err) {
-      alert('Could not extend the reservation: ' + (err.message || err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleRelease = async () => {
-    if (busy) return;
-    setBusy(true);
-    try {
-      await callSlots('release');
-    } catch (err) {
-      console.warn('[NARP] Slot release failed (continuing with denial):', err);
-    } finally {
-      setBusy(false);
-    }
-    onCancel(pending.id); // full denial flow: Discord log, submitter DM, delete
-  };
-
-  return (
-    <div className="text-xs bg-purple-50 border border-purple-200 rounded-lg p-3 space-y-2">
-      <div className="flex items-center justify-between gap-2 flex-wrap">
-        <span className="font-extrabold uppercase tracking-wider text-[10px] text-purple-700">⏳ Réservation Request — {data.bloodline}</span>
-        {granted && !expired && (
-          <span className="text-[10px] font-bold text-amber-700 bg-amber-100 border border-amber-200 px-2 py-0.5 rounded tabular-nums">
-            {hoursLeft}h {minsLeft}m left{extensions > 0 ? ` · extended ×${extensions}` : ''}
-          </span>
-        )}
-        {expired && (
-          <span className="text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-200 px-2 py-0.5 rounded animate-pulse">
-            Expired — awaiting reviewer decision
-          </span>
-        )}
-        {!granted && (
-          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded">
-            Awaiting reservation grant
-          </span>
-        )}
-      </div>
-      <p className="text-purple-900/70">
-        {granted
-          ? expired
-            ? 'The 48h window has passed. Extend it if the sheet shows real progress (≥50% complete), or release the slot and deny the entry.'
-            : 'A slot is being held in this bloodline while the submitter completes their OC sheet.'
-          : 'This bloodline is nearly full. Granting the reservation holds a slot and starts the submitter’s 48-hour completion window.'}
-      </p>
-      {canAct && (
-        <div className="flex gap-2 flex-wrap pt-1">
-          {!granted ? (
-            <ConfirmButton
-              onConfirm={handleGrant}
-              disabled={busy}
-              armedLabel="Confirm grant?"
-              armedClassName="ring-2 ring-emerald-300 animate-pulse"
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
-              {busy ? 'Working…' : 'Grant Reservation (48h)'}
-            </ConfirmButton>
-          ) : (
-            <ConfirmButton
-              onConfirm={handleExtend}
-              disabled={busy}
-              armedLabel="Confirm +48h?"
-              armedClassName="ring-2 ring-amber-300 animate-pulse"
-              className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
-              {busy ? 'Working…' : 'Extend 48h'}
-            </ConfirmButton>
-          )}
-          {granted && (
-            <ConfirmButton
-              onConfirm={handleRelease}
-              disabled={busy}
-              armedLabel="Confirm release & deny?"
-              armedClassName="ring-2 ring-rose-300 animate-pulse"
-              className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1.5 rounded-lg font-bold text-xs disabled:opacity-60">
-              {busy ? 'Working…' : 'Release Slot & Deny'}
-            </ConfirmButton>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ============================================================================
-   COMPONENT: PendingJutsuCard
-   ============================================================================ */
-function PendingJutsuCard({
-  pending,
-  originalJutsu,
-  currentUserId,
-  isAdmin,
-  onApprove,
-  onCancel,
-  onSubmitterCancel,
-  onReview,
-  onEdit,
-  currentUserRole,
-  refreshTrigger,
-  onClaim,
-  isMySubmissionsView = false,
-  currentUserProfile = null,
-  refreshPending = null,
-  isApproving = false,
-  chatMeta = null,
-  onChatOpened = null,
-  chatVariant = 'drawer',
-}) {
-  const currentUser = { id: currentUserId, role: currentUserRole };
-  const pendingItem = pending;
-
-  // isStrictSubmitter: true for anyone who submitted this item, regardless of role.
-  // Staff reviewing their OWN submission see the submitter view, not the reviewer view.
-  const isStrictSubmitter = currentUser.id === pendingItem.submitted_by;
-
-  const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
-
-  const isMine     = pending.submitted_by === currentUserId;
-  const op         = pending.operation;
-  const submitter  = pending.submitter;
-  const submitterName = submitter?.username || 'Unknown';
-
-  const isReviewerOrAdmin = currentUserRole === 'staff' || currentUserRole === 'admin' || currentUserRole === 'owner';
-  const isStaff = isReviewerOrAdmin;
-
-  const opColors = {
-    insert: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-    update: 'bg-amber-100  text-amber-800  border-amber-300',
-    delete: 'bg-rose-100   text-rose-800   border-rose-300',
-  };
-
-  const display = op === 'delete' ? (originalJutsu || {}) : (pending.data || {});
-  const name = display.name || originalJutsu?.name || '(no name)';
-
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatSenderIds, setChatSenderIds] = useState(() => new Set());
-  const [isJoiningChat, setIsJoiningChat] = useState(false);
-
-  const isClaimed = !!(
-    pendingItem.assigned_to !== null &&
-    pendingItem.assigned_to !== undefined &&
-    (typeof pendingItem.assigned_to === 'object'
-      ? (pendingItem.assigned_to.id !== null && pendingItem.assigned_to.id !== undefined)
-      : (typeof pendingItem.assigned_to === 'string' && pendingItem.assigned_to.trim() !== ''))
-  );
-
-  const elapsed = (() => {
-    const baseTimeStr = pending.submitted_at;
-    if (!baseTimeStr) return { formatted: '', hours: 0 };
-    const baseTime = new Date(baseTimeStr);
-    const now = new Date();
-    const diffMs = now - baseTime;
-    const hours = Math.max(0, Math.floor(diffMs / (1000 * 60 * 60)));
-    
-    if (hours < 48) {
-      return { formatted: `${hours}h`, hours };
-    } else {
-      const days = Math.floor(hours / 24);
-      const remainingHours = hours % 24;
-      let formatted = `${days}d`;
-      if (remainingHours > 0) {
-        formatted += ` ${remainingHours}h`;
-      }
-      return { formatted, hours };
-    }
-  })();
-
-  const timerColorClass = elapsed.hours >= 48
-    ? 'text-red-500 animate-pulse font-bold'
-    : elapsed.hours >= 24
-      ? 'text-yellow-500'
-      : 'text-green-500';
-
-  // For staff: scan who has sent messages in this chat. Feeds two gates:
-  // whether the submitter ever chatted, and whether the current reviewer has
-  // entered the chat (a [SYSTEM_JOIN] marker is a message from the joiner).
-  useEffect(() => {
-    if (!hasStaffPrivileges || !pending?.id || !supabase) return;
-    supabase
-      .from('pending_chats')
-      .select('sender_id')
-      .eq('pending_id', pending.id)
-      .then(({ data }) => { setChatSenderIds(new Set((data || []).map(r => r.sender_id))); });
-  }, [pending.id, hasStaffPrivileges, refreshTrigger]);
-
-  const hasSubmitterChatted = chatSenderIds.has(pending.submitted_by);
-
-  // Characters can't be approved until the player finishes the final step:
-  // Character Area thread link registered + upgrades thread confirmed.
-  const isCharacterEntry = pending.data?.type === 'Character';
-  const ocFinalStepDone = !isCharacterEntry || !!(
-    pending.data?.myCharactersLink &&
-    (pending.data?.upgradesConfirmed || pending.data?.upgradesLink)
-  );
-
-  const assignedId = pendingItem.assigned_to && typeof pendingItem.assigned_to === 'object'
-    ? pendingItem.assigned_to.id
-    : pendingItem.assigned_to;
-  const iAmAssignee = isClaimed && assignedId === currentUserId;
-  const hasEnteredChat = iAmAssignee || chatSenderIds.has(currentUserId);
-  // Once someone else claims the entry, other reviewers must join the review
-  // chat before they can review, approve, deny, or edit it. Reading stays open.
-  const mustJoinToAct = isClaimed && hasStaffPrivileges && !hasEnteredChat;
-
-  const handleJoinChat = async () => {
-    if (isJoiningChat || hasEnteredChat) return;
-    setIsJoiningChat(true);
-    try {
-      const dn = currentUserProfile?.site_nickname || currentUserProfile?.username || 'A reviewer';
-      await sendReviewChat(pending.id, `${JOIN_PREFIX} ${dn} joined the review chat`, false);
-      setChatSenderIds(prev => new Set([...prev, currentUserId]));
-      setIsChatOpen(true);
-      onChatOpened?.();
-    } catch (err) {
-      alert('Could not join the chat: ' + (err.message || err));
-    } finally {
-      setIsJoiningChat(false);
-    }
-  };
-
-  return (
-    <div className={`bg-white rounded-2xl shadow-sm border border-amber-200 p-4 flex flex-col gap-3 transition-all duration-500 ${isApproving ? 'opacity-40 scale-95 pointer-events-none' : ''}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${opColors[op] || ''}`}>
-              {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Delete'}
-            </span>
-            <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded border ${
-              pending.status === 'pending_review' ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-blue-100 text-blue-800 border-blue-300'
-            }`}>
-              {pending.status === 'pending_review' ? 'Pending Review' : 'Pending Approval'}
-            </span>
-            {isMine && <span className="text-[10px] font-bold uppercase text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Yours</span>}
-            {pending.data?.subType === 'reservation_request' && (
-              <span className="text-[10px] font-bold uppercase text-purple-700 bg-purple-50 border border-purple-200 px-2 py-0.5 rounded">
-                Réservation Request
-              </span>
-            )}
-            {chatMeta?.turn === 'you' && (
-              <span className="text-[10px] font-bold uppercase text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-                Awaiting Your Response
-              </span>
-            )}
-            {chatMeta?.turn === 'them' && (
-              <span className="text-[10px] font-bold uppercase text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                {isMine ? 'Awaiting Reviewer' : 'Awaiting Player'}
-              </span>
-            )}
-            {pending.assignee && (
-              <span className="text-[10px] font-bold uppercase text-teal-700 bg-teal-50 border border-teal-200 px-2 py-0.5 rounded flex items-center gap-1">
-                Claimed by
-                {pending.assignee.avatar_url && (
-                  <img
-                    src={getNetlifyImageUrl(pending.assignee.avatar_url, 14)}
-                    srcSet={getNetlifyImageSrcSet(pending.assignee.avatar_url)}
-                    alt=""
-                    className="w-3.5 h-3.5 rounded-full object-cover shrink-0"
-                    width={14}
-                    height={14}
-                    loading="lazy"
-                  />
-                )}
-                <span className="truncate max-w-[100px]">{pending.assignee.username}</span>
-              </span>
-            )}
-          </div>
-          <h3 className="font-bold text-slate-900 text-base truncate">{name}</h3>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Submitted by <strong>{submitterName}</strong> · {new Date(pending.submitted_at).toLocaleString()}
-          </p>
-        </div>
-        {elapsed.formatted && (
-          <div className={`text-xs flex items-center gap-1 whitespace-nowrap shrink-0 select-none ${timerColorClass}`} title="Time since last activity">
-            <span>⏳</span>
-            <span>{elapsed.formatted}</span>
-          </div>
-        )}
-      </div>
-
-      {op !== 'delete' && (
-        <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
-          {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}{display.councilor ? ' · Councilor' : ''}</div>}
-          {display.village                                 && <div><span className="font-semibold">Village:</span> {display.village}</div>}
-          {display.squad_type && display.squad_number      && <div><span className="font-semibold">Squad:</span> {display.squad_type === 'genin' ? 'Genin' : 'Chunin'} Squad {display.squad_number}{display.squad_is_new ? ' (new squad)' : ''}</div>}
-          {display.mentor_squad_number                     && <div><span className="font-semibold">Mentors:</span> Genin Squad {display.mentor_squad_number}</div>}
-          {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
-          {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
-          {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
-          {display.bloodline                               && <div><span className="font-semibold">Bloodline:</span> {display.bloodline}</div>}
-          {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Specialization:</span> {display.spec.join(', ')}</div>}
-          {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
-        </div>
-      )}
-      {op === 'delete' && (
-        <div className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-lg p-3">
-          {originalJutsu
-            ? <>This will permanently delete <strong>{originalJutsu.name}</strong> from the database.</>
-            : <>Target jutsu no longer exists. Cancel this pending entry.</>}
-        </div>
-      )}
-
-      {pending.data?.subType === 'reservation_request' && (
-        <ReservationControls
-          pending={pending}
-          canAct={hasStaffPrivileges && isClaimed && !mustJoinToAct}
-          onCancel={onCancel}
-          refreshPending={refreshPending}
-        />
-      )}
-
-      <div className="flex gap-2 mt-1 flex-wrap">
-        {isClaimed ? (
-          <>
-            {mustJoinToAct ? (
-              /* ── Claimed by someone else and not in the chat yet: reviewing,
-                    approving, denying, and editing are locked behind joining. ── */
-              <ConfirmButton
-                onConfirm={handleJoinChat}
-                disabled={isJoiningChat}
-                armedLabel={<><Icon n="Check" size={14}/> Click again to join</>}
-                armedClassName="ring-2 ring-indigo-300 animate-pulse"
-                className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60"
-                title="Join the review chat to act on this entry"
-              >
-                {isJoiningChat
-                  ? <><Icon n="Refresh" size={14} className="animate-spin"/> Joining…</>
-                  : <>👋 Join Chat</>}
-              </ConfirmButton>
-            ) : (
-              <>
-                {/* ── All action buttons — only visible once the entry is claimed ── */}
-                {pending.status === 'pending_review' ? (
-                  hasStaffPrivileges ? (
-                    <>
-                      <ConfirmButton
-                        onConfirm={() => onReview(pending.id)}
-                        armedLabel={<><Icon n="Check" size={14}/> Confirm second review?</>}
-                        armedClassName="ring-2 ring-slate-400 animate-pulse"
-                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                        <Icon n="Check" size={14}/> Begin Second Review
-                      </ConfirmButton>
-                      {['admin', 'owner'].includes(currentUser.role) && (
-                        ocFinalStepDone ? (
-                          <ConfirmButton
-                            onConfirm={() => onApprove(pending.id)}
-                            disabled={isApproving}
-                            armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
-                            armedClassName="ring-2 ring-emerald-300 animate-pulse"
-                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
-                            {isApproving
-                              ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                              : <><Icon n="Check" size={14}/> Admin Approve</>}
-                          </ConfirmButton>
-                        ) : (
-                          <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
-                            ⏳ Final step pending — the player must register their character area threads first
-                          </div>
-                        )
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      {isMine && !hasStaffPrivileges && (
-                        <ConfirmButton
-                          onConfirm={() => onSubmitterCancel(pending.id)}
-                          armedLabel={<><Icon n="X" size={14}/> Confirm cancel?</>}
-                          armedClassName="ring-2 ring-rose-300 animate-pulse !bg-rose-50 !text-rose-700"
-                          className="flex-1 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5">
-                          <Icon n="X" size={14}/> Cancel Submission
-                        </ConfirmButton>
-                      )}
-                      {isStrictSubmitter && (
-                        <div className="text-[10px] text-slate-400 italic self-center">
-                          Another Reviewer must perform Begin Second Review
-                        </div>
-                      )}
-                    </>
-                  )
-                ) : (
-                  hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-                    ocFinalStepDone ? (
-                      <ConfirmButton
-                        onConfirm={() => onApprove(pending.id)}
-                        disabled={isApproving}
-                        armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
-                        armedClassName="ring-2 ring-emerald-300 animate-pulse"
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
-                        {isApproving
-                          ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                          : <><Icon n="Check" size={14}/> Approve</>}
-                      </ConfirmButton>
-                    ) : (
-                      <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
-                        ⏳ Final step pending — the player must register their character area threads first
-                      </div>
-                    )
-                  )
-                )}
-                {onEdit && (!isStrictSubmitter || !isClaimed) && (
-                  <button onClick={() => onEdit(pending)}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                          title="Edit pending payload">
-                    <Icon n="Edit" size={14}/> Edit
-                  </button>
-                )}
-                {hasStaffPrivileges && (['admin', 'owner'].includes(currentUser.role) || hasSubmitterChatted) && (
-                  <ConfirmButton
-                    onConfirm={() => onCancel(pending.id)}
-                    armedLabel={<><Icon n="X" size={14}/> Confirm deny?</>}
-                    armedClassName="ring-2 ring-rose-300 animate-pulse !bg-rose-50 !text-rose-700"
-                    className={`${(!isMine && pending.status !== 'pending_review') ? 'flex-none px-4' : 'flex-1'} bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-600 px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5`}>
-                    <Icon n="X" size={14}/> Cancel Submission
-                  </ConfirmButton>
-                )}
-              </>
-            )}
-            {(isReviewerOrAdmin || isMine) && (
-              <button
-                onClick={() => { setIsChatOpen(true); onChatOpened?.(); }}
-                className="relative bg-slate-100 hover:bg-amber-50 hover:text-amber-700 text-slate-600 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                title="Open Chat"
-              >
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                </svg>
-                Review Chat
-                {chatMeta?.hasUnread && (
-                  <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-500 border-2 border-white animate-pulse" title="Unread messages" />
-                )}
-              </button>
-            )}
-            {mustJoinToAct && (
-              <div className="text-[10px] text-slate-400 italic self-center basis-full">
-                Claimed by another Reviewer. Join the review chat to review, approve, or deny — you can still read the chat.
-              </div>
-            )}
-            {!mustJoinToAct && isStrictSubmitter && pending.status === 'pending_approval' && (
-              <div className="text-[10px] text-slate-400 italic self-center">
-                Another Reviewer must approve
-              </div>
-            )}
-            {!mustJoinToAct && !['admin', 'owner'].includes(currentUser.role) && pending.first_reviewer_id === currentUserId && pending.status === 'pending_approval' && (
-              <div className="text-[10px] text-slate-400 italic self-center">
-                You reviewed this. Another Reviewer must approve.
-              </div>
-            )}
-          </>
-        ) : (
-          <>
-            {/* ── Unclaimed: only show "Assign to Me" for staff, and info text ── */}
-            {hasStaffPrivileges && (
-              <ConfirmButton
-                onConfirm={() => onClaim(pending.id)}
-                armedLabel={<><Icon n="Check" size={14}/> Confirm claim?</>}
-                armedClassName="ring-2 ring-teal-300 animate-pulse"
-                className="bg-teal-600 hover:bg-teal-700 text-white px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"
-                title="Assign to Me">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
-                </svg>
-                Assign to Me
-              </ConfirmButton>
-            )}
-            {isStrictSubmitter && (
-              <div className="text-[10px] text-slate-400 italic self-center">
-                Waiting for a Reviewer to claim this entry.
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {isChatOpen && chatVariant === 'inline' && (
-        <div className="border-t border-slate-200 mt-1 -mx-4 -mb-4 rounded-b-2xl overflow-hidden h-[70vh] min-h-[420px]">
-          <ReviewChat
-            pending={pending}
-            name={name}
-            currentUserId={currentUserId}
-            currentUserProfile={currentUserProfile}
-            isStaff={isStaff}
-            isStrictSubmitter={isStrictSubmitter}
-            isClaimed={isClaimed}
-            refreshTrigger={refreshTrigger}
-            refreshPending={refreshPending}
-            onClose={() => setIsChatOpen(false)}
-            onRead={onChatOpened}
-            variant="inline"
-          />
-        </div>
-      )}
-      {isChatOpen && chatVariant !== 'inline' && (
-        <ReviewChat
-          pending={pending}
-          name={name}
-          currentUserId={currentUserId}
-          currentUserProfile={currentUserProfile}
-          isStaff={isStaff}
-          isStrictSubmitter={isStrictSubmitter}
-          isClaimed={isClaimed}
-          refreshTrigger={refreshTrigger}
-          refreshPending={refreshPending}
-          onClose={() => setIsChatOpen(false)}
-          onRead={onChatOpened}
-        />
-      )}
-    </div>
-  );
-}
-
-/* ============================================================================
    MODAL: CatalogManagementModal
    ============================================================================ */
 function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete }) {
@@ -4440,17 +3840,16 @@ export default function App() {
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [approvingIds, setApprovingIds] = useState(new Set());
-  const [pendingHasNew, setPendingHasNew] = useState(false);
-  const [mySubsHasNew, setMySubsHasNew] = useState(false);
+  // Inbox tab (merged Messages + Pending + My Submissions): one "new item"
+  // dot and one "selected item" state shared across every audience/view.
+  const [inboxHasNew, setInboxHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
   const tabRef = useRef('jutsus');
-  const [expandedPendingId, setExpandedPendingId] = useState(null);
+  const [selectedInboxId, setSelectedInboxId] = useState(null);
   const [collapsedGroups, setCollapsedGroups] = useState(new Set());
   const [chatThreads, setChatThreads] = useState([]);
   const [chatReadMap, setChatReadMap] = useState(() => LS.get(STORAGE.CHAT_READ, {}));
-  const [messagesSelectedId, setMessagesSelectedId] = useState(null);
   const [myParticipatingIds, setMyParticipatingIds] = useState(() => new Set());
-  const isDesktop = useIsDesktop();
 
   const markChatRead = useCallback((pendingId) => {
     if (!pendingId) return;
@@ -4827,7 +4226,7 @@ export default function App() {
             if (profile?.id) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
           }
         }
-        if (profile && tabRef.current !== 'my_submissions') setMySubsHasNew(true);
+        if (profile && tabRef.current !== 'inbox') setInboxHasNew(true);
       });
     } catch (err) {
       console.warn('[NARP] Failed to subscribe to database changes:', err);
@@ -4857,8 +4256,8 @@ export default function App() {
   // Raise pending-tab badge when count grows while user is on another tab
   useEffect(() => {
     if (!pendingLoaded) return;
-    if (prevPendingCountRef.current !== null && pendingJutsus.length > prevPendingCountRef.current && tabRef.current !== 'pending') {
-      setPendingHasNew(true);
+    if (prevPendingCountRef.current !== null && pendingJutsus.length > prevPendingCountRef.current && tabRef.current !== 'inbox') {
+      setInboxHasNew(true);
     }
     prevPendingCountRef.current = pendingJutsus.length;
     pendingJutsusRef.current = pendingJutsus;
@@ -5500,40 +4899,54 @@ export default function App() {
     [chatThreads]
   );
 
-  const conversations = useMemo(() => {
+  /*
+   * Inbox tab data (merged Messages + Pending + My Submissions). Every
+   * pending item relevant to the viewer gets an entry here, including ones
+   * with zero chat messages yet — a freshly-submitted, unclaimed item is
+   * exactly what the old Pending tab existed to surface, so it must not
+   * disappear just because nobody has said anything about it yet. Items
+   * with no thread get status 'unclaimed' rather than being folded into
+   * 'awaiting_them', since no reviewer has actually engaged yet.
+   *
+   * Post-merge, staff see every pending item here — unclaimed and
+   * claimed-by-others included — not just ones they've personally claimed
+   * or messaged in. That's intentional: folding the old Pending tab's
+   * full-queue discovery function into Inbox requires the same visibility
+   * here; restricting it back down would silently kill that function.
+   */
+  const inboxItems = useMemo(() => {
     if (!profile?.id) return [];
     const seen = new Set();
     const source = [];
     for (const p of [...myOwnSubmissions, ...(isStaff ? pendingJutsus : [])]) {
       if (!seen.has(p.id)) { seen.add(p.id); source.push(p); }
     }
-    return source
-      .map(p => {
-        const thread = chatThreadById.get(p.id);
-        if (!thread?.lastMessage) return null;
-        const iAmSubmitter = p.submitted_by === profile.id;
-        // Reviewers (non-admin) only see conversations they claimed or joined;
-        // admins/owners see everything. Own submissions always show.
-        if (!iAmSubmitter && role === 'staff') {
-          const claimedByMe = getPendingAssignedId(p) === profile.id;
-          if (!claimedByMe && !myParticipatingIds.has(p.id)) return null;
-        }
-        const turn = getChatTurn(thread.lastMessage, profile.id, iAmSubmitter);
-        const readAt = chatReadMap[p.id] ? new Date(chatReadMap[p.id]).getTime() : 0;
-        const unreadCount = thread.messages.filter(m =>
-          m.sender_id !== profile.id && new Date(m.created_at).getTime() > readAt
-        ).length;
-        const status = p.status === 'pending_approval'
-          ? 'ready'
-          : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
-        return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
-      })
-      .filter(Boolean);
-  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, role, myParticipatingIds, chatReadMap]);
+    return source.map(p => {
+      const thread = chatThreadById.get(p.id);
+      if (!thread?.lastMessage) {
+        return { pending: p, messages: [], lastMessage: null, turn: null, unreadCount: 0, status: 'unclaimed' };
+      }
+      const iAmSubmitter = p.submitted_by === profile.id;
+      const turn = getChatTurn(thread.lastMessage, profile.id, iAmSubmitter);
+      const readAt = chatReadMap[p.id] ? new Date(chatReadMap[p.id]).getTime() : 0;
+      const unreadCount = thread.messages.filter(m =>
+        m.sender_id !== profile.id && new Date(m.created_at).getTime() > readAt
+      ).length;
+      const status = p.status === 'pending_approval'
+        ? 'ready'
+        : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
+      return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
+    });
+  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, chatReadMap]);
 
-  const messagesUnreadThreads = useMemo(
-    () => conversations.filter(c => c.unreadCount > 0).length,
-    [conversations]
+  const inboxItemById = useMemo(
+    () => new Map(inboxItems.map(it => [it.pending.id, it])),
+    [inboxItems]
+  );
+
+  const inboxUnreadCount = useMemo(
+    () => inboxItems.filter(c => c.unreadCount > 0).length,
+    [inboxItems]
   );
 
   const resolvePendingName = useCallback((p) => {
@@ -5568,39 +4981,38 @@ export default function App() {
   const TABS = [
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
-    ...(profile ? [{ id: 'messages', label: 'Messages', count: conversations.length, unread: messagesUnreadThreads }] : []),
-    ...(isStaff ? [{ id: 'pending', label: 'Pending', count: pendingJutsus.length, isPending: true, hasNew: pendingHasNew }] : []),
-    ...(profile ? [{ id: 'my_submissions', label: 'My Submissions', count: myOwnSubmissions.length, hasNew: mySubsHasNew }] : []),
+    ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
   ];
 
   const switchTab = (tabId) => {
     setTab(tabId);
-    if (tabId === 'pending') setPendingHasNew(false);
-    if (tabId === 'my_submissions') setMySubsHasNew(false);
+    if (tabId === 'inbox') setInboxHasNew(false);
     setExpRow(null);
     clearF();
     setF(p => ({ ...p, sort: 'az', showFilters: false }));
   };
 
+  // Pending's four review-queue groups (drawn only from OTHER people's
+  // submissions), plus a fifth bucket for the viewer's own — folding My
+  // Submissions in. For non-staff players, pendingJutsus is always empty
+  // (see refreshPending), so only "My Submissions" ever renders for them.
   const pendingGroupClaimedByMe = pendingJutsus.filter(p => getPendingAssignedId(p) === profile?.id);
   const pendingGroupRest = pendingJutsus.filter(p => getPendingAssignedId(p) !== profile?.id);
   const pendingGroupApproval = pendingGroupRest.filter(p => p.status === 'pending_approval');
   const pendingGroupNeeds = pendingGroupRest.filter(p => p.status === 'pending_review' && !getPendingAssignedId(p));
   const pendingGroupOthers = pendingGroupRest.filter(p => !(p.status === 'pending_approval') && !(p.status === 'pending_review' && !getPendingAssignedId(p)));
   const pendingGroups = [
-    { key: 'mine',     label: 'Claimed by Me',     emoji: '⭐', items: pendingGroupClaimedByMe },
-    { key: 'approval', label: 'Pending Approval',   emoji: '🔵', items: pendingGroupApproval },
-    { key: 'needs',    label: 'Needs Reviewer',     emoji: '🟡', items: pendingGroupNeeds },
-    { key: 'others',   label: 'Claimed by Others',  emoji: '⬜', items: pendingGroupOthers },
+    { key: 'mine',       label: 'Claimed by Me',     emoji: '⭐', items: pendingGroupClaimedByMe },
+    { key: 'approval',   label: 'Pending Approval',   emoji: '🔵', items: pendingGroupApproval },
+    { key: 'needs',      label: 'Needs Reviewer',     emoji: '🟡', items: pendingGroupNeeds },
+    { key: 'others',     label: 'Claimed by Others',  emoji: '⬜', items: pendingGroupOthers },
+    { key: 'my_submissions', label: 'My Submissions', emoji: '📝', items: myOwnSubmissions },
   ].filter(g => g.items.length > 0);
-  const expandedPending = pendingJutsus.find(p => p.id === expandedPendingId) || null;
-  const pendingOpColors = {
-    insert: 'bg-emerald-100 text-emerald-800 border-emerald-300',
-    update: 'bg-amber-100 text-amber-800 border-amber-300',
-    delete: 'bg-rose-100 text-rose-800 border-rose-300',
-  };
+  const selectedInboxItem = pendingJutsus.find(p => p.id === selectedInboxId)
+    || myOwnSubmissions.find(p => p.id === selectedInboxId)
+    || null;
   // For staff, only surface recent chats for submissions they claimed or messaged in.
   // Admins and owners see all.
   const visibleRecentChats = ['admin', 'owner'].includes(role)
@@ -5842,238 +5254,35 @@ export default function App() {
           />
         )}
 
-        {tab === 'messages' && profile && (
-          <MessagesPage
-            conversations={conversations}
+        {tab === 'inbox' && profile && (
+          <InboxPage
+            inboxItems={inboxItems}
+            pendingGroups={pendingGroups}
             profile={profile}
             role={role}
-            selectedId={messagesSelectedId}
-            onSelect={setMessagesSelectedId}
+            isAdmin={isAdmin}
+            isStaff={isStaff}
+            selectedId={selectedInboxId}
+            onSelect={setSelectedInboxId}
             onMarkRead={markChatRead}
             resolveName={resolvePendingName}
+            getPendingChatMeta={getPendingChatMeta}
             refreshTrigger={refreshTrigger}
             refreshPending={refreshPending}
             headerOffset={headerHeight + 54}
+            dbJutsus={db.jutsus || []}
+            onApprove={handleApprovePending}
+            onCancel={handleCancelPending}
+            onSubmitterCancel={handleSubmitterCancelPending}
+            onReview={handleReviewPending}
+            onEdit={handleEditPending}
+            onClaim={handleClaimPending}
+            approvingIds={approvingIds}
+            collapsedGroups={collapsedGroups}
+            setCollapsedGroups={setCollapsedGroups}
+            visibleRecentChats={visibleRecentChats}
+            pendingLoaded={pendingLoaded}
           />
-        )}
-
-        {tab === 'pending' && isStaff && (
-          <div className="max-w-6xl mx-auto">
-            {!pendingLoaded ? (
-              <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading pending submissions...</div>
-            ) : pendingJutsus.length === 0 ? (
-              <div className="text-center py-16">
-                <Icon n="CheckCir" size={40} className="text-emerald-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-semibold">All caught up — no pending submissions.</p>
-              </div>
-            ) : (
-              <>
-                {/* Recent Chat Activity panel (Feature 5) */}
-                <RecentChatActivity
-                  recentChats={visibleRecentChats}
-                  pendingItems={pendingJutsus}
-                  onSelectPending={(id) => {
-                    setExpandedPendingId(id);
-                    const p2 = pendingJutsus.find(x => x.id === id);
-                    if (p2) {
-                      const aid = getPendingAssignedId(p2);
-                      let gk;
-                      if (aid === profile?.id) gk = 'mine';
-                      else if (p2.status === 'pending_approval') gk = 'approval';
-                      else if (p2.status === 'pending_review' && !aid) gk = 'needs';
-                      else gk = 'others';
-                      setCollapsedGroups(prev => { const n = new Set(prev); n.delete(gk); return n; });
-                    }
-                    setTimeout(() => document.getElementById(`pending-row-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100);
-                  }}
-                />
-
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{pendingJutsus.length} Pending</div>
-
-                {/* Desktop: split view (list left, detail panel right). Mobile: inline expansion. */}
-                <div className={isDesktop ? 'grid grid-cols-5 gap-4 items-start' : ''}>
-                <div className={isDesktop ? 'col-span-2 min-w-0' : ''}>
-                {pendingGroups.map(({ key, label, emoji, items }) => (
-                  <div key={key} className="mb-4">
-                    <button
-                      type="button"
-                      onClick={() => setCollapsedGroups(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n; })}
-                      className="w-full flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 rounded-xl mb-1 transition-colors"
-                    >
-                      <span className="text-base">{emoji}</span>
-                      <span className="font-bold text-slate-700 text-sm flex-1 text-left">{label}</span>
-                      <span className="bg-white border border-slate-200 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{items.length}</span>
-                      <Icon n={collapsedGroups.has(key) ? 'Down' : 'Up'} size={14} className="text-slate-400" />
-                    </button>
-
-                    {!collapsedGroups.has(key) && (
-                      <div className="flex flex-col gap-1">
-                        {items.map(p => {
-                          const op = p.operation;
-                          const rowDisplay = op === 'delete' ? {} : (p.data || {});
-                          const rowName = rowDisplay.name || '(no name)';
-                          const rowSubmitter = p.submitter?.username || 'Unknown';
-                          const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
-                          const isExpanded = expandedPendingId === p.id;
-                          const diffMs = Date.now() - new Date(p.submitted_at || 0).getTime();
-                          const hrs = Math.floor(diffMs / 3600000);
-                          const elapsedStr = hrs < 48 ? `${hrs}h` : `${Math.floor(hrs / 24)}d`;
-                          const chatMeta = getPendingChatMeta(p);
-                          const rowBorder = isExpanded && isDesktop
-                            ? 'border-indigo-400 ring-2 ring-indigo-200'
-                            : chatMeta?.turn === 'you'
-                              ? 'border-rose-300'
-                              : 'border-slate-200';
-
-                          return (
-                            <div key={p.id} id={`pending-row-${p.id}`} className={`rounded-xl overflow-hidden border bg-white shadow-xs ${rowBorder}`}>
-                              <button
-                                type="button"
-                                onClick={() => setExpandedPendingId(prev => prev === p.id ? null : p.id)}
-                                className="w-full flex items-center gap-2.5 px-4 py-3 hover:bg-slate-50 transition-colors text-left"
-                              >
-                                {chatMeta?.hasUnread && (
-                                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" title="Unread messages" />
-                                )}
-                                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 ${pendingOpColors[op] || ''}`}>
-                                  {op === 'insert' ? 'New' : op === 'update' ? 'Edit' : 'Del'}
-                                </span>
-                                <span className="flex-1 font-semibold text-slate-900 text-sm truncate min-w-0">{rowName}</span>
-                                {chatMeta?.turn === 'you' && (
-                                  <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded-full shrink-0 uppercase">
-                                    <svg viewBox="0 0 24 24" width="8" height="8" fill="currentColor" className="animate-pulse"><circle cx="12" cy="12" r="10"/></svg>
-                                    Awaiting You
-                                  </span>
-                                )}
-                                {chatMeta?.turn === 'them' && (
-                                  <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full shrink-0 uppercase">
-                                    <svg viewBox="0 0 24 24" width="8" height="8" fill="currentColor"><circle cx="12" cy="12" r="10"/></svg>
-                                    Awaiting Player
-                                  </span>
-                                )}
-                                <span className="text-[11px] text-slate-500 shrink-0 hidden sm:block">by {rowSubmitter}</span>
-                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full shrink-0 ${p.status === 'pending_review' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-                                  {p.status === 'pending_review' ? 'Review' : 'Approval'}
-                                </span>
-                                <span className="text-[11px] text-slate-400 shrink-0">{elapsedStr}</span>
-                                {!isDesktop && <Icon n={isExpanded ? 'Up' : 'Down'} size={13} className="text-slate-400 shrink-0" />}
-                              </button>
-
-                              {isExpanded && !isDesktop && (
-                                <div className="border-t border-slate-100">
-                                  <PendingJutsuCard
-                                    pending={p}
-                                    originalJutsu={original}
-                                    currentUserId={profile?.id}
-                                    isAdmin={isAdmin}
-                                    onApprove={handleApprovePending}
-                                    onCancel={handleCancelPending}
-                                    onSubmitterCancel={handleSubmitterCancelPending}
-                                    onReview={handleReviewPending}
-                                    onEdit={handleEditPending}
-                                    currentUserRole={role}
-                                    refreshTrigger={refreshTrigger}
-                                    onClaim={handleClaimPending}
-                                    isMySubmissionsView={false}
-                                    currentUserProfile={profile}
-                                    refreshPending={refreshPending}
-                                    isApproving={approvingIds.has(p.id)}
-                                    chatMeta={chatMeta}
-                                    onChatOpened={() => markChatRead(p.id)}
-                                  />
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                ))}
-                </div>
-
-                {isDesktop && (
-                  <div className="col-span-3 sticky" style={{ top: `${headerHeight + 62}px` }}>
-                    {expandedPending ? (
-                      <div className="overflow-y-auto custom-scrollbar pr-1" style={{ maxHeight: `calc(100vh - ${headerHeight + 78}px)` }}>
-                        <PendingJutsuCard
-                          pending={expandedPending}
-                          originalJutsu={expandedPending.target_id ? (db.jutsus || []).find(j => j._id === expandedPending.target_id) : null}
-                          currentUserId={profile?.id}
-                          isAdmin={isAdmin}
-                          onApprove={handleApprovePending}
-                          onCancel={handleCancelPending}
-                          onSubmitterCancel={handleSubmitterCancelPending}
-                          onReview={handleReviewPending}
-                          onEdit={handleEditPending}
-                          currentUserRole={role}
-                          refreshTrigger={refreshTrigger}
-                          onClaim={handleClaimPending}
-                          isMySubmissionsView={false}
-                          currentUserProfile={profile}
-                          refreshPending={refreshPending}
-                          isApproving={approvingIds.has(expandedPending.id)}
-                          chatMeta={getPendingChatMeta(expandedPending)}
-                          onChatOpened={() => markChatRead(expandedPending.id)}
-                          chatVariant="inline"
-                        />
-                      </div>
-                    ) : (
-                      <div className="bg-white/60 rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-3 py-24">
-                        <Icon n="Eye" size={36} className="text-slate-300" />
-                        <p className="text-sm font-semibold">Select a submission to review it here</p>
-                      </div>
-                    )}
-                  </div>
-                )}
-                </div>
-              </>
-            )}
-          </div>
-        )}
-
-        {tab === 'my_submissions' && profile && (
-          <div className="max-w-6xl mx-auto">
-            {!pendingLoaded ? (
-              <div className="text-center py-16 text-slate-400 text-sm font-semibold">Loading your submissions...</div>
-            ) : myOwnSubmissions.length === 0 ? (
-              <div className="text-center py-16">
-                <Icon n="CheckCir" size={40} className="text-emerald-300 mx-auto mb-3" />
-                <p className="text-slate-500 font-semibold">You have no pending submissions</p>
-              </div>
-            ) : (
-              <>
-                <div className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">{myOwnSubmissions.length} Submissions</div>
-                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3 items-start">
-                  {myOwnSubmissions.map(p => {
-                    const original = p.target_id ? (db.jutsus || []).find(j => j._id === p.target_id) : null;
-                    return (
-                      <PendingJutsuCard
-                        key={p.id}
-                        pending={p}
-                        originalJutsu={original}
-                        currentUserId={profile?.id}
-                        isAdmin={isAdmin}
-                        onApprove={handleApprovePending}
-                        onCancel={handleCancelPending}
-                        onSubmitterCancel={handleSubmitterCancelPending}
-                        onReview={handleReviewPending}
-                        onEdit={handleEditPending}
-                        currentUserRole={role}
-                        refreshTrigger={refreshTrigger}
-                        onClaim={handleClaimPending}
-                        isMySubmissionsView={true}
-                        currentUserProfile={profile}
-                        refreshPending={refreshPending}
-                        isApproving={approvingIds.has(p.id)}
-                        chatMeta={getPendingChatMeta(p)}
-                        onChatOpened={() => markChatRead(p.id)} />
-                    );
-                  })}
-                </div>
-              </>
-            )}
-          </div>
         )}
 
         {tab === 'members' && isAdmin && (
