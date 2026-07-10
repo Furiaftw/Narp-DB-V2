@@ -18,8 +18,6 @@ import {
   fetchMyProfile,
   updateMyUsername,
   updateMyWorkThreadId,
-  updateMyCustomItemThreadId,
-  updateMySummonThreadId,
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
@@ -2784,8 +2782,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
   const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
   const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
   const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
-  const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
-  const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
+  const [wlCustom, setWlCustom] = useState(webhookConfig.discord_custom_item_thread_id || '');
+  const [wlSummon, setWlSummon] = useState(webhookConfig.discord_summon_thread_id || '');
   const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
 
   const saveWorkLog = async (type) => {
@@ -2798,11 +2796,9 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
       } else if (type === 'oc') {
         onWebhookConfigSave('discord_oc_thread_id', wlOC);
       } else if (type === 'custom') {
-        const updated = await updateMyCustomItemThreadId(wlCustom);
-        onProfileUpdate(updated);
+        onWebhookConfigSave('discord_custom_item_thread_id', wlCustom);
       } else if (type === 'summon') {
-        const updated = await updateMySummonThreadId(wlSummon);
-        onProfileUpdate(updated);
+        onWebhookConfigSave('discord_summon_thread_id', wlSummon);
       }
       setMsg('Log thread ID saved.');
     } catch (e) {
@@ -2956,26 +2952,25 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
               </div>
             </div>
 
-            {/* Log Thread IDs — admin+ */}
-            {isAdmin && isSupabaseConfigured() && (
+            {/* Log Thread IDs — owner only */}
+            {isOwner && isSupabaseConfigured() && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="MessageSquare" size={20} className="text-sky-500" /> Log Thread IDs
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-indigo-100 text-indigo-700 border border-indigo-300 px-2 py-0.5 rounded">Admin+</span>
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
-                    { label: 'Jutsu',          val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
-                    { label: 'Battlemode',     val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
-                    { label: 'OC / Character', val: wlOC,     set: setWlOC,     type: 'oc',     ownerOnly: true },
-                    { label: 'Custom Item',    val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
-                    { label: 'Summon',         val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
-                  ].map(({ label, val, set, type, ownerOnly }) => (
+                    { label: 'Jutsu',          val: wlJutsu,  set: setWlJutsu,  type: 'jutsu' },
+                    { label: 'Battlemode',     val: wlBattle, set: setWlBattle, type: 'battle' },
+                    { label: 'OC / Character', val: wlOC,     set: setWlOC,     type: 'oc' },
+                    { label: 'Custom Item',    val: wlCustom, set: setWlCustom, type: 'custom' },
+                    { label: 'Summon',         val: wlSummon, set: setWlSummon, type: 'summon' },
+                  ].map(({ label, val, set, type }) => (
                     <div key={type}>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
                         {label}
-                        {ownerOnly && <span className="ml-1.5 text-[9px] font-bold bg-amber-100 text-amber-700 border border-amber-300 px-1 py-0.5 rounded">Operator</span>}
                       </label>
                       <div className="flex gap-2">
                         <input
@@ -2983,13 +2978,12 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                           value={val}
                           onChange={e => set(e.target.value)}
                           placeholder="Thread ID"
-                          disabled={ownerOnly && !isOwner}
-                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400 disabled:bg-slate-100 disabled:text-slate-400"
+                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400"
                         />
                         <button
                           type="button"
                           onClick={() => saveWorkLog(type)}
-                          disabled={wlSaving[type] || (ownerOnly && !isOwner)}
+                          disabled={wlSaving[type]}
                           className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-30 transition-colors shrink-0"
                         >
                           {wlSaving[type] ? '...' : 'Save'}
