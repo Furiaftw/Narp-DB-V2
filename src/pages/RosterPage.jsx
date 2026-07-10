@@ -977,7 +977,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, perms, onRefresh,
 // ─── ENTRY LIST SECTION ───────────────────────────────────────────────────────
 // Handles any flat roster_entries list with add/edit/delete
 
-function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, sublabel = false }) {
+function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, sublabel = false, adminOnly = false }) {
   const [modal, setModal] = useState(null); // null | 'add' | entry object
   const [orderedEntries, setOrderedEntries] = useState(entries);
   const [deletingId, setDeletingId] = useState(null);
@@ -986,7 +986,8 @@ function EntrySection({ icon, title, rosterType, entries, t, perms, onRefresh, s
   const sensors = useSortSensors();
 
   const canReorder = perms.admin; // only admins may touch approved rows
-  const canAdd = perms.admin || perms.reviewer;
+  // adminOnly sections (e.g. Sannin) can only be granted by admin+.
+  const canAdd = adminOnly ? perms.admin : (perms.admin || perms.reviewer);
 
   const handleDelete = async (id) => {
     if (!window.confirm('Remove this entry?')) return;
@@ -1622,12 +1623,24 @@ export default function RosterPage({ userRole, userId }) {
         {/* ── Village roster ── */}
         {isVillageTab && (
           <div className="space-y-4">
+            {/* Sannin — legendary rank above the council; granted by admin+ only */}
             <Block t={t}>
-              <EntrySection icon={Crown} title="Jonin Council" rosterType={`${activeVillage}_council`}
+              <EntrySection icon={Flame} title="Sannin" rosterType={`${activeVillage}_sannin`}
+                entries={ofType(`${activeVillage}_sannin`)} t={t} perms={perms} onRefresh={fetchData} adminOnly />
+              {ofType(`${activeVillage}_sannin`).length === 0 && (
+                <p className="text-[10px] italic text-slate-500 px-1 -mt-2">
+                  A legendary rank — cannot be started with, and only granted by an Admin.
+                </p>
+              )}
+            </Block>
+            <Block t={t}>
+              <EntrySection icon={Crown} title="Village Council" rosterType={`${activeVillage}_council`}
                 entries={ofType(`${activeVillage}_council`)} t={t} perms={perms} onRefresh={fetchData} />
             </Block>
             <Block t={t}>
               <SectionHeader icon={BookOpen} title="Elite Shinobi" t={t} canEdit={false} />
+              <EntrySection title="Elite Jonin" rosterType={`${activeVillage}_elite_jonin`}
+                entries={ofType(`${activeVillage}_elite_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
               <EntrySection title="Jonin" rosterType={`${activeVillage}_jonin`}
                 entries={ofType(`${activeVillage}_jonin`)} t={t} perms={perms} onRefresh={fetchData} sublabel />
               <EntrySection title="Special Jonin" rosterType={`${activeVillage}_special_jonin`}

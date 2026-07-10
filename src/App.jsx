@@ -1760,8 +1760,14 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
   const [village, setVillage] = useState(initial.village || '');
   const [bloodline, setBloodline] = useState(initial.bloodline || CLANLESS);
+  const [squadChoice, setSquadChoice] = useState(() =>
+    initial.squad_number ? { number: Number(initial.squad_number), isNew: !!initial.squad_is_new } : null
+  );
+  const [mentorSquad, setMentorSquad] = useState(initial.mentor_squad_number ? String(initial.mentor_squad_number) : '');
+  const [councilor, setCouncilor] = useState(!!initial.councilor);
   const [submitting, setSubmitting] = useState(false);
   const [rosterCounts, setRosterCounts] = useState(null);
+  const [rosterSquads, setRosterSquads] = useState([]);
 
   const isEdit = !!editPending;
 
@@ -1771,24 +1777,73 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
     (async () => {
       try {
         const [{ data: e }, { data: s }] = await Promise.all([
-          supabase.from('roster_entries').select('roster_type'),
-          supabase.from('roster_squads').select('village, squad_type, role'),
+          supabase.from('roster_entries').select('roster_type, status'),
+          supabase.from('roster_squads').select('village, squad_type, squad_number, role, name, status'),
         ]);
+        const entries = (e || []).filter(x => x.status !== 'pending');
+        const squadRows = (s || []).filter(x => x.status !== 'pending');
         const counts = {};
         for (const v of OC_VILLAGES) {
           counts[v.id] = {
-            jonin:        (e || []).filter(x => x.roster_type === `${v.id}_jonin`).length,
-            specialJonin: (e || []).filter(x => x.roster_type === `${v.id}_special_jonin`).length,
-            chunin:       (s || []).filter(x => x.village === v.id && x.squad_type === 'chunin' && x.role === 'member').length,
-            genin:        (s || []).filter(x => x.village === v.id && x.squad_type === 'genin'  && x.role === 'genin').length,
+            jonin:        entries.filter(x => x.roster_type === `${v.id}_jonin`).length,
+            specialJonin: entries.filter(x => x.roster_type === `${v.id}_special_jonin`).length,
+            chunin:       squadRows.filter(x => x.village === v.id && x.squad_type === 'chunin' && x.role === 'member').length,
+            genin:        squadRows.filter(x => x.village === v.id && x.squad_type === 'genin'  && x.role === 'genin').length,
           };
         }
         setRosterCounts(counts);
+        setRosterSquads(squadRows);
       } catch (err) {
         console.warn('[NARP] OC roster stats fetch failed:', err);
       }
     })();
   }, []);
+
+  /* ---- Squad interaction ------------------------------------------------ */
+  const villageId = OC_VILLAGES.find(v => v.name === village)?.id || null;
+  // Genin and Chūnin join (or start) a squad of their own rank.
+  const squadType = ninjaRank === 'Genin' ? 'genin' : ninjaRank === 'Chūnin' ? 'chunin' : null;
+  const memberRole = squadType === 'genin' ? 'genin' : 'member';
+
+  // Squads of the relevant type in the chosen village, with member counts.
+  // The squad with the fewest members needs recruits the most → recommended.
+  const squadGroups = useMemo(() => {
+    if (!villageId || !squadType) return [];
+    const byNum = new Map();
+    for (const s of rosterSquads) {
+      if (s.village !== villageId || s.squad_type !== squadType) continue;
+      let g = byNum.get(s.squad_number);
+      if (!g) { g = { number: s.squad_number, members: 0, captain: null }; byNum.set(s.squad_number, g); }
+      if (s.role === memberRole || s.role === 'part_time') g.members += 1;
+      if (s.role === 'captain') g.captain = s.name;
+    }
+    return [...byNum.values()].sort((a, b) => a.number - b.number);
+  }, [rosterSquads, villageId, squadType, memberRole]);
+
+  const recommendedSquad = useMemo(() => {
+    if (!squadGroups.length) return null;
+    return squadGroups.reduce((min, g) => (g.members < min.members ? g : min), squadGroups[0]).number;
+  }, [squadGroups]);
+
+  const nextSquadNumber = squadGroups.length ? Math.max(...squadGroups.map(g => g.number)) + 1 : 1;
+
+  // Captainless genin squads the new Jōnin / Special Jōnin could mentor.
+  const mentorableSquads = useMemo(() => {
+    if (!villageId || (ninjaRank !== 'Jōnin' && ninjaRank !== 'Special Jōnin')) return [];
+    const byNum = new Map();
+    for (const s of rosterSquads) {
+      if (s.village !== villageId || s.squad_type !== 'genin') continue;
+      let g = byNum.get(s.squad_number);
+      if (!g) { g = { number: s.squad_number, members: 0, hasCaptain: false }; byNum.set(s.squad_number, g); }
+      if (s.role === 'genin' || s.role === 'part_time') g.members += 1;
+      if (s.role === 'captain') g.hasCaptain = true;
+    }
+    return [...byNum.values()].filter(g => !g.hasCaptain).sort((a, b) => a.number - b.number);
+  }, [rosterSquads, villageId, ninjaRank]);
+
+  // Rank or village change invalidates the squad-related picks.
+  const pickRank = (r) => { setNinjaRank(r); setSquadChoice(null); setMentorSquad(''); if (r !== 'Jōnin') setCouncilor(false); };
+  const pickVillage = (name) => { setVillage(name); setSquadChoice(null); setMentorSquad(''); };
 
   const rankTotals = useMemo(() => {
     if (!rosterCounts) return null;
@@ -1833,13 +1888,23 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const needsReservation = !isEdit && selectedInfo.status === 'limited';
   const bloodlineFull = selectedInfo.status === 'full';
 
-  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village || bloodlineFull || submitting;
+  const squadRequired = !!squadType && !!village;
+  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village
+    || (squadRequired && !squadChoice) || bloodlineFull || submitting;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (submitDisabled) return;
     setSubmitting(true);
     try {
+      const squadFields = {
+        squad_type: squadType || null,
+        squad_number: squadType && squadChoice ? squadChoice.number : null,
+        squad_is_new: squadType && squadChoice ? !!squadChoice.isNew : false,
+        mentor_squad_number: (ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && mentorSquad ? Number(mentorSquad) : null,
+        councilor: ninjaRank === 'Jōnin' ? councilor : false,
+      };
+
       if (isEdit) {
         // Reviewer edit: overwrite the entry fields, keep workflow fields
         // (reservation state, final-step links, etc.) untouched.
@@ -1850,6 +1915,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
           ninja_rank: ninjaRank,
           village,
           bloodline,
+          ...squadFields,
         });
         onClose();
         return;
@@ -1862,6 +1928,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         ninja_rank: ninjaRank,
         village,
         bloodline,
+        ...squadFields,
         ...(needsReservation ? { subType: 'reservation_request', reservationStatus: 'requested' } : {}),
       };
       await submitPendingJutsu('insert', null, data, 'pending_review');
@@ -1939,7 +2006,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
                   <button
                     key={r}
                     type="button"
-                    onClick={() => setNinjaRank(r)}
+                    onClick={() => pickRank(r)}
                     className={`text-left p-3 rounded-xl border-2 transition-all ${
                       active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
                     }`}
@@ -1972,7 +2039,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
                     <button
                       key={v.id}
                       type="button"
-                      onClick={() => setVillage(v.name)}
+                      onClick={() => pickVillage(v.name)}
                       className={`text-left p-3 rounded-xl border-2 transition-all ${
                         active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}
@@ -1992,6 +2059,105 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Squad — Genin and Chūnin join an existing squad or start their own */}
+          {squadType && village && (
+            <div className="animate-in fade-in slide-in-from-top-2">
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
+                {ninjaRank} Squad (Mandatory)
+              </label>
+              <div className="flex flex-col gap-2">
+                {squadGroups.map(g => {
+                  const active = squadChoice && !squadChoice.isNew && squadChoice.number === g.number;
+                  const recommended = recommendedSquad === g.number;
+                  return (
+                    <button
+                      key={g.number}
+                      type="button"
+                      onClick={() => setSquadChoice({ number: g.number, isNew: false })}
+                      className={`text-left p-3 rounded-xl border-2 transition-all flex items-center justify-between gap-2 ${
+                        active ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white hover:border-slate-300'
+                      }`}
+                    >
+                      <span>
+                        <span className={`text-sm font-bold block ${active ? 'text-emerald-800' : 'text-slate-800'}`}>
+                          Squad {g.number}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-semibold">
+                          {g.members} member{g.members === 1 ? '' : 's'}
+                          {g.captain ? ` · led by ${g.captain}` : ' · no captain yet'}
+                        </span>
+                      </span>
+                      {recommended && (
+                        <span className="text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-indigo-100 text-indigo-700 border-indigo-200 shrink-0">
+                          ★ Needs {ninjaRank}s
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+                <button
+                  type="button"
+                  onClick={() => setSquadChoice({ number: nextSquadNumber, isNew: true })}
+                  className={`text-left p-3 rounded-xl border-2 border-dashed transition-all ${
+                    squadChoice?.isNew ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-white hover:border-slate-400'
+                  }`}
+                >
+                  <span className={`text-sm font-bold block ${squadChoice?.isNew ? 'text-emerald-800' : 'text-slate-800'}`}>
+                    ＋ Start My Own Squad (Squad {nextSquadNumber})
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    Begin alone — others can join your squad later.
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Jōnin / Special Jōnin — optional mentoring + councilor */}
+          {(ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && village && (
+            <div className="animate-in fade-in slide-in-from-top-2 space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
+                  Mentor a Genin Squad (Optional)
+                </label>
+                {mentorableSquads.length > 0 ? (
+                  <select
+                    value={mentorSquad}
+                    onChange={e => setMentorSquad(e.target.value)}
+                    className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2.5 text-slate-800 focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="">No squad — just take my roster slot</option>
+                    {mentorableSquads.map(g => (
+                      <option key={g.number} value={g.number}>
+                        Genin Squad {g.number} — {g.members} genin, needs a captain
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-xl p-2.5">
+                    No captainless genin squads in {village} right now — your roster slot will be filled automatically.
+                  </p>
+                )}
+              </div>
+              {ninjaRank === 'Jōnin' && (
+                <label className="flex items-start gap-2.5 bg-slate-50 border border-slate-200 rounded-xl p-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={councilor}
+                    onChange={e => setCouncilor(e.target.checked)}
+                    className="w-4 h-4 mt-0.5 rounded accent-emerald-600 shrink-0"
+                  />
+                  <span className="text-xs font-bold text-slate-700">
+                    Councilor — member of the Village Council
+                    <span className="block text-[10px] font-semibold text-slate-400 mt-0.5">
+                      Symbolic rank: you stay a Jōnin and are also listed in the Village Council.
+                    </span>
+                  </span>
+                </label>
+              )}
             </div>
           )}
 
@@ -3792,6 +3958,14 @@ function PendingJutsuCard({
 
   const hasSubmitterChatted = chatSenderIds.has(pending.submitted_by);
 
+  // Characters can't be approved until the player finishes the final step:
+  // Character Area thread link registered + upgrades thread confirmed.
+  const isCharacterEntry = pending.data?.type === 'Character';
+  const ocFinalStepDone = !isCharacterEntry || !!(
+    pending.data?.myCharactersLink &&
+    (pending.data?.upgradesConfirmed || pending.data?.upgradesLink)
+  );
+
   const assignedId = pendingItem.assigned_to && typeof pendingItem.assigned_to === 'object'
     ? pendingItem.assigned_to.id
     : pendingItem.assigned_to;
@@ -3881,8 +4055,10 @@ function PendingJutsuCard({
 
       {op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
-          {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}</div>}
+          {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}{display.councilor ? ' · Councilor' : ''}</div>}
           {display.village                                 && <div><span className="font-semibold">Village:</span> {display.village}</div>}
+          {display.squad_type && display.squad_number      && <div><span className="font-semibold">Squad:</span> {display.squad_type === 'genin' ? 'Genin' : 'Chunin'} Squad {display.squad_number}{display.squad_is_new ? ' (new squad)' : ''}</div>}
+          {display.mentor_squad_number                     && <div><span className="font-semibold">Mentors:</span> Genin Squad {display.mentor_squad_number}</div>}
           {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
           {Array.isArray(display.rank) && display.rank.length > 0 && <div><span className="font-semibold">Rank:</span> {display.rank.join(', ')}</div>}
           {Array.isArray(display.types) && display.types.length > 0 && <div><span className="font-semibold">Type:</span> {display.types.join(', ')}</div>}
@@ -3940,16 +4116,22 @@ function PendingJutsuCard({
                         <Icon n="Check" size={14}/> Begin Second Review
                       </ConfirmButton>
                       {['admin', 'owner'].includes(currentUser.role) && (
-                        <ConfirmButton
-                          onConfirm={() => onApprove(pending.id)}
-                          disabled={isApproving}
-                          armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
-                          armedClassName="ring-2 ring-emerald-300 animate-pulse"
-                          className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
-                          {isApproving
-                            ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                            : <><Icon n="Check" size={14}/> Admin Approve</>}
-                        </ConfirmButton>
+                        ocFinalStepDone ? (
+                          <ConfirmButton
+                            onConfirm={() => onApprove(pending.id)}
+                            disabled={isApproving}
+                            armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
+                            armedClassName="ring-2 ring-emerald-300 animate-pulse"
+                            className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                            {isApproving
+                              ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                              : <><Icon n="Check" size={14}/> Admin Approve</>}
+                          </ConfirmButton>
+                        ) : (
+                          <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
+                            ⏳ Final step pending — the player must register their character area threads first
+                          </div>
+                        )
                       )}
                     </>
                   ) : (
@@ -3972,16 +4154,22 @@ function PendingJutsuCard({
                   )
                 ) : (
                   hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-                    <ConfirmButton
-                      onConfirm={() => onApprove(pending.id)}
-                      disabled={isApproving}
-                      armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
-                      armedClassName="ring-2 ring-emerald-300 animate-pulse"
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
-                      {isApproving
-                        ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
-                        : <><Icon n="Check" size={14}/> Approve</>}
-                    </ConfirmButton>
+                    ocFinalStepDone ? (
+                      <ConfirmButton
+                        onConfirm={() => onApprove(pending.id)}
+                        disabled={isApproving}
+                        armedLabel={<><Icon n="Check" size={14}/> Confirm approve?</>}
+                        armedClassName="ring-2 ring-emerald-300 animate-pulse"
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-60">
+                        {isApproving
+                          ? <><Icon n="Refresh" size={14} className="animate-spin"/> Approving...</>
+                          : <><Icon n="Check" size={14}/> Approve</>}
+                      </ConfirmButton>
+                    ) : (
+                      <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
+                        ⏳ Final step pending — the player must register their character area threads first
+                      </div>
+                    )
                   )
                 )}
                 {onEdit && (!isStrictSubmitter || !isClaimed) && (
@@ -4805,6 +4993,32 @@ export default function App() {
           if (!slotRes || !slotRes.ok) {
             const out = slotRes ? await slotRes.json().catch(() => ({})) : {};
             throw new Error(out.error || 'Could not add the character to its bloodline roster. Approval aborted.');
+          }
+        }
+
+        // Automated roster insertion (squads / elite sections / council).
+        // Must run while the pending row still exists; a failure here doesn't
+        // block the approval — staff can add the entry manually.
+        if (isCharacter) {
+          try {
+            const rosterSess = await getCurrentSession();
+            const rosterRes = await fetch('/.netlify/functions/roster-auto-insert', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                ...(rosterSess?.access_token ? { Authorization: `Bearer ${rosterSess.access_token}` } : {}),
+              },
+              body: JSON.stringify({ pendingId: id }),
+            });
+            const rosterOut = await rosterRes.json().catch(() => ({}));
+            if (!rosterRes.ok) {
+              alert('Heads up: the character was approved, but automatic roster insertion failed ('
+                + (rosterOut.error || rosterRes.status) + '). Please add them to the roster manually.');
+            } else if (rosterOut.warnings?.length) {
+              alert('Roster note: ' + rosterOut.warnings.join(' '));
+            }
+          } catch (rosterErr) {
+            console.warn('[NARP] Roster auto-insert failed:', rosterErr);
           }
         }
 

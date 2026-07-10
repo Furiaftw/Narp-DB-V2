@@ -28,8 +28,10 @@ const displayNameOf = (p) => p?.site_nickname || p?.username || 'Unknown User';
 /* ---- SystemFinalStepBlock -------------------------------------------------- */
 
 function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) {
-  const [myLink, setMyLink] = useState(pending?.data?.myCharactersLink || '');
-  const [upgLink, setUpgLink] = useState(pending?.data?.upgradesLink || '');
+  const d = pending?.data || {};
+  const [myLink, setMyLink] = useState(d.myCharactersLink || '');
+  const [areaChecked, setAreaChecked] = useState(!!d.myCharactersLink);
+  const [upgradesChecked, setUpgradesChecked] = useState(!!(d.upgradesConfirmed || d.upgradesLink));
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -39,21 +41,32 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) 
   const isSubmitter = currentUserId === pending?.submitted_by;
 
   const myLinkValid = !myLink || myLink.includes('1473338902264676424');
-  const upgLinkValid = !upgLink || upgLink.includes('1473338902264676425');
+  const myLinkComplete = !!myLink.trim() && myLink.includes('1473338902264676424');
 
+  // Older entries stored an upgradesLink; either that or the new checkbox
+  // confirmation counts as the upgrades thread being done.
   const linksSavedAndVerified =
-    pending?.data?.myCharactersLink &&
-    pending.data.myCharactersLink.includes('1473338902264676424') &&
-    pending?.data?.upgradesLink &&
-    pending.data.upgradesLink.includes('1473338902264676425');
+    d.myCharactersLink &&
+    d.myCharactersLink.includes('1473338902264676424') &&
+    (d.upgradesConfirmed || d.upgradesLink);
 
-  const templateText = `Character name | @tagyourself
-Village: [If not in village put wanderer or rogue]
-Rank: [As per character sheet]
-Bloodline/hidden: [Name of bloodline, if there is one]
-Approved by: [Tag the reviewers involved]
-Other: [For Jinchuriki/Sage/seven sword, other non bloodline things]
-Character Doc: [Link your approved character's google doc here]`;
+  // Discord mentions of the reviewers involved: the claimer / first reviewer
+  // and the reviewer who activated this final step (second reviewer).
+  const reviewerMentions = [...new Set([
+    pending?.assignee?.discord_id,
+    pending?.first_reviewer?.discord_id,
+    d.second_reviewer_discord_id,
+  ].filter(Boolean))].map(id => `<@${id}>`).join(' ');
+
+  // Template pre-filled from the OC entry — paste-ready for Discord.
+  const ocName = d.name && d.name !== 'OC Submission' ? d.name : 'Character name';
+  const templateText = `${ocName} | @tagyourself
+Village: ${d.village || '[If not in village put wanderer or rogue]'}
+Rank: ${d.ninja_rank || '[As per character sheet]'}
+Clan/KKG/hidden: ${d.bloodline || '[Name of clan, if there is one]'}
+Approved by: ${reviewerMentions || '[Tag the reviewers involved]'}
+Other: [For Jinchuriki/Sage/seven sword, other non clan things]
+Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
 
   const handleCopy = () => {
     copyText(templateText, () => {
@@ -63,15 +76,14 @@ Character Doc: [Link your approved character's google doc here]`;
   };
 
   const handleSave = async () => {
-    if (!myLink.trim() || !upgLink.trim()) { setError('Both links are required.'); return; }
-    if (!myLink.includes('1473338902264676424')) { setError('Invalid link — paste a link from the #my-characters forum on the server.'); return; }
-    if (!upgLink.includes('1473338902264676425')) { setError('Invalid link — paste a link from the #character-upgrades forum on the server.'); return; }
+    if (!myLinkComplete) { setError('Paste your Character Area thread link from the #my-characters forum.'); return; }
+    if (!areaChecked || !upgradesChecked) { setError('Check both boxes once the threads are created.'); return; }
     setError('');
     setSaving(true);
     try {
-      await onUpdatePending({ ...pending.data, myCharactersLink: myLink.trim(), upgradesLink: upgLink.trim() });
+      await onUpdatePending({ ...pending.data, myCharactersLink: myLink.trim(), upgradesConfirmed: true });
     } catch (err) {
-      setError('Failed to save links: ' + err.message);
+      setError('Failed to save: ' + err.message);
     } finally {
       setSaving(false);
     }
@@ -92,7 +104,7 @@ Character Doc: [Link your approved character's google doc here]`;
           submitterName: pending.submitter?.username || 'Player',
           reviewerDiscordId: pending.data.second_reviewer_discord_id,
           myCharactersLink: pending.data.myCharactersLink,
-          upgradesLink: pending.data.upgradesLink,
+          upgradesLink: pending.data.upgradesLink || '',
           docLink: pending.data.link,
         }),
       });
@@ -115,22 +127,26 @@ Character Doc: [Link your approved character's google doc here]`;
       </div>
 
       <div className="text-xs space-y-2 text-slate-300 leading-relaxed">
-        <p className="font-bold text-white text-sm">Your character is almost approved!</p>
-        <p>Please create a thread in the following forums on Discord:</p>
+        <p className="font-bold text-white text-sm">Your character is almost approved! There is one last step before you are all set.</p>
+        <p>Please create a thread in:</p>
         <div className="flex flex-col gap-1.5 pl-2 mt-1">
           <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
-            ◈ my-characters — your character RP log area
+            ◈ #my-characters → your character RP log area
           </a>
           <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
-            ◈ character-upgrades — your character upgrades log area
+            ◈ #character-upgrades → your character upgrades log area
           </a>
         </div>
-        <p className="mt-2">Use the template below for both threads. Once done, your character will be added to the rosters!</p>
+        <p className="mt-2">
+          Make sure to use the template below for your character area thread. Once done, your character will be added to
+          the rosters and you will receive your roles! If you need help, ping <strong className="text-indigo-300">@Reviewer</strong> on
+          Discord and we will guide you through it.
+        </p>
       </div>
 
       <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
         <div className="flex justify-between items-center mb-2">
-          <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Thread Template</span>
+          <span className="text-[10px] uppercase tracking-wider font-extrabold text-slate-400">Copy the template below for #my-characters</span>
           <button
             type="button"
             onClick={handleCopy}
@@ -147,28 +163,49 @@ Character Doc: [Link your approved character's google doc here]`;
       <div className="border-t border-slate-800/80 pt-4 flex flex-col gap-3">
         {isSubmitter ? (
           <>
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">My-Characters Thread Link</label>
+            {/* Thread checklist: character area needs its Discord link to be
+                checkable; the upgrades thread is a simple confirmation. */}
+            <div className="flex flex-col gap-2 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
+              <div className="flex items-start gap-2.5">
+                <input
+                  type="checkbox"
+                  id={`fs-area-${pending.id}`}
+                  checked={areaChecked}
+                  disabled={!myLinkComplete}
+                  onChange={e => { setAreaChecked(e.target.checked); setError(''); }}
+                  className="w-4 h-4 mt-0.5 rounded accent-indigo-500 disabled:opacity-40 shrink-0"
+                />
+                <label htmlFor={`fs-area-${pending.id}`} className="text-xs font-bold text-slate-200 cursor-pointer select-none">
+                  Character Area thread created (#my-characters)
+                  <span className="block text-[10px] font-semibold text-slate-500 mt-0.5">Paste the thread link below to unlock this checkbox.</span>
+                </label>
+              </div>
               <input
                 type="url"
                 value={myLink}
-                onChange={e => { setMyLink(e.target.value); setError(''); }}
+                onChange={e => {
+                  setMyLink(e.target.value);
+                  setError('');
+                  if (!e.target.value.includes('1473338902264676424')) setAreaChecked(false);
+                }}
                 placeholder="https://discord.com/channels/.../1473338902264676424"
-                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
               />
               {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the my-characters forum</p>}
             </div>
 
-            <div className="flex flex-col gap-2">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Character-Upgrades Thread Link</label>
+            <div className="flex items-start gap-2.5 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
               <input
-                type="url"
-                value={upgLink}
-                onChange={e => { setUpgLink(e.target.value); setError(''); }}
-                placeholder="https://discord.com/channels/.../1473338902264676425"
-                className="w-full text-xs border border-slate-800 bg-slate-950 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
+                type="checkbox"
+                id={`fs-upg-${pending.id}`}
+                checked={upgradesChecked}
+                onChange={e => { setUpgradesChecked(e.target.checked); setError(''); }}
+                className="w-4 h-4 mt-0.5 rounded accent-indigo-500 shrink-0"
               />
-              {!upgLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the character-upgrades forum</p>}
+              <label htmlFor={`fs-upg-${pending.id}`} className="text-xs font-bold text-slate-200 cursor-pointer select-none">
+                Character Upgrades thread created (#character-upgrades)
+                <span className="block text-[10px] font-semibold text-slate-500 mt-0.5">No link needed — just confirm you created it.</span>
+              </label>
             </div>
 
             {error && <p className="text-red-400 text-xs font-bold bg-red-950/30 border border-red-900/50 p-2.5 rounded-xl">{error}</p>}
@@ -177,10 +214,10 @@ Character Doc: [Link your approved character's google doc here]`;
               <button
                 type="button"
                 onClick={handleSave}
-                disabled={saving || !myLink.trim() || !upgLink.trim() || !myLinkValid || !upgLinkValid}
+                disabled={saving || !myLinkComplete || !areaChecked || !upgradesChecked}
                 className="w-full mt-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl text-xs transition-colors"
               >
-                {saving ? 'Verifying...' : 'Verify and Save Links'}
+                {saving ? 'Verifying...' : 'Complete Final Step'}
               </button>
             ) : (
               <div className="flex flex-col gap-2.5 mt-1 bg-emerald-950/20 border border-emerald-900/50 p-4 rounded-2xl">
@@ -188,7 +225,7 @@ Character Doc: [Link your approved character's google doc here]`;
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="3" className="shrink-0">
                     <polyline points="20 6 9 17 4 12" />
                   </svg>
-                  <span>Links verified and saved successfully!</span>
+                  <span>Final step complete! A second reviewer will verify everything and approve.</span>
                 </div>
                 <button
                   type="button"
@@ -208,20 +245,27 @@ Character Doc: [Link your approved character's google doc here]`;
           <div className="text-xs space-y-3">
             {linksSavedAndVerified ? (
               <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800">
-                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Verified links provided by submitter:</p>
+                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-wider mb-2">Final step completed by submitter:</p>
                 <div className="flex flex-col gap-2 pl-1">
                   <a href={pending.data.myCharactersLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
-                    My-Characters Thread Link
+                    ✓ Character Area Thread Link
                   </a>
-                  <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
-                    Character-Upgrades Thread Link
-                  </a>
+                  {pending.data.upgradesLink ? (
+                    <a href={pending.data.upgradesLink} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:underline font-bold flex items-center gap-1.5 truncate">
+                      ✓ Character Upgrades Thread Link
+                    </a>
+                  ) : (
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      ✓ Upgrades thread confirmed by submitter
+                    </span>
+                  )}
                 </div>
+                <p className="text-slate-500 text-[10px] mt-3">Verify the threads, then approve the submission from the Pending tab.</p>
               </div>
             ) : (
               <div className="bg-slate-950 rounded-2xl p-4 border border-slate-800 flex items-center gap-2.5 text-slate-400">
                 <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
-                <span>Waiting for submitter to submit forum links...</span>
+                <span>Waiting for the submitter to create their threads and register the Character Area link...</span>
               </div>
             )}
           </div>
