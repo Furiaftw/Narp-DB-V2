@@ -2783,9 +2783,10 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
 
   const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
   const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
+  const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
   const [wlCustom, setWlCustom] = useState(profile?.custom_item_thread_id || '');
   const [wlSummon, setWlSummon] = useState(profile?.summon_thread_id || '');
-  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, custom: false, summon: false });
+  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
 
   const saveWorkLog = async (type) => {
     setWlSaving(s => ({ ...s, [type]: true }));
@@ -2794,6 +2795,8 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
         onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
       } else if (type === 'battle') {
         onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
+      } else if (type === 'oc') {
+        onWebhookConfigSave('discord_oc_thread_id', wlOC);
       } else if (type === 'custom') {
         const updated = await updateMyCustomItemThreadId(wlCustom);
         onProfileUpdate(updated);
@@ -2963,10 +2966,11 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   {[
-                    { label: 'Jutsu',       val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
-                    { label: 'Battlemode',  val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
-                    { label: 'Custom Item', val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
-                    { label: 'Summon',      val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
+                    { label: 'Jutsu',          val: wlJutsu,  set: setWlJutsu,  type: 'jutsu',  ownerOnly: true },
+                    { label: 'Battlemode',     val: wlBattle, set: setWlBattle, type: 'battle', ownerOnly: true },
+                    { label: 'OC / Character', val: wlOC,     set: setWlOC,     type: 'oc',     ownerOnly: true },
+                    { label: 'Custom Item',    val: wlCustom, set: setWlCustom, type: 'custom', ownerOnly: false },
+                    { label: 'Summon',         val: wlSummon, set: setWlSummon, type: 'summon', ownerOnly: false },
                   ].map(({ label, val, set, type, ownerOnly }) => (
                     <div key={type}>
                       <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
@@ -3105,25 +3109,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
-                  ].map(({ key, label, placeholder }) => (
-                    <WebhookConfigRow
-                      key={key}
-                      label={label}
-                      placeholder={placeholder}
-                      initialValue={webhookConfig[key] || ''}
-                      onSave={(value) => onWebhookConfigSave(key, value)}
-                    />
-                  ))}
-                </div>
-                <h4 className="text-sm font-bold mt-6 mb-1 text-slate-700">Submission Log Threads</h4>
-                <p className="text-xs text-slate-500 mb-4">Paste the Discord thread ID each submission type should log to. These override the env-var defaults.</p>
-                <div className="space-y-3">
-                  {[
-                    { key: 'discord_jutsu_thread_id',       label: 'Jutsu Log Thread',          placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_battlemode_thread_id',  label: 'Battlemode Log Thread',     placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_oc_thread_id',          label: 'OC / Character Log Thread', placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_summon_thread_id',      label: 'Summon Log Thread',         placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_custom_item_thread_id', label: 'Custom Item Log Thread',    placeholder: 'Thread ID (17-20 digits)' },
                   ].map(({ key, label, placeholder }) => (
                     <WebhookConfigRow
                       key={key}
