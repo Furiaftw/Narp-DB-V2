@@ -48,6 +48,7 @@ import {
   deletePushSubscription,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
+import { rolesForApprovedOC, applyDiscordRoles } from './lib/discordRoles';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
 import InboxPage from './pages/InboxPage';
@@ -1762,6 +1763,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   );
   const [mentorSquad, setMentorSquad] = useState(initial.mentor_squad_number ? String(initial.mentor_squad_number) : '');
   const [councilor, setCouncilor] = useState(!!initial.councilor);
+  const [ocNumber, setOcNumber] = useState(initial.oc_number ? Number(initial.oc_number) : 0);
   const [submitting, setSubmitting] = useState(false);
   const [rosterCounts, setRosterCounts] = useState(null);
   const [rosterSquads, setRosterSquads] = useState([]);
@@ -1797,9 +1799,11 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   }, []);
 
   /* ---- Squad interaction ------------------------------------------------ */
+  const isWanderer = village === 'Wanderer';
   const villageId = OC_VILLAGES.find(v => v.name === village)?.id || null;
-  // Genin and Chūnin join (or start) a squad of their own rank.
-  const squadType = ninjaRank === 'Genin' ? 'genin' : ninjaRank === 'Chūnin' ? 'chunin' : null;
+  // Genin and Chūnin join (or start) a squad of their own rank. Wanderers
+  // live outside the village system — no squads, mentoring, or council.
+  const squadType = !isWanderer && (ninjaRank === 'Genin' ? 'genin' : ninjaRank === 'Chūnin' ? 'chunin' : null);
   const memberRole = squadType === 'genin' ? 'genin' : 'member';
 
   // Squads of the relevant type in the chosen village, with member counts.
@@ -1840,7 +1844,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
 
   // Rank or village change invalidates the squad-related picks.
   const pickRank = (r) => { setNinjaRank(r); setSquadChoice(null); setMentorSquad(''); if (r !== 'Jōnin') setCouncilor(false); };
-  const pickVillage = (name) => { setVillage(name); setSquadChoice(null); setMentorSquad(''); };
+  const pickVillage = (name) => { setVillage(name); setSquadChoice(null); setMentorSquad(''); if (name === 'Wanderer') setCouncilor(false); };
 
   const rankTotals = useMemo(() => {
     if (!rosterCounts) return null;
@@ -1886,7 +1890,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const bloodlineFull = selectedInfo.status === 'full';
 
   const squadRequired = !!squadType && !!village;
-  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village
+  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village || !ocNumber
     || (squadRequired && !squadChoice) || bloodlineFull || submitting;
 
   const handleSubmit = async (e) => {
@@ -1898,8 +1902,9 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         squad_type: squadType || null,
         squad_number: squadType && squadChoice ? squadChoice.number : null,
         squad_is_new: squadType && squadChoice ? !!squadChoice.isNew : false,
-        mentor_squad_number: (ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && mentorSquad ? Number(mentorSquad) : null,
-        councilor: ninjaRank === 'Jōnin' ? councilor : false,
+        mentor_squad_number: !isWanderer && (ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && mentorSquad ? Number(mentorSquad) : null,
+        councilor: !isWanderer && ninjaRank === 'Jōnin' ? councilor : false,
+        oc_number: ocNumber || null,
       };
 
       if (isEdit) {
@@ -1991,6 +1996,28 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             />
           </div>
 
+          {/* Which OC — drives the Discord "X oc" count role granted at approval */}
+          <div>
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you? (Mandatory)</label>
+            <div className="grid grid-cols-3 gap-2">
+              {[[1, 'First OC'], [2, 'Second OC'], [3, 'Third OC']].map(([n, label]) => {
+                const active = ocNumber === n;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setOcNumber(n)}
+                    className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${
+                      active ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Ninja rank — each option shows how needed that rank is server-wide */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Ninja Rank (Mandatory)</label>
@@ -2023,10 +2050,10 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             </div>
           </div>
 
-          {/* Village — revealed after a rank is picked, with a balance suggestion */}
+          {/* Faction — revealed after a rank is picked, with a balance suggestion */}
           {ninjaRank && (
             <div className="animate-in fade-in slide-in-from-top-2">
-              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Village (Mandatory)</label>
+              <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Faction — Village or Wanderer (Mandatory)</label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                 {OC_VILLAGES.map(v => {
                   const count = rosterCounts ? (rosterCounts[v.id]?.[OC_RANK_KEY[ninjaRank]] || 0) : null;
@@ -2055,6 +2082,18 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
                     </button>
                   );
                 })}
+                <button
+                  type="button"
+                  onClick={() => pickVillage('Wanderer')}
+                  className={`text-left p-3 rounded-xl border-2 border-dashed transition-all sm:col-span-3 ${
+                    isWanderer ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-white hover:border-slate-400'
+                  }`}
+                >
+                  <span className={`text-sm font-bold block ${isWanderer ? 'text-emerald-800' : 'text-slate-800'}`}>Wanderer</span>
+                  <span className="text-[10px] text-slate-400 font-semibold">
+                    Outside the village system — no squads or council, keeps their ninja rank.
+                  </span>
+                </button>
               </div>
             </div>
           )}
@@ -2113,8 +2152,8 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             </div>
           )}
 
-          {/* Jōnin / Special Jōnin — optional mentoring + councilor */}
-          {(ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && village && (
+          {/* Jōnin / Special Jōnin — optional mentoring + councilor (village-only) */}
+          {(ninjaRank === 'Jōnin' || ninjaRank === 'Special Jōnin') && village && !isWanderer && (
             <div className="animate-in fade-in slide-in-from-top-2 space-y-3">
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
@@ -4422,6 +4461,29 @@ export default function App() {
             }
           } catch (rosterErr) {
             console.warn('[NARP] Roster auto-insert failed:', rosterErr);
+          }
+        }
+
+        // Automated Discord role grant: village (or Wanderer) + ninja rank
+        // (+ Councilor with Jōnin) + the OC-count role picked at submission
+        // (higher counts strip the lower ones). Failures never block the
+        // approval — the reviewer is told to grant manually instead.
+        if (isCharacter) {
+          if (item.submitter?.discord_id) {
+            try {
+              const { add, remove } = rolesForApprovedOC(item.data);
+              await applyDiscordRoles({
+                discordUserId: item.submitter.discord_id,
+                add,
+                remove,
+                reason: `OC "${item.data?.name || 'OC'}" fully approved`,
+              });
+            } catch (roleErr) {
+              console.warn('[NARP] Approval role grant failed:', roleErr);
+              alert('Approved, but granting the Discord roles (village/rank/OC count) failed — please assign them manually. (' + (roleErr.message || roleErr) + ')');
+            }
+          } else {
+            alert('Approved, but the submitter has no linked Discord ID — assign their village/rank/OC-count roles manually.');
           }
         }
 

@@ -62,7 +62,8 @@ export default async (req) => {
   const rank = d.ninja_rank;
   const name = d.name || 'OC';
   const link = d.myCharactersLink || null;
-  if (!villageId || !rank) return json({ ok: true, skipped: true, reason: 'missing_village_or_rank' });
+  const isWanderer = (d.village || '').trim().toLowerCase() === 'wanderer';
+  if ((!villageId && !isWanderer) || !rank) return json({ ok: true, skipped: true, reason: 'missing_village_or_rank' });
 
   const warnings = [];
   const stamp = {
@@ -71,6 +72,20 @@ export default async (req) => {
     status: 'approved',
     approved_by: user.id,
   };
+
+  // Wanderers live outside the village system: one entry in the Wanderer
+  // roster section, no squads/elite/council rows.
+  if (isWanderer) {
+    try {
+      const { error: wErr } = await supabase.from('roster_entries').insert({
+        roster_type: 'wanderer', name, discord_link: link, meta: {}, ...stamp,
+      });
+      if (wErr) throw wErr;
+      return json({ ok: true, inserted: 'wanderer', warnings });
+    } catch (err) {
+      return json({ error: 'Roster insert failed: ' + (err.message || String(err)) }, 500);
+    }
+  }
 
   try {
     if (rank === 'Genin' || rank === 'Chūnin') {
