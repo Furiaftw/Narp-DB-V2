@@ -177,7 +177,7 @@ export default async (req) => {
     const { data: updatedProfile, error: updateError } = await supabaseAdmin
       .from('profiles')
       .upsert(profileToSave)
-      .select('id, email, username, avatar_url, role, discord_id')
+      .select('id, email, username, avatar_url, role, discord_id, wanderer_ticket')
       .single();
 
     if (updateError) {

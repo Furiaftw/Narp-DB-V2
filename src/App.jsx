@@ -21,6 +21,8 @@ import {
   setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
+  grantWandererTicket,
+  consumeWandererTicket,
   fetchWhitelist,
   addToWhitelist,
   removeFromWhitelist,
@@ -1769,6 +1771,11 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const [rosterSquads, setRosterSquads] = useState([]);
 
   const isEdit = !!editPending;
+  // Wanderer is not a pickable option for ordinary users — an admin has to
+  // grant a one-time ticket first (after the user cleared it with them in
+  // Discord). Editing an existing Wanderer submission stays allowed even
+  // without a ticket, since the ticket was already spent to create it.
+  const hasWandererTicket = isEdit ? initial.village === 'Wanderer' : !!profile?.wanderer_ticket;
 
   // Population per village per rank, straight from the public roster tables.
   useEffect(() => {
@@ -1921,6 +1928,19 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         });
         onClose();
         return;
+      }
+
+      // Wanderer is ticket-gated: the ticket is spent right here, at
+      // submission time, not at approval — cancelling afterward does not
+      // refund it, so a stolen/duplicate submit attempt can't consume it
+      // twice and a legitimate submit can't slip through without one.
+      if (isWanderer) {
+        const consumed = await consumeWandererTicket();
+        if (!consumed) {
+          alert('You don’t have a Wanderer ticket. Ask an admin in Discord for one before submitting a Wanderer OC.');
+          setSubmitting(false);
+          return;
+        }
       }
 
       const data = {
@@ -2082,18 +2102,25 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
                     </button>
                   );
                 })}
-                <button
-                  type="button"
-                  onClick={() => pickVillage('Wanderer')}
-                  className={`text-left p-3 rounded-xl border-2 border-dashed transition-all sm:col-span-3 ${
-                    isWanderer ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-white hover:border-slate-400'
-                  }`}
-                >
-                  <span className={`text-sm font-bold block ${isWanderer ? 'text-emerald-800' : 'text-slate-800'}`}>Wanderer</span>
-                  <span className="text-[10px] text-slate-400 font-semibold">
-                    Outside the village system — no squads or council, keeps their ninja rank.
-                  </span>
-                </button>
+                {hasWandererTicket && (
+                  <button
+                    type="button"
+                    onClick={() => pickVillage('Wanderer')}
+                    className={`text-left p-3 rounded-xl border-2 border-dashed transition-all sm:col-span-3 ${
+                      isWanderer ? 'border-emerald-500 bg-emerald-50' : 'border-slate-300 bg-white hover:border-slate-400'
+                    }`}
+                  >
+                    <span className={`text-sm font-bold block ${isWanderer ? 'text-emerald-800' : 'text-slate-800'}`}>Wanderer</span>
+                    <span className="text-[10px] text-slate-400 font-semibold">
+                      Outside the village system — no squads or council, keeps their ninja rank.
+                    </span>
+                    {!isEdit && (
+                      <span className="block mt-1 text-[9px] font-extrabold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-amber-100 text-amber-700 border-amber-200 w-fit">
+                        Uses your one-time ticket
+                      </span>
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -3957,6 +3984,17 @@ export default function App() {
     }
   };
 
+  const handleGrantWandererTicket = async (userId, username) => {
+    if (!window.confirm(`Grant a one-time Wanderer OC ticket to ${username || 'this member'}?`)) return;
+    try {
+      await grantWandererTicket(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to grant Wanderer ticket:', err);
+      alert('Failed to grant ticket: ' + (err.message || err));
+    }
+  };
+
   const handleWorkThreadChange = async (userId, threadId) => {
     try {
       await setUserWorkThreadId(userId, threadId);
@@ -5385,6 +5423,7 @@ export default function App() {
                           <th className="py-3 px-4">Discord User ID</th>
                           <th className="py-3 px-4">Joined At</th>
                           <th className="py-3 px-4">Work Thread ID</th>
+                          <th className="py-3 px-4">Wanderer Ticket</th>
                           <th className="py-3 px-4 text-right">Role</th>
                         </tr>
                       </thead>
@@ -5429,6 +5468,21 @@ export default function App() {
                               </td>
                               <td className="py-3 px-4">
                                 <MemberWorkThreadInput member={m} onSave={handleWorkThreadChange} />
+                              </td>
+                              <td className="py-3 px-4">
+                                {m.wanderer_ticket ? (
+                                  <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded border bg-amber-100 text-amber-700 border-amber-200">
+                                    Ticket Active
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleGrantWandererTicket(m.id, m.username)}
+                                    className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs transition-all"
+                                  >
+                                    Grant Ticket
+                                  </button>
+                                )}
                               </td>
                               <td className="py-3 px-4 text-right">
                                 <select
