@@ -798,7 +798,7 @@ export const setJutsuTypeTags = async (names) => {
 /* --- Submission controls -------------------------------------------------- */
 
 export const fetchSubmissionControls = async () => {
-  if (!supabase) return { jutsu_paused: false, custom_item_paused: false, summon_paused: false };
+  if (!supabase) return { jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false };
   const { data, error } = await supabase.from('submission_controls').select('*').eq('id', 1).single();
   if (error) throw error;
   return data;

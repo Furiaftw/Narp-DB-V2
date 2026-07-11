@@ -2934,6 +2934,14 @@ function AuditLogModal({ onClose }) {
 /* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
+const SUBMISSION_GATE_TYPES = [
+  { key: 'jutsu_paused',       label: 'Jutsu / Battlemode', color: 'slate'   },
+  { key: 'character_paused',   label: 'OC Submission',      color: 'emerald' },
+  { key: 'custom_item_paused', label: 'Custom Item',        color: 'red'     },
+  { key: 'summon_paused',      label: 'Summon',             color: 'amber'   },
+];
+const SUBMISSION_GATE_LABELS = Object.fromEntries(SUBMISSION_GATE_TYPES.map(({ key, label }) => [key, label]));
+
 function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
@@ -2978,7 +2986,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
     try {
       await updateSubmissionControl(key, newVal, currentUserId);
       onToggleSubmission(key, newVal);
-      const label = key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon';
+      const label = SUBMISSION_GATE_LABELS[key] || key;
       setMsg(`${label} submissions ${newVal ? 'paused' : 'reopened'}.`);
     } catch (e) {
       setMsg('Failed to update: ' + (e.message || 'unknown error'));
@@ -3166,15 +3174,11 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                   <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {[
-                    { key: 'jutsu_paused',      label: 'Jutsu / Battlemode', color: 'slate' },
-                    { key: 'custom_item_paused', label: 'Custom Item',        color: 'red'   },
-                    { key: 'summon_paused',      label: 'Summon',             color: 'amber' },
-                  ].map(({ key, label, color }) => {
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {SUBMISSION_GATE_TYPES.map(({ key, label, color }) => {
                     const paused  = !!(submissionControls?.[key]);
                     const pending = !!togglePending[key];
-                    const trackOn  = { slate: 'bg-slate-700', red: 'bg-red-700', amber: 'bg-amber-500' }[color];
+                    const trackOn  = { slate: 'bg-slate-700', red: 'bg-red-700', amber: 'bg-amber-500', emerald: 'bg-emerald-600' }[color];
                     return (
                       <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
                         <div>
@@ -3825,7 +3829,7 @@ export default function App() {
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
   const [viewAsRole, setViewAsRole] = useState(null);
-  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false });
+  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
   const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
