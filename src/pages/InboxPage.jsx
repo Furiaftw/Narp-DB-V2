@@ -435,9 +435,13 @@ export default function InboxPage({
       <div className="max-w-2xl mx-auto">
         {groupsList}
         {/* Full-screen takeover instead of appending after the whole list —
-            selecting a row must never require scrolling to find its detail. */}
+            selecting a row must never require scrolling to find its detail.
+            z-50 (not z-30): the app's own sticky header is z-40, and since
+            `fixed` + `z-index` opens a new stacking context here, anything
+            lower than 40 gets trapped underneath the header — including the
+            back button — leaving no way out of the card. */}
         {selectedPending && (
-          <div className="fixed inset-0 z-30 bg-white flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-right duration-200">
             <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white">
               <button
                 type="button"
