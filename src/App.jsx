@@ -5273,7 +5273,6 @@ export default function App() {
             getPendingChatMeta={getPendingChatMeta}
             refreshTrigger={refreshTrigger}
             refreshPending={refreshPending}
-            headerOffset={headerHeight + 54}
             dbJutsus={db.jutsus || []}
             onApprove={handleApprovePending}
             onCancel={handleCancelPending}

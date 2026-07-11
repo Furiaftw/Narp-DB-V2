@@ -3,7 +3,6 @@ import Icon from '../components/ui/Icon';
 import ReviewChat from '../components/features/ReviewChat';
 import RecentChatActivity from '../components/features/RecentChatActivity';
 import PendingJutsuCard, { OP_BADGE_COLORS, OP_BADGE_LABELS } from '../components/features/PendingJutsuCard';
-import useIsDesktop from '../hooks/useIsDesktop';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from '../utils/helpers';
 
 const PREFS_KEY = 'narp_msgs_prefs_v1';
@@ -115,7 +114,6 @@ export default function InboxPage({
   getPendingChatMeta,
   refreshTrigger,
   refreshPending,
-  headerOffset = 120,
   dbJutsus = [],
   onApprove,
   onCancel,
@@ -129,7 +127,6 @@ export default function InboxPage({
   visibleRecentChats = [],
   pendingLoaded = true,
 }) {
-  const isDesktop = useIsDesktop();
   const [filter, setFilter] = useState(() => loadPrefs().filter || 'all');
   const [sort, setSort] = useState(() => loadPrefs().sort || 'newest');
 
@@ -286,8 +283,8 @@ export default function InboxPage({
         id={`pending-row-${p.id}`}
         role="button"
         tabIndex={0}
-        onClick={() => onSelect(isSelected && isDesktop ? null : p.id)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(isSelected && isDesktop ? null : p.id); } }}
+        onClick={() => onSelect(p.id)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(p.id); } }}
         className={`w-full text-left cursor-pointer bg-white rounded-2xl border shadow-sm px-4 py-3 flex items-start gap-3 transition-all hover:shadow-md ${
           isSelected
             ? 'border-indigo-400 ring-2 ring-indigo-200'
@@ -430,60 +427,38 @@ export default function InboxPage({
     </div>
   );
 
-  if (!isDesktop) {
-    return (
-      <div className="max-w-2xl mx-auto">
-        {groupsList}
-        {/* Full-screen takeover instead of appending after the whole list —
-            selecting a row must never require scrolling to find its detail.
-            z-50 (not z-30): the app's own sticky header is z-40, and since
-            `fixed` + `z-index` opens a new stacking context here, anything
-            lower than 40 gets trapped underneath the header — including the
-            back button — leaving no way out of the card. */}
-        {selectedPending && (
-          <div className="fixed inset-0 z-50 bg-white flex flex-col animate-in slide-in-from-right duration-200">
-            <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white">
-              <button
-                type="button"
-                onClick={() => onSelect(null)}
-                className="p-1.5 -ml-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
-                aria-label="Back to Inbox"
-              >
-                <Icon n="X" size={18} />
-              </button>
-              <span className="font-bold text-slate-900 text-sm truncate">{resolveName(selectedPending)}</span>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+  /* One layout for every screen size: the row list, plus — when a row is
+     selected — a full-screen slide-in takeover (like opening a Discord
+     channel) with a back button. The old desktop split view is gone: its
+     sticky in-flow panel fought the page scroll (the embedded chat's
+     auto-scroll dragged the whole window down) and never used the full
+     viewport for the review card and its action buttons.
+     z-50 (not lower): the app's own sticky header is z-40, and since
+     `fixed` + `z-index` opens a new stacking context here, anything below
+     40 gets trapped underneath the header — including the back button. */
+  return (
+    <div className="max-w-2xl mx-auto">
+      {groupsList}
+      {selectedPending && (
+        <div className="fixed inset-0 z-50 bg-slate-100 flex flex-col animate-in slide-in-from-right duration-200">
+          <div className="shrink-0 flex items-center gap-2 px-4 py-3 border-b border-slate-200 bg-white">
+            <button
+              type="button"
+              onClick={() => onSelect(null)}
+              className="p-1.5 -ml-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
+              aria-label="Back to Inbox"
+            >
+              <Icon n="X" size={18} />
+            </button>
+            <span className="font-bold text-slate-900 text-sm truncate">{resolveName(selectedPending)}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 md:p-6">
+            <div className="max-w-3xl mx-auto">
               {renderCard(selectedPending, 'drawer')}
             </div>
           </div>
-        )}
-      </div>
-    );
-  }
-
-  // Desktop split view: list on the left, sticky detail panel on the right.
-  const panelHeight = `calc(100vh - ${headerOffset + 32}px)`;
-  return (
-    <div className="max-w-6xl mx-auto grid grid-cols-5 gap-4 items-start">
-      <div className="col-span-2 min-w-0">{groupsList}</div>
-      <div className="col-span-3 sticky" style={{ top: `${headerOffset + 8}px` }}>
-        {selectedPending ? (
-          <div className="overflow-y-auto custom-scrollbar pr-1" style={{ maxHeight: panelHeight }}>
-            {renderCard(selectedPending, 'inline')}
-          </div>
-        ) : (
-          <div
-            className="bg-white/60 rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 gap-3"
-            style={{ height: panelHeight }}
-          >
-            <svg viewBox="0 0 24 24" width="42" height="42" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="text-slate-300">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <p className="text-sm font-semibold">Select a submission to review it here</p>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
