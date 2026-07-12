@@ -320,7 +320,7 @@ export const fetchPendingJutsus = async () => {
   // Manual join for submitter/reviewer, and select/join assignee.
   const result = await supabase
     .from('pending_jutsus')
-    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, assignee:profiles!assigned_to(username, avatar_url)')
+    .select('id, operation, target_id, data, submitted_by, submitted_at, status, first_reviewer_id, assigned_to, second_approval_ping_count, last_second_approval_ping_at, assignee:profiles!assigned_to(username, avatar_url)')
     .order('submitted_at', { ascending: false });
 
   if (result.error) throw result.error;
@@ -366,6 +366,15 @@ export const reviewPendingJutsu = async (id, reviewerId) => {
       status: 'pending_approval',
       first_reviewer_id: reviewerId,
     })
+    .eq('id', id);
+  if (error) throw error;
+};
+
+export const recordSecondApprovalPing = async (id, count) => {
+  if (!supabase) return;
+  const { error } = await supabase
+    .from('pending_jutsus')
+    .update({ second_approval_ping_count: count, last_second_approval_ping_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw error;
 };

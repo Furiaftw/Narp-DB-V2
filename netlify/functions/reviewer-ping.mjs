@@ -24,7 +24,7 @@ export default async (req) => {
     });
   }
 
-  const { triggerType, itemName, itemType, submitterName } = body;
+  const { triggerType, itemName, itemType, submitterName, pingCount } = body;
 
   if (!triggerType || !itemName || !itemType) {
     return new Response(JSON.stringify({ error: 'Missing required parameters: triggerType, itemName, itemType' }), {
@@ -73,7 +73,8 @@ export default async (req) => {
     } else if (triggerType === 'retracted') {
       messageString = `Technique submission **${itemName}** was retracted by the player.`;
     } else if (triggerType === 'second_approval') {
-      messageString = `<@&${roleId}> Pending approval request for the ${itemType} entry: **${itemName}**. Second pair of eyes needed!`;
+      const count = Number.isInteger(pingCount) && pingCount > 0 ? pingCount : 1;
+      messageString = `<@&${roleId}> Pending approval request for the ${itemType} entry: **${itemName}**. Second pair of eyes needed! (How many pings has it been requesting a second reviewer: **${count}**)`;
     } else {
       return new Response(JSON.stringify({ error: 'Invalid triggerType' }), {
         status: 400,

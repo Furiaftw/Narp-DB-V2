@@ -39,6 +39,7 @@ import {
   fetchRoleChangeLog,
   fetchReviewChats,
   claimPendingSubmission,
+  recordSecondApprovalPing,
   fetchWebhookConfig,
   saveWebhookConfig,
   fetchSubmissionControls,
@@ -4801,18 +4802,20 @@ export default function App() {
       const itemType = 'Jutsu';
 
       // Optimistic: update status immediately so re-ordering happens at once
+      const pingedAt = new Date().toISOString();
       setPendingJutsus(prev => prev.map(p =>
-        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile } : p
+        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile, second_approval_ping_count: 1, last_second_approval_ping_at: pingedAt } : p
       ));
 
       await reviewPendingJutsu(id, profile.id);
+      await recordSecondApprovalPing(id, 1);
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
 
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType }),
+        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: 1 }),
       }).catch((pingErr) => {
         console.warn('Failed to send reviewer second approval ping:', pingErr);
       });
@@ -4867,6 +4870,43 @@ export default function App() {
       await refreshPending();
     } catch (e) {
       alert('Claim failed: ' + e.message);
+    }
+  };
+
+  const SECOND_APPROVAL_PING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+  const handlePingSecondApproval = async (id) => {
+    try {
+      const item = pendingJutsus.find(p => p.id === id);
+      if (!item) return;
+
+      const lastPingAt = item.last_second_approval_ping_at ? new Date(item.last_second_approval_ping_at).getTime() : 0;
+      const remainingMs = SECOND_APPROVAL_PING_COOLDOWN_MS - (Date.now() - lastPingAt);
+      if (remainingMs > 0) {
+        alert(`You can send another ping in about ${Math.ceil(remainingMs / 3600000)}h.`);
+        return;
+      }
+
+      const op = item.operation;
+      const display = op === 'delete' ? ((db.jutsus || []).find(j => j._id === item.target_id) || {}) : (item.data || {});
+      const itemName = display.name || 'Unknown Jutsu';
+      const itemType = 'Jutsu';
+      const nextCount = (item.second_approval_ping_count || 0) + 1;
+      const pingedAt = new Date().toISOString();
+
+      setPendingJutsus(prev => prev.map(p =>
+        p.id === id ? { ...p, second_approval_ping_count: nextCount, last_second_approval_ping_at: pingedAt } : p
+      ));
+
+      await recordSecondApprovalPing(id, nextCount);
+
+      await fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: nextCount }),
+      });
+    } catch (e) {
+      alert('Ping failed: ' + e.message);
     }
   };
 
@@ -5011,8 +5051,9 @@ export default function App() {
    * with zero chat messages yet — a freshly-submitted, unclaimed item is
    * exactly what the old Pending tab existed to surface, so it must not
    * disappear just because nobody has said anything about it yet. Items
-   * with no thread get status 'unclaimed' rather than being folded into
-   * 'awaiting_them', since no reviewer has actually engaged yet.
+   * with no thread but no claimant get status 'unclaimed'; once a reviewer
+   * claims it, it moves to 'awaiting_you'/'awaiting_them' even with zero
+   * messages — claiming without chatting yet is not the same as unclaimed.
    *
    * Post-merge, staff see every pending item here — unclaimed and
    * claimed-by-others included — not just ones they've personally claimed
@@ -5030,7 +5071,9 @@ export default function App() {
     return source.map(p => {
       const thread = chatThreadById.get(p.id);
       if (!thread?.lastMessage) {
-        return { pending: p, messages: [], lastMessage: null, turn: null, unreadCount: 0, status: 'unclaimed' };
+        const assignedId = getPendingAssignedId(p);
+        const status = !assignedId ? 'unclaimed' : (assignedId === profile.id ? 'awaiting_you' : 'awaiting_them');
+        return { pending: p, messages: [], lastMessage: null, turn: null, unreadCount: 0, status };
       }
       const iAmSubmitter = p.submitted_by === profile.id;
       const turn = getChatTurn(thread.lastMessage, profile.id, iAmSubmitter);
@@ -5382,6 +5425,7 @@ export default function App() {
             onReview={handleReviewPending}
             onEdit={handleEditPending}
             onClaim={handleClaimPending}
+            onPingSecondApproval={handlePingSecondApproval}
             approvingIds={approvingIds}
             collapsedGroups={collapsedGroups}
             setCollapsedGroups={setCollapsedGroups}
