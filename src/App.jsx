@@ -2951,12 +2951,13 @@ function AuditLogModal({ onClose }) {
   }, []);
 
   const arrow = (from, to) => {
-    const colors = { user: 'text-slate-500', staff: 'text-emerald-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
+    const colors = { user: 'text-slate-500', staff: 'text-emerald-600', oc_staff: 'text-teal-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
+    const label = (r) => r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff' : (r || '∅');
     return (
       <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{from === 'staff' ? 'Reviewer' : (from || '∅')}</span>
+        <span className={colors[from] || ''}>{label(from)}</span>
         <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{to === 'staff' ? 'Reviewer' : (to || '∅')}</span>
+        <span className={colors[to] || ''}>{label(to)}</span>
       </span>
     );
   };
@@ -3337,6 +3338,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
+                    { key: 'discord_oc_staff_role_id',    label: 'Staff (OC) Role ID',   placeholder: 'Discord role snowflake' },
                   ].map(({ key, label, placeholder }) => (
                     <WebhookConfigRow
                       key={key}
@@ -3609,6 +3611,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
     owner: 'bg-amber-500 text-amber-50 border-amber-600',
     admin: 'bg-indigo-500 text-indigo-50 border-indigo-600',
     staff: 'bg-emerald-500 text-emerald-50 border-emerald-600',
+    oc_staff: 'bg-teal-500 text-teal-50 border-teal-600',
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
 
@@ -3619,7 +3622,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
+          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'oc_staff' ? 'Staff' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -3638,8 +3641,8 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
             </div>
           </div>
 
-          {/* Site Nickname — staff / admin / owner only */}
-          {supabaseReady && profile && ['staff', 'admin', 'owner'].includes(profile.role) && (
+          {/* Site Nickname — staff / oc_staff / admin / owner only */}
+          {supabaseReady && profile && ['staff', 'oc_staff', 'admin', 'owner'].includes(profile.role) && (
             <div className="border-b border-slate-100 px-4 py-3">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Site Nickname</div>
               {!nicknameEditing ? (
@@ -3721,6 +3724,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 <option value="owner">Operator (default)</option>
                 <option value="admin">Admin</option>
                 <option value="staff">Reviewer</option>
+                <option value="oc_staff">Staff (OC only)</option>
                 <option value="user">User</option>
               </select>
             </div>
@@ -3731,7 +3735,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['user', 'staff', 'admin', 'owner'].map(r => (
+                {['user', 'staff', 'oc_staff', 'admin', 'owner'].map(r => (
                   <button key={r} type="button"
                     onClick={() => onToggleDevRole(r)}
                     className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
@@ -3739,7 +3743,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
                     }`}>
-                    {r === 'staff' ? 'Reviewer' : r === 'owner' ? 'Operator' : r}
+                    {r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff (OC)' : r === 'owner' ? 'Operator' : r}
                   </button>
                 ))}
               </div>
@@ -3905,6 +3909,10 @@ export default function App() {
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
+  // 'oc_staff' ("Staff" in the UI) is a narrower reviewer tier that can only
+  // claim/review/approve OC (Character) submissions — everything else in the
+  // app treats them like a plain 'user'.
+  const isOcStaff = role === 'oc_staff';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const pendingJutsusRef = useRef([]);
@@ -4190,10 +4198,13 @@ export default function App() {
         .sort((a, b) => new Date(b.submitted_at || 0) - new Date(a.submitted_at || 0));
       setMyOwnSubmissions(own);
 
-      // Staff see all submissions EXCEPT their own in the Pending review tab
+      // Staff see all submissions EXCEPT their own in the Pending review tab.
+      // OC Staff see the same, narrowed to Character (OC) entries only.
       const filtered = isStaff
         ? list.filter(p => p.submitted_by !== profile?.id)
-        : [];
+        : isOcStaff
+          ? list.filter(p => p.submitted_by !== profile?.id && p.data?.type === 'Character')
+          : [];
       
       const sorted = [...filtered].sort((a, b) => {
         const getPriorityWeight = (p) => {
@@ -4240,15 +4251,15 @@ export default function App() {
     } catch (e) {
       console.warn('[NARP] fetchPendingJutsus failed:', e);
     }
-  }, [supabaseReady, isStaff, profile?.id]);
+  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
   useEffect(() => {
     if (!supabaseReady || !profile?.id) return;
     fetchChatOverview().then(setChatThreads).catch(() => {});
-    if (isStaff) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
-  }, [supabaseReady, isStaff, profile?.id]);
+    if (isStaff || isOcStaff) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
@@ -5065,7 +5076,7 @@ export default function App() {
     if (!profile?.id) return [];
     const seen = new Set();
     const source = [];
-    for (const p of [...myOwnSubmissions, ...(isStaff ? pendingJutsus : [])]) {
+    for (const p of [...myOwnSubmissions, ...((isStaff || isOcStaff) ? pendingJutsus : [])]) {
       if (!seen.has(p.id)) { seen.add(p.id); source.push(p); }
     }
     return source.map(p => {
@@ -5086,7 +5097,7 @@ export default function App() {
         : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
       return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
     });
-  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, chatReadMap]);
+  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, isOcStaff, chatReadMap]);
 
   const inboxItemById = useMemo(
     () => new Map(inboxItems.map(it => [it.pending.id, it])),
@@ -5410,7 +5421,7 @@ export default function App() {
             profile={profile}
             role={role}
             isAdmin={isAdmin}
-            isStaff={isStaff}
+            isStaff={isStaff || isOcStaff}
             selectedId={selectedInboxId}
             onSelect={setSelectedInboxId}
             onMarkRead={markChatRead}
@@ -5539,6 +5550,7 @@ export default function App() {
                                 >
                                   <option value="user">User</option>
                                   <option value="staff">Reviewer</option>
+                                  <option value="oc_staff">Staff (OC only)</option>
                                   <option value="admin">Admin</option>
                                 </select>
                               </td>

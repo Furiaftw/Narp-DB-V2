@@ -130,8 +130,23 @@ export default async (req) => {
     const memberRoles = memberData?.roles || [];
 
     const ownerUserId = process.env.DISCORD_OWNER_USER_ID;
-    const adminRoleId = process.env.DISCORD_ADMIN_ROLE_ID;
-    const reviewerRoleId = process.env.DISCORD_REVIEWER_ROLE_ID;
+
+    // Prefer DB config (editable live from System Tools), fall back to env vars
+    let adminRoleId = null;
+    let reviewerRoleId = null;
+    let ocStaffRoleId = null;
+    try {
+      const { data: cfgRows } = await supabaseAdmin
+        .from('webhook_config')
+        .select('config_key, config_value')
+        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_oc_staff_role_id']);
+      adminRoleId = cfgRows?.find(r => r.config_key === 'discord_admin_role_id')?.config_value || null;
+      reviewerRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || null;
+      ocStaffRoleId = cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || null;
+    } catch { /* fall through to env vars */ }
+    adminRoleId = adminRoleId || process.env.DISCORD_ADMIN_ROLE_ID;
+    reviewerRoleId = reviewerRoleId || process.env.DISCORD_REVIEWER_ROLE_ID;
+    ocStaffRoleId = ocStaffRoleId || process.env.DISCORD_OC_STAFF_ROLE_ID;
 
     let appRole = 'user';
     if (ownerUserId && String(discordUserId) === String(ownerUserId)) {
@@ -140,6 +155,8 @@ export default async (req) => {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
       appRole = 'staff';
+    } else if (ocStaffRoleId && memberRoles.includes(String(ocStaffRoleId))) {
+      appRole = 'oc_staff';
     }
 
     /* ------------------------------------------------------------------

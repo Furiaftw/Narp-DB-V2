@@ -186,7 +186,7 @@ export default function InboxPage({
 
   const renderChat = (p, variant) => {
     const iAmSubmitter = p.submitted_by === profile?.id;
-    const viewerIsStaff = ['staff', 'admin', 'owner'].includes(role) && !iAmSubmitter;
+    const viewerIsStaff = (['staff', 'admin', 'owner'].includes(role) || role === 'oc_staff') && !iAmSubmitter;
     return (
       <ReviewChat
         pending={p}
