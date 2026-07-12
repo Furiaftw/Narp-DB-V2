@@ -3408,24 +3408,26 @@ function WebhookConfigRow({ label, placeholder, initialValue, onSave }) {
   };
 
   return (
-    <div className="flex items-center gap-2">
-      <label className="text-xs font-bold text-slate-600 w-36 shrink-0">{label}</label>
-      <input
-        type="text"
-        value={value}
-        onChange={e => { setValue(e.target.value); setStatus('idle'); }}
-        placeholder={placeholder}
-        className="flex-1 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 font-mono"
-      />
-      <button
-        onClick={handleSave}
-        disabled={status === 'saving'}
-        className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 shrink-0"
-      >
-        {status === 'saving' ? '…' : 'Save'}
-      </button>
-      {status === 'success' && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓</span>}
-      {status === 'error'   && <span className="text-red-500 text-[10px] shrink-0" title={errMsg}>✗</span>}
+    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+      <label className="text-xs font-bold text-slate-600 sm:w-36 sm:shrink-0">{label}</label>
+      <div className="flex items-center gap-2 min-w-0">
+        <input
+          type="text"
+          value={value}
+          onChange={e => { setValue(e.target.value); setStatus('idle'); }}
+          placeholder={placeholder}
+          className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 font-mono"
+        />
+        <button
+          onClick={handleSave}
+          disabled={status === 'saving'}
+          className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 shrink-0"
+        >
+          {status === 'saving' ? '…' : 'Save'}
+        </button>
+        {status === 'success' && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓</span>}
+        {status === 'error'   && <span className="text-red-500 text-[10px] shrink-0" title={errMsg}>✗</span>}
+      </div>
     </div>
   );
 }
