@@ -218,14 +218,20 @@ export default function PendingJutsuCard({
   // Staff reviewing their OWN submission see the submitter view, not the reviewer view.
   const isStrictSubmitter = currentUser.id === pendingItem.submitted_by;
 
-  const hasStaffPrivileges = ['staff', 'admin', 'owner'].includes(currentUser.role) && !isStrictSubmitter;
+  const op = pending.operation;
+  // Characters can't be approved until the player finishes the final step
+  // (see isCharacterEntry/ocFinalStepDone below) — also doubles as the scope
+  // gate for 'oc_staff' ("Staff"), a reviewer tier restricted to OCs only.
+  const isCharacterEntry = pending.data?.type === 'Character';
+  const isOcStaffRole = currentUser.role === 'oc_staff';
+
+  const hasStaffPrivileges = (['staff', 'admin', 'owner'].includes(currentUser.role) || (isOcStaffRole && isCharacterEntry)) && !isStrictSubmitter;
 
   const isMine     = pending.submitted_by === currentUserId;
-  const op         = pending.operation;
   const submitter  = pending.submitter;
   const submitterName = submitter?.username || 'Unknown';
 
-  const isReviewerOrAdmin = currentUserRole === 'staff' || currentUserRole === 'admin' || currentUserRole === 'owner';
+  const isReviewerOrAdmin = ['staff', 'admin', 'owner'].includes(currentUserRole) || (isOcStaffRole && isCharacterEntry);
   const isStaff = isReviewerOrAdmin;
 
   const opColors = OP_BADGE_COLORS;
@@ -292,9 +298,7 @@ export default function PendingJutsuCard({
 
   const hasSubmitterChatted = chatSenderIds.has(pending.submitted_by);
 
-  // Characters can't be approved until the player finishes the final step:
   // Character Area thread link registered + upgrades thread confirmed.
-  const isCharacterEntry = pending.data?.type === 'Character';
   const ocFinalStepDone = !isCharacterEntry || !!(
     pending.data?.myCharactersLink &&
     (pending.data?.upgradesConfirmed || pending.data?.upgradesLink)

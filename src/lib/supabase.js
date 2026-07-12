@@ -236,7 +236,7 @@ export const fetchAllProfiles = async () => {
 
 export const setUserRole = async (userId, role) => {
   if (!supabase) return;
-  if (!['user', 'staff', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
+  if (!['user', 'staff', 'oc_staff', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
   if (error) throw error;
 };

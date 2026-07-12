@@ -23,8 +23,8 @@ export default async (req) => {
     const discordClientSecret = Netlify.env.get('DISCORD_CLIENT_SECRET') || process.env.DISCORD_CLIENT_SECRET;
     const discordGuildId = Netlify.env.get('VITE_DISCORD_GUILD_ID') || process.env.VITE_DISCORD_GUILD_ID;
     const ownerUserId = Netlify.env.get('DISCORD_OWNER_USER_ID') || process.env.DISCORD_OWNER_USER_ID;
-    const adminRoleId = Netlify.env.get('DISCORD_ADMIN_ROLE_ID') || process.env.DISCORD_ADMIN_ROLE_ID;
-    const reviewerRoleId = Netlify.env.get('DISCORD_REVIEWER_ROLE_ID') || process.env.DISCORD_REVIEWER_ROLE_ID;
+    const envAdminRoleId = Netlify.env.get('DISCORD_ADMIN_ROLE_ID') || process.env.DISCORD_ADMIN_ROLE_ID;
+    const envReviewerRoleId = Netlify.env.get('DISCORD_REVIEWER_ROLE_ID') || process.env.DISCORD_REVIEWER_ROLE_ID;
 
     const supabaseUrl = Netlify.env.get('VITE_SUPABASE_URL') || process.env.VITE_SUPABASE_URL || Netlify.env.get('SUPABASE_DATABASE_URL') || process.env.SUPABASE_DATABASE_URL || Netlify.env.get('VITE_SUPABASE_DATABASE_URL') || process.env.VITE_SUPABASE_DATABASE_URL;
     const supabaseServiceKey = Netlify.env.get('SUPABASE_SERVICE_ROLE_KEY') || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -106,12 +106,37 @@ export default async (req) => {
       console.warn('VITE_DISCORD_GUILD_ID is not set, skipping roles fetch');
     }
 
-    // 4. Role Sync Logic
+    // 4. Supabase Admin client — created early so role sync (below) can read
+    // the live DB config for role IDs before Discord login/DB sync (step 5).
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    // 4b. Role Sync Logic
     // Determine the user's application role (appRole) based on exact hierarchy:
     // - IF the user's Discord ID strictly matches DISCORD_OWNER_USER_ID, set appRole = 'owner'.
-    // - ELSE IF the member's roles array includes DISCORD_ADMIN_ROLE_ID, set appRole = 'admin'.
-    // - ELSE IF the member's roles array includes DISCORD_REVIEWER_ROLE_ID, set appRole = 'staff'. (NOTE: Keep the database value as 'staff', do not use 'reviewer').
+    // - ELSE IF the member's roles array includes the admin role ID, set appRole = 'admin'.
+    // - ELSE IF the member's roles array includes the reviewer role ID, set appRole = 'staff'. (NOTE: Keep the database value as 'staff', do not use 'reviewer').
+    // - ELSE IF the member's roles array includes the OC staff role ID, set appRole = 'oc_staff' ("Staff" — OC-only reviewer).
     // - ELSE, set appRole = 'user'.
+    // Role IDs prefer the live DB config (System Tools) over the env vars, since
+    // env vars are frozen at deploy time and the operator panel edits the DB.
+    let adminRoleId = envAdminRoleId;
+    let reviewerRoleId = envReviewerRoleId;
+    let ocStaffRoleId = process.env.DISCORD_OC_STAFF_ROLE_ID;
+    try {
+      const { data: cfgRows } = await supabaseAdmin
+        .from('webhook_config')
+        .select('config_key, config_value')
+        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_oc_staff_role_id']);
+      adminRoleId = cfgRows?.find(r => r.config_key === 'discord_admin_role_id')?.config_value || adminRoleId;
+      reviewerRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || reviewerRoleId;
+      ocStaffRoleId = cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || ocStaffRoleId;
+    } catch { /* fall through to env vars already read above */ }
+
     let appRole = 'user';
     if (ownerUserId && String(discordUser.id) === String(ownerUserId)) {
       appRole = 'owner';
@@ -119,16 +144,9 @@ export default async (req) => {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
       appRole = 'staff';
+    } else if (ocStaffRoleId && memberRoles.includes(String(ocStaffRoleId))) {
+      appRole = 'oc_staff';
     }
-
-    // 5. Supabase Auth & DB Sync
-    // Initialize Supabase Admin client
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
-      },
-    });
 
     // Generate a highly secure, random 32-character string to serve as session password
     const securePassword = crypto.randomBytes(16).toString('hex');

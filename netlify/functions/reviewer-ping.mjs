@@ -42,26 +42,29 @@ export default async (req) => {
       });
     }
 
-    const roleId = process.env.DISCORD_REVIEWER_ROLE_ID;
+    // Prefer DB config (editable live from System Tools), fall back to env vars
+    let rawRoleId = null;
+    let rawThreadId = null;
+    try {
+      const { data: cfgRows } = await supabase
+        .from('webhook_config')
+        .select('config_key, config_value')
+        .in('config_key', ['discord_reviewer_role_id', 'discord_ping_thread_id']);
+      rawRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || null;
+      rawThreadId = cfgRows?.find(r => r.config_key === 'discord_ping_thread_id')?.config_value || null;
+    } catch {}
+    if (!rawRoleId) {
+      rawRoleId = process.env.DISCORD_REVIEWER_ROLE_ID || null;
+    }
+    if (!rawThreadId) {
+      rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID || null;
+    }
+    const roleId = rawRoleId && /^\d{17,20}$/.test(rawRoleId) ? rawRoleId : null;
     if (!roleId) {
       return new Response(JSON.stringify({ error: 'Reviewer role ID not configured' }), {
         status: 500,
         headers: { 'Content-Type': 'application/json' },
       });
-    }
-
-    // Prefer DB config, fall back to env vars
-    let rawThreadId = null;
-    try {
-      const { data: cfgRow } = await supabase
-        .from('webhook_config')
-        .select('config_value')
-        .eq('config_key', 'discord_ping_thread_id')
-        .maybeSingle();
-      rawThreadId = cfgRow?.config_value || null;
-    } catch {}
-    if (!rawThreadId) {
-      rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID || null;
     }
     const safeThreadId = rawThreadId && /^\d{17,20}$/.test(rawThreadId) ? rawThreadId : null;
     const webhookUrl = safeThreadId ? `${baseUrl}?thread_id=${safeThreadId}` : baseUrl;
