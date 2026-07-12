@@ -9,6 +9,7 @@ import {
   getCurrentSession,
 } from '../../lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
+import { DISCORD_ROLES, applyDiscordRoles } from '../../lib/discordRoles';
 import Icon from '../ui/Icon';
 import ConfirmButton from '../ui/ConfirmButton';
 import useIsDesktop from '../../hooks/useIsDesktop';
@@ -27,7 +28,14 @@ const displayNameOf = (p) => p?.site_nickname || p?.username || 'Unknown User';
 
 /* ---- SystemFinalStepBlock -------------------------------------------------- */
 
-function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) {
+// A forum THREAD link is discord.com/channels/<guildId>/<threadId> — it never
+// contains the parent forum's channel ID, so the only URL-checkable fact is
+// that the thread lives in our server (guild). Reviewers verify the rest.
+const NARP_GUILD_ID = '1473338897697214584';
+const isServerThreadLink = (link) =>
+  new RegExp(`discord(?:app)?\\.com/channels/${NARP_GUILD_ID}/\\d+`).test(link || '');
+
+function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending, participants = [] }) {
   const d = pending?.data || {};
   const [myLink, setMyLink] = useState(d.myCharactersLink || '');
   const [areaChecked, setAreaChecked] = useState(!!d.myCharactersLink);
@@ -40,27 +48,35 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending }) 
 
   const isSubmitter = currentUserId === pending?.submitted_by;
 
-  const myLinkValid = !myLink || myLink.includes('1473338902264676424');
-  const myLinkComplete = !!myLink.trim() && myLink.includes('1473338902264676424');
+  const myLinkValid = !myLink || isServerThreadLink(myLink);
+  const myLinkComplete = !!myLink.trim() && isServerThreadLink(myLink);
 
   // Older entries stored an upgradesLink; either that or the new checkbox
   // confirmation counts as the upgrades thread being done.
   const linksSavedAndVerified =
     d.myCharactersLink &&
-    d.myCharactersLink.includes('1473338902264676424') &&
+    isServerThreadLink(d.myCharactersLink) &&
     (d.upgradesConfirmed || d.upgradesLink);
 
-  // Discord mentions of the reviewers involved: the claimer / first reviewer
-  // and the reviewer who activated this final step (second reviewer).
+  // Discord mentions of every reviewer involved: staff who entered this chat
+  // (claimer, joiners, anyone who messaged), plus the recorded first/second
+  // reviewers as a fallback when chat data hasn't loaded.
   const reviewerMentions = [...new Set([
+    ...participants
+      .filter(p => ['staff', 'admin', 'owner'].includes(p.role) && p.id !== pending?.submitted_by)
+      .map(p => p.discord_id),
     pending?.assignee?.discord_id,
     pending?.first_reviewer?.discord_id,
     d.second_reviewer_discord_id,
   ].filter(Boolean))].map(id => `<@${id}>`).join(' ');
 
+  const submitterMention = pending?.submitter?.discord_id
+    ? `<@${pending.submitter.discord_id}>`
+    : '@tagyourself';
+
   // Template pre-filled from the OC entry — paste-ready for Discord.
   const ocName = d.name && d.name !== 'OC Submission' ? d.name : 'Character name';
-  const templateText = `${ocName} | @tagyourself
+  const templateText = `${ocName} | ${submitterMention}
 Village: ${d.village || '[If not in village put wanderer or rogue]'}
 Rank: ${d.ninja_rank || '[As per character sheet]'}
 Clan/KKG/hidden: ${d.bloodline || '[Name of clan, if there is one]'}
@@ -76,7 +92,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
   };
 
   const handleSave = async () => {
-    if (!myLinkComplete) { setError('Paste your Character Area thread link from the #my-characters forum.'); return; }
+    if (!myLinkComplete) { setError('Paste your Character Area thread link from the NARP server (right-click your thread → Copy Link).'); return; }
     if (!areaChecked || !upgradesChecked) { setError('Check both boxes once the threads are created.'); return; }
     setError('');
     setSaving(true);
@@ -186,12 +202,12 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
                 onChange={e => {
                   setMyLink(e.target.value);
                   setError('');
-                  if (!e.target.value.includes('1473338902264676424')) setAreaChecked(false);
+                  if (!isServerThreadLink(e.target.value)) setAreaChecked(false);
                 }}
-                placeholder="https://discord.com/channels/.../1473338902264676424"
+                placeholder="https://discord.com/channels/.../your-thread-id"
                 className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
               />
-              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Must be from the my-characters forum</p>}
+              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Paste your thread's link from the NARP server (right-click the thread → Copy Link)</p>}
             </div>
 
             <div className="flex items-start gap-2.5 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
@@ -303,7 +319,7 @@ export default function ReviewChat({
   const [isJoiningChat, setIsJoiningChat] = useState(false);
   const [mentionQuery, setMentionQuery] = useState(null); // null = picker closed
   const [mentionIndex, setMentionIndex] = useState(0);
-  const messagesEndRef = useRef(null);
+  const messagesListRef = useRef(null);
   const profileCacheRef = useRef({});
   const inputRef = useRef(null);
   const isDesktop = useIsDesktop();
@@ -421,9 +437,13 @@ export default function ReviewChat({
     return () => supabase.removeChannel(channel);
   }, [pending?.id]);
 
-  // Auto-scroll to newest message
+  // Auto-scroll to newest message. Scoped to the chat's own scroll container
+  // (scrollTop, not scrollIntoView) — scrollIntoView also scrolls ancestor
+  // scrollers including the page itself, which yanked the whole window down
+  // whenever messages loaded while the chat was rendered in document flow.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const list = messagesListRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   // Report that the thread is being viewed so unread badges clear — on open
@@ -632,6 +652,26 @@ export default function ReviewChat({
       if (refreshPending) await refreshPending();
       const fresh = await fetchReviewChats(pending.id);
       if (fresh) setMessages(fresh);
+
+      // Grant "Has Character" immediately — without it the player can't post
+      // in the character-area forum this final step sends them to. Also strip
+      // "No Character" (a no-op past their first submission). A failure here
+      // must not undo the activation; the reviewer just grants manually.
+      if (pending.submitter?.discord_id) {
+        try {
+          await applyDiscordRoles({
+            discordUserId: pending.submitter.discord_id,
+            add: [DISCORD_ROLES.HAS_CHARACTER],
+            remove: [DISCORD_ROLES.NO_CHARACTER],
+            reason: `Final step activated for "${pending.data?.name || 'OC'}"`,
+          });
+        } catch (roleErr) {
+          console.warn('[NARP] Has Character role grant failed:', roleErr);
+          alert('Final step started, but granting the "Has Character" Discord role failed — please give it to the player manually so they can post their threads. (' + (roleErr.message || roleErr) + ')');
+        }
+      } else {
+        alert('Final step started, but the submitter has no linked Discord ID — grant the "Has Character" role manually.');
+      }
     } catch {
       alert("Couldn't start the OC approval flow. Refresh the page and try again.");
     } finally {
@@ -735,7 +775,7 @@ export default function ReviewChat({
             )}
 
             {/* Message list */}
-            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3">
+            <div ref={messagesListRef} className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scrollbar flex flex-col gap-3">
               {visibleMessages.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-slate-400 py-12">
                   <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="mb-2 text-slate-300">
@@ -767,6 +807,7 @@ export default function ReviewChat({
                         msg={msg}
                         pending={pending}
                         currentUserId={currentUserId}
+                        participants={participants}
                         onUpdatePending={async (newData) => {
                           await updatePendingJutsuData(pending.id, newData);
                           if (refreshPending) await refreshPending();
@@ -924,7 +965,6 @@ export default function ReviewChat({
                   );
                 })
               )}
-              <div ref={messagesEndRef} />
             </div>
 
             {/* Input footer */}

@@ -102,7 +102,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -217,7 +217,7 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
@@ -239,6 +239,24 @@ export const setUserRole = async (userId, role) => {
   if (!['user', 'staff', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
   if (error) throw error;
+};
+
+/* --- Wanderer tickets -------------------------------------------------------
+   One-time, admin-granted permission to submit a Wanderer-faction OC. Both
+   mutations go through SECURITY DEFINER RPCs (see add-wanderer-ticket.sql)
+   so users can't self-grant by writing the column directly. */
+
+export const grantWandererTicket = async (userId) => {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('grant_wanderer_ticket', { target_user_id: userId });
+  if (error) throw error;
+};
+
+export const consumeWandererTicket = async () => {
+  if (!supabase) return false;
+  const { data, error } = await supabase.rpc('consume_wanderer_ticket');
+  if (error) throw error;
+  return !!data;
 };
 
 /* --- Webhook config -------------------------------------------------------- */

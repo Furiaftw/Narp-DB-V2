@@ -382,8 +382,9 @@ export default function PendingJutsuCard({
 
       {op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
+          {display.oc_number                               && <div><span className="font-semibold">OC:</span> {display.oc_number === 1 ? 'First' : display.oc_number === 2 ? 'Second' : 'Third'} character</div>}
           {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}{display.councilor ? ' · Councilor' : ''}</div>}
-          {display.village                                 && <div><span className="font-semibold">Village:</span> {display.village}</div>}
+          {display.village                                 && <div><span className="font-semibold">{display.village === 'Wanderer' ? 'Faction' : 'Village'}:</span> {display.village}</div>}
           {display.squad_type && display.squad_number      && <div><span className="font-semibold">Squad:</span> {display.squad_type === 'genin' ? 'Genin' : 'Chunin'} Squad {display.squad_number}{display.squad_is_new ? ' (new squad)' : ''}</div>}
           {display.mentor_squad_number                     && <div><span className="font-semibold">Mentors:</span> Genin Squad {display.mentor_squad_number}</div>}
           {display.nature                                  && <div><span className="font-semibold">Nature:</span> {display.nature}</div>}
