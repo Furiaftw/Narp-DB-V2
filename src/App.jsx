@@ -1256,28 +1256,10 @@ const HIDE_ONLY = [
   { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
-function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, isAdmin, onAdd, onOpenStatelessSubmission, submissionControls }) {
+function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
-
-  const [addDdOpen, setAddDdOpen] = useState(false);
-  const addDdRef = useRef(null);
-
-  useEffect(() => {
-    if (!addDdOpen) return;
-    const handleOutsideClick = (e) => {
-      if (addDdRef.current && !addDdRef.current.contains(e.target)) {
-        setAddDdOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    document.addEventListener('touchstart', handleOutsideClick);
-    return () => {
-      document.removeEventListener('mousedown', handleOutsideClick);
-      document.removeEventListener('touchstart', handleOutsideClick);
-    };
-  }, [addDdOpen]);
 
   const ActiveChip = ({ label, onRemove }) => (
     <span className="flex items-center gap-1.5 bg-slate-800 border border-slate-700 text-slate-200 text-[10px] font-bold px-2.5 py-1 rounded-lg shrink-0 shadow-sm">
@@ -1349,81 +1331,6 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                 <span className="bg-white text-indigo-600 px-1.5 py-0.5 rounded-md text-[10px]">{activeFilterCount}</span>
               )}
             </button>
-
-            {isAdmin && (
-              <div className="relative shrink-0" ref={addDdRef}>
-                <button onClick={() => setAddDdOpen(!addDdOpen)}
-                        className="px-5 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 transition-all shrink-0 bg-slate-800 text-white hover:bg-slate-700 shadow-lg">
-                  <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Add</span> <Icon n="Down" size={12} className="text-white opacity-80" />
-                </button>
-                {addDdOpen && (
-                  <div className="absolute right-0 mt-2 w-64 bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
-                    {submissionControls?.jutsu_paused ? (
-                      <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none">
-                        <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
-                        <span>Jutsu / Battlemode <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => { setAddDdOpen(false); onAdd(); }}
-                        className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                      >
-                        <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
-                      </button>
-                    )}
-                    <div className="border-t border-slate-100">
-                      {submissionControls?.character_paused ? (
-                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
-                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
-                          <span>OC Submission <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Character'); }}
-                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        >
-                          <Icon n="PlusCir" size={14} className="text-emerald-500" /> OC Submission
-                        </button>
-                      )}
-                    </div>
-                    <div className="border-t border-slate-100">
-                      {submissionControls?.summon_paused ? (
-                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
-                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
-                          <span>Summon <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
-                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        >
-                          <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
-                        </button>
-                      )}
-                    </div>
-                    <div className="border-t border-slate-100">
-                      {submissionControls?.custom_item_paused ? (
-                        <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
-                          <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
-                          <span>Custom Item <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
-                        </div>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
-                          className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
-                        >
-                          <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
 
           {activeFilterCount > 0 && (
@@ -1445,6 +1352,109 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
       </div>
 
     </>
+  );
+}
+
+/* ============================================================================
+   COMPONENT: AddSubmissionMenu — lives in the persistent header (not the
+   Jutsus-tab-only FilterBar) so "Submit OC"/Jutsu/Summon/Custom Item is
+   reachable from every tab, not just discoverable if you happen to be
+   looking at the jutsu database.
+   ============================================================================ */
+function AddSubmissionMenu({ canSubmit, onAdd, onOpenStatelessSubmission, submissionControls }) {
+  const [addDdOpen, setAddDdOpen] = useState(false);
+  const addDdRef = useRef(null);
+
+  useEffect(() => {
+    if (!addDdOpen) return;
+    const handleOutsideClick = (e) => {
+      if (addDdRef.current && !addDdRef.current.contains(e.target)) {
+        setAddDdOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [addDdOpen]);
+
+  if (!canSubmit) return null;
+
+  return (
+    <div className="relative shrink-0" ref={addDdRef}>
+      <button onClick={() => setAddDdOpen(!addDdOpen)}
+              className="px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 transition-all shrink-0 bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg">
+        <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Submit</span> <Icon n="Down" size={12} className="text-white opacity-80" />
+      </button>
+      {addDdOpen && (
+        <div className="absolute left-0 mt-2 w-64 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+          {submissionControls?.jutsu_paused ? (
+            <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none">
+              <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+              <span>Jutsu / Battlemode <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => { setAddDdOpen(false); onAdd(); }}
+              className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+            >
+              <Icon n="PlusCir" size={14} className="text-indigo-500" /> Jutsu / Battlemode
+            </button>
+          )}
+          <div className="border-t border-slate-100">
+            {submissionControls?.character_paused ? (
+              <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                <span>OC Submission <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Character'); }}
+                className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              >
+                <Icon n="PlusCir" size={14} className="text-emerald-500" /> OC Submission
+              </button>
+            )}
+          </div>
+          <div className="border-t border-slate-100">
+            {submissionControls?.summon_paused ? (
+              <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                <span>Summon <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Summon'); }}
+                className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              >
+                <Icon n="PlusCir" size={14} className="text-amber-400" /> Summon
+              </button>
+            )}
+          </div>
+          <div className="border-t border-slate-100">
+            {submissionControls?.custom_item_paused ? (
+              <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none opacity-70">
+                <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
+                <span>Custom Item <span className="text-[10px] font-bold uppercase tracking-wide text-rose-400 ml-1">Paused</span></span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => { setAddDdOpen(false); onOpenStatelessSubmission('Custom Item'); }}
+                className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50 flex items-center gap-2"
+              >
+                <Icon n="PlusCir" size={14} className="text-purple-400" /> Custom Item
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -5296,6 +5306,12 @@ export default function App() {
                 Previewing as {viewAsRole === 'staff' ? 'Reviewer' : viewAsRole}
               </span>
             )}
+            <AddSubmissionMenu
+              canSubmit={role !== 'guest'}
+              onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+              onOpenStatelessSubmission={setStatelessType}
+              submissionControls={submissionControls}
+            />
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
@@ -5316,11 +5332,7 @@ export default function App() {
           <FilterBar
             tab={tab} f={f} setF={setF}
             activeFilterCount={fCount}
-            clearF={clearF}
-            isAdmin={role !== 'guest'}
-            onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-            onOpenStatelessSubmission={setStatelessType}
-            submissionControls={submissionControls} />
+            clearF={clearF} />
         )}
       </div>
 
