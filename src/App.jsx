@@ -1361,9 +1361,30 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
    reachable from every tab, not just discoverable if you happen to be
    looking at the jutsu database.
    ============================================================================ */
+const ADD_MENU_WIDTH = 256;
+
+/* Compute fixed-position style for the add-submission panel from the trigger
+   button rect, clamped so it never spills past the right/left viewport edge
+   (the trigger sits at the right end of a flex-wrap header row, so a
+   left-anchored panel can otherwise open off-screen on narrow viewports). */
+function computeAddMenuPos(triggerEl, panelWidth) {
+  if (!triggerEl) return { top: 0, left: 0, width: panelWidth };
+  const rect = triggerEl.getBoundingClientRect();
+  const clampedLeft = Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 8);
+  const left = Math.max(8, clampedLeft);
+  return { top: rect.bottom + 8, left, width: panelWidth };
+}
+
 function AddSubmissionMenu({ canSubmit, onAdd, onOpenStatelessSubmission, submissionControls }) {
   const [addDdOpen, setAddDdOpen] = useState(false);
   const addDdRef = useRef(null);
+  const triggerRef = useRef(null);
+  const [panelStyle, setPanelStyle] = useState({});
+
+  const handleToggle = useCallback(() => {
+    if (!addDdOpen) setPanelStyle(computeAddMenuPos(triggerRef.current, ADD_MENU_WIDTH));
+    setAddDdOpen(o => !o);
+  }, [addDdOpen]);
 
   useEffect(() => {
     if (!addDdOpen) return;
@@ -1384,12 +1405,13 @@ function AddSubmissionMenu({ canSubmit, onAdd, onOpenStatelessSubmission, submis
 
   return (
     <div className="relative shrink-0" ref={addDdRef}>
-      <button onClick={() => setAddDdOpen(!addDdOpen)}
+      <button ref={triggerRef} onClick={handleToggle}
               className="px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-1.5 transition-all shrink-0 bg-emerald-600 text-white hover:bg-emerald-500 shadow-lg">
         <Icon n="PlusCir" size={16} /> <span className="hidden sm:inline">Submit</span> <Icon n="Down" size={12} className="text-white opacity-80" />
       </button>
       {addDdOpen && (
-        <div className="absolute left-0 mt-2 w-64 max-w-[calc(100vw-1rem)] bg-white rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden py-1">
+        <div style={{ position: 'fixed', zIndex: 9999, ...panelStyle }}
+             className="bg-white rounded-xl shadow-xl border border-slate-200 overflow-hidden py-1">
           {submissionControls?.jutsu_paused ? (
             <div className="w-full text-left px-4 py-2.5 text-sm font-semibold text-rose-500 flex items-center gap-2 cursor-default select-none">
               <Icon n="Lock" size={14} className="text-rose-400 shrink-0" />
