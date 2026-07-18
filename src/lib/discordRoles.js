@@ -10,6 +10,11 @@ export const DISCORD_ROLES = {
   HAS_CHARACTER: '1473338897944547331',
   NO_CHARACTER:  '1473338897873375472',
 
+  // Community verification: granted when an admin approves a join-application
+  // interview. Empty by default — set the real role ID here, or configure
+  // discord_verified_role_id in System Tools (the webhook_config value wins).
+  VERIFIED: '',
+
   // OC count — a member carries exactly one of these (granting a higher count
   // removes the lower ones).
   OC_COUNT: {

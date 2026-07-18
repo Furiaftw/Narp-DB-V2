@@ -99,7 +99,7 @@ export default async (req) => {
     // Always ensure dev account has 'owner' role and correct username
     const { error: roleError } = await supabaseAdmin
       .from('profiles')
-      .update({ role: 'owner', username: DEV_USERNAME })
+      .update({ role: 'owner', username: DEV_USERNAME, verified: true })
       .eq('email', DEV_EMAIL);
 
     if (roleError) {

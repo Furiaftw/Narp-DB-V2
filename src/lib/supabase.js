@@ -102,7 +102,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket, verified')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -311,6 +311,134 @@ export const removeFromWhitelist = async (email) => {
     .delete()
     .eq('email', email.toLowerCase().trim());
   if (error) throw error;
+};
+
+/* --- Community verification -------------------------------------------------
+   Join applications + interview chats. Deliberately isolated from the
+   pending_jutsus/pending_chats machinery: own tables, own realtime channel
+   (see add-community-verification.sql). Status transitions go through
+   SECURITY DEFINER RPCs; the client never updates join_applications rows. */
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const fetchMyApplications = async () => {
+  if (!supabase) return [];
+  const session = await getCurrentSession();
+  if (!session?.user?.id) return [];
+  const { data, error } = await supabase
+    .from('join_applications')
+    .select('*')
+    .eq('user_id', session.user.id)
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+};
+
+export const submitJoinApplication = async (answers) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('Must be signed in to apply');
+  const { data, error } = await supabase
+    .from('join_applications')
+    .insert({ user_id: session.user.id, answers })
+    .select()
+    .single();
+  if (error) {
+    if (error.code === '23505') throw new Error('You already have an open application.');
+    throw error;
+  }
+  return data;
+};
+
+/* Admin: every application, newest first, with applicant + reviewer identity.
+   The table has two FKs into profiles, so both joins need explicit names. */
+export const fetchAllApplications = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('join_applications')
+    .select('*, applicant:profiles!join_applications_user_id_fkey(id, username, site_nickname, avatar_url, discord_id, email), reviewer:profiles!join_applications_reviewed_by_fkey(id, username, site_nickname)')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return data || [];
+};
+
+export const startApplicationInterview = async (applicationId) => {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('start_application_interview', { application_id: applicationId });
+  if (error) throw error;
+};
+
+export const denyJoinApplication = async (applicationId, reason = null) => {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('deny_join_application', { application_id: applicationId, reason });
+  if (error) throw error;
+};
+
+/* Returns { user_id, discord_id } of the newly verified applicant so the
+   caller can follow up with the Discord role grant. */
+export const approveJoinApplication = async (applicationId) => {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc('approve_join_application', { application_id: applicationId });
+  if (error) throw error;
+  return Array.isArray(data) ? data[0] || null : data;
+};
+
+export const fetchApplicationChats = async (applicationId) => {
+  if (!supabase) return [];
+  if (!applicationId || typeof applicationId !== 'string' || !UUID_RE.test(applicationId)) {
+    console.warn('[NARP] fetchApplicationChats called with invalid applicationId:', applicationId);
+    return [];
+  }
+  const { data, error } = await supabase
+    .from('application_chats')
+    .select('*, profiles(username, site_nickname, avatar_url, role, discord_id)')
+    .eq('application_id', applicationId)
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[NARP] Error fetching application chats:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const sendApplicationChat = async (applicationId, message) => {
+  if (!supabase) throw new Error('Supabase is not initialized');
+  if (!applicationId || typeof applicationId !== 'string' || !UUID_RE.test(applicationId)) {
+    throw new Error(`Invalid application ID format: "${applicationId}"`);
+  }
+  const session = await getCurrentSession();
+  if (!session?.user?.id) throw new Error('No authenticated user session found');
+  const { data, error } = await supabase
+    .from('application_chats')
+    .insert({ application_id: applicationId, message, sender_id: session.user.id })
+    .select();
+  if (error) {
+    console.error('[NARP] sendApplicationChat failed:', error);
+    throw error;
+  }
+  return data;
+};
+
+/* Own realtime channel — intentionally NOT part of subscribeToDatabaseChanges,
+   whose consumer drives Inbox badges/refreshes; verification stays isolated. */
+export const subscribeToApplicationChanges = (onChange) => {
+  if (!supabase) return null;
+  // Unique topic per subscriber — the badge effect, the admin panel, and the
+  // applicant screen can all be listening at once.
+  const channel = supabase
+    .channel(`verification-changes-${Math.random().toString(36).slice(2)}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'join_applications' },
+      (payload) => onChange(payload)
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'application_chats' },
+      (payload) => onChange(payload)
+    )
+    .subscribe();
+  return channel;
 };
 
 /* --- Pending jutsus -------------------------------------------------------- */

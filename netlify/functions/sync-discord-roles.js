@@ -74,6 +74,7 @@ export default async (req) => {
         avatar_url: existingProfile.avatar_url,
         role: 'owner',
         discord_id: existingProfile.discord_id,
+        verified: true,
       }, 200);
     }
 
@@ -188,13 +189,15 @@ export default async (req) => {
         username: meta.preferred_username || meta.user_name || meta.name || '',
         role: appRole,
         discord_role_synced_at: new Date().toISOString(),
+        // Discord-synced staff/admin are pre-trusted; plain users must verify
+        verified: appRole !== 'user',
       };
     }
 
     const { data: updatedProfile, error: updateError } = await supabaseAdmin
       .from('profiles')
       .upsert(profileToSave)
-      .select('id, email, username, avatar_url, role, discord_id, wanderer_ticket')
+      .select('id, email, username, avatar_url, role, discord_id, wanderer_ticket, verified')
       .single();
 
     if (updateError) {

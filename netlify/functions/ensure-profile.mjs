@@ -33,7 +33,7 @@ export default async (req) => {
 
   const { data: existing } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role')
+    .select('id, email, username, avatar_url, role, verified')
     .eq('id', user.id)
     .maybeSingle();
 
@@ -62,6 +62,8 @@ export default async (req) => {
     avatar_url: meta.avatar_url || meta.picture || '',
     username: meta.preferred_username || meta.user_name || meta.name || '',
     role,
+    // Whitelisted (staff/admin) accounts skip community verification
+    verified: role !== 'user',
   };
 
   const { data, error } = await supabase

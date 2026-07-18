@@ -11,8 +11,9 @@ language plpgsql
 security definer set search_path = ''
 as $$
 declare
-  _role text := 'user';
-  _wl   record;
+  _role     text := 'user';
+  _verified boolean := false;
+  _wl       record;
 begin
   -- Check whitelist first
   select role into _wl
@@ -22,17 +23,20 @@ begin
 
   if found then
     _role := _wl.role;
+    -- Whitelisted accounts are pre-trusted staff/admin: skip verification
+    _verified := true;
     -- Remove from whitelist after use
     delete from public.whitelist where email = lower(new.email);
   end if;
 
-  insert into public.profiles (id, email, username, avatar_url, role)
+  insert into public.profiles (id, email, username, avatar_url, role, verified)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'preferred_username', ''),
     coalesce(new.raw_user_meta_data ->> 'avatar_url', new.raw_user_meta_data ->> 'picture', ''),
-    _role
+    _role,
+    _verified
   )
   on conflict (id) do update set
     email      = excluded.email,

@@ -45,13 +45,17 @@ export default async (req) => {
     // Prefer DB config (editable live from System Tools), fall back to env vars
     let rawRoleId = null;
     let rawThreadId = null;
+    let rawCommunityRoleId = null;
+    let rawApplicationThreadId = null;
     try {
       const { data: cfgRows } = await supabase
         .from('webhook_config')
         .select('config_key, config_value')
-        .in('config_key', ['discord_reviewer_role_id', 'discord_ping_thread_id']);
+        .in('config_key', ['discord_reviewer_role_id', 'discord_ping_thread_id', 'discord_community_admin_role_id', 'discord_application_thread_id']);
       rawRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || null;
       rawThreadId = cfgRows?.find(r => r.config_key === 'discord_ping_thread_id')?.config_value || null;
+      rawCommunityRoleId = cfgRows?.find(r => r.config_key === 'discord_community_admin_role_id')?.config_value || null;
+      rawApplicationThreadId = cfgRows?.find(r => r.config_key === 'discord_application_thread_id')?.config_value || null;
     } catch {}
     if (!rawRoleId) {
       rawRoleId = process.env.DISCORD_REVIEWER_ROLE_ID || null;
@@ -59,6 +63,43 @@ export default async (req) => {
     if (!rawThreadId) {
       rawThreadId = process.env.DISCORD_PING_THREAD_ID || process.env.DISCORD_JUTSU_THREAD_ID || process.env.VITE_DISCORD_JUTSU_THREAD_ID || null;
     }
+    if (!rawCommunityRoleId) {
+      rawCommunityRoleId = process.env.DISCORD_COMMUNITY_ADMIN_ROLE_ID || null;
+    }
+    if (!rawApplicationThreadId) {
+      rawApplicationThreadId = process.env.DISCORD_APPLICATION_THREAD_ID || null;
+    }
+
+    // Community verification: new join application. Mentions the community
+    // admin role when configured, and posts to the application thread if one
+    // is set (falling back to the general ping thread, then the bare webhook).
+    if (triggerType === 'join_application') {
+      const communityRoleId = rawCommunityRoleId && /^\d{17,20}$/.test(rawCommunityRoleId) ? rawCommunityRoleId : null;
+      const appThreadId =
+        (rawApplicationThreadId && /^\d{17,20}$/.test(rawApplicationThreadId) ? rawApplicationThreadId : null)
+        || (rawThreadId && /^\d{17,20}$/.test(rawThreadId) ? rawThreadId : null);
+      const appWebhookUrl = appThreadId ? `${baseUrl}?thread_id=${appThreadId}` : baseUrl;
+      const mention = communityRoleId ? `<@&${communityRoleId}> ` : '';
+      const appMessage = `${mention}New join application from **${submitterName || itemName}**. Review it in the database's Applications tab.`;
+
+      const appResponse = await fetch(appWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: appMessage }),
+      });
+      if (!appResponse.ok) {
+        const errText = await appResponse.text();
+        return new Response(JSON.stringify({ error: `Discord webhook delivery failed: ${errText}` }), {
+          status: appResponse.status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const roleId = rawRoleId && /^\d{17,20}$/.test(rawRoleId) ? rawRoleId : null;
     if (!roleId) {
       return new Response(JSON.stringify({ error: 'Reviewer role ID not configured' }), {

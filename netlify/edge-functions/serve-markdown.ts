@@ -18,6 +18,15 @@ export default async (req: Request, context: Context) => {
     return;
   }
 
+  // The database is members-only since the community verification system:
+  // the catalog is no longer served publicly. (Verified-only RLS would empty
+  // these anon reads anyway — this makes the intent explicit and is easy to
+  // revert if the public feed ever comes back.)
+  return new Response("Catalog access is restricted to verified community members.", {
+    status: 403,
+    headers: { "Content-Type": "text/markdown; charset=utf-8" },
+  });
+
   try {
     const url = Netlify.env.get("SUPABASE_DATABASE_URL") || "";
     const anonKey = Netlify.env.get("SUPABASE_ANON_KEY") || "";

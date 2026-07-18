@@ -49,12 +49,16 @@ import {
   updateMySiteNickname,
   savePushSubscription,
   deletePushSubscription,
+  subscribeToApplicationChanges,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import { rolesForApprovedOC, applyDiscordRoles } from './lib/discordRoles';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
 import InboxPage from './pages/InboxPage';
+import LandingPage from './pages/LandingPage';
+import VerificationScreen from './pages/VerificationScreen';
+import ApplicationsPanel from './pages/ApplicationsPanel';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 
 
@@ -3371,6 +3375,9 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
                     { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
                     { key: 'discord_oc_staff_role_id',    label: 'Staff (OC) Role ID',   placeholder: 'Discord role snowflake' },
+                    { key: 'discord_community_admin_role_id', label: 'Community Admin Role ID (application pings)', placeholder: 'Discord role snowflake' },
+                    { key: 'discord_application_thread_id',   label: 'Join Application Thread',                     placeholder: 'Thread ID (17-20 digits)' },
+                    { key: 'discord_verified_role_id',        label: 'Verified Role ID (granted on approval)',      placeholder: 'Discord role snowflake' },
                   ].map(({ key, label, placeholder }) => (
                     <WebhookConfigRow
                       key={key}
@@ -3767,7 +3774,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['user', 'staff', 'oc_staff', 'admin', 'owner'].map(r => (
+                {['pending', 'user', 'staff', 'oc_staff', 'admin', 'owner'].map(r => (
                   <button key={r} type="button"
                     onClick={() => onToggleDevRole(r)}
                     className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
@@ -3936,6 +3943,9 @@ export default function App() {
   const [viewAsRole, setViewAsRole] = useState(null);
   const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false });
   const supabaseReady = isSupabaseConfigured();
+  // True until the initial session/profile resolution settles — keeps the
+  // landing page from flashing for already-signed-in users on reload.
+  const [authLoading, setAuthLoading] = useState(supabaseReady);
 
   const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
   const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
@@ -3945,6 +3955,14 @@ export default function App() {
   // claim/review/approve OC (Character) submissions — everything else in the
   // app treats them like a plain 'user'.
   const isOcStaff = role === 'oc_staff';
+  // Community verification gate: unverified plain users only see the
+  // application flow. Checks the raw profile (not viewAsRole) so previews
+  // can't lock an admin out; staff+ are implicitly verified. A missing
+  // verified column (migration not run yet) deliberately fails open.
+  const needsVerification = supabaseReady && profile
+    && profile.verified === false
+    && !['staff', 'oc_staff', 'admin', 'owner'].includes(profile.role);
+  const [applicationsHasNew, setApplicationsHasNew] = useState(false);
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const pendingJutsusRef = useRef([]);
@@ -4170,51 +4188,51 @@ export default function App() {
   }, []);
   useEffect(() => { if (!loading) LS.set(STORAGE.CACHE, { ...db, ts: Date.now() }); }, [db, loading]);
 
+  // Component-scope so the verification screen can re-pull the profile the
+  // moment an admin approves the user's application.
+  const refreshProfile = useCallback(async () => {
+    if (!supabaseReady) return;
+    try {
+      const session = await getCurrentSession();
+      if (!session) { setProfile(null); return; }
+      let p = await fetchMyProfile();
+      if (!p) {
+        setProfile(null);
+        return;
+      }
+
+      // Automatically assign unique Discord username if profile doesn't have one
+      if (!p.username) {
+        const meta = session.user?.user_metadata || {};
+        const discordUser = meta.preferred_username || meta.user_name || meta.name || '';
+        if (discordUser) {
+          try {
+            p = await updateMyUsername(discordUser);
+          } catch (updateErr) {
+            console.warn('[NARP] failed to auto-update username:', updateErr);
+          }
+        }
+      }
+
+      setProfile(p);
+      if (p.role === 'owner' || p.role === 'admin') {
+        fetchWebhookConfig().then(setWebhookConfig).catch(() => {});
+      }
+      fetchSubmissionControls().then(setSubmissionControls).catch(() => {});
+    } catch (e) {
+      console.warn('[NARP] profile fetch failed:', e);
+      setProfile(null);
+    } finally {
+      setAuthLoading(false);
+    }
+  }, [supabaseReady]);
+
   useEffect(() => {
     if (!supabaseReady) return;
-    let cancelled = false;
-
-    const refreshProfile = async () => {
-      try {
-        const session = await getCurrentSession();
-        if (cancelled) return;
-        if (!session) { setProfile(null); return; }
-        let p = await fetchMyProfile();
-        if (!p) {
-          if (!cancelled) setProfile(null);
-          return;
-        }
-
-        // Automatically assign unique Discord username if profile doesn't have one
-        if (!p.username) {
-          const meta = session.user?.user_metadata || {};
-          const discordUser = meta.preferred_username || meta.user_name || meta.name || '';
-          if (discordUser) {
-            try {
-              p = await updateMyUsername(discordUser);
-            } catch (updateErr) {
-              console.warn('[NARP] failed to auto-update username:', updateErr);
-            }
-          }
-        }
-
-        if (!cancelled) {
-          setProfile(p);
-          if (p.role === 'owner' || p.role === 'admin') {
-            fetchWebhookConfig().then(setWebhookConfig).catch(() => {});
-          }
-          fetchSubmissionControls().then(setSubmissionControls).catch(() => {});
-        }
-      } catch (e) {
-        console.warn('[NARP] profile fetch failed:', e);
-        if (!cancelled) setProfile(null);
-      }
-    };
-
     refreshProfile();
     const unsub = onAuthChange(() => { refreshProfile(); });
-    return () => { cancelled = true; unsub(); };
-  }, [supabaseReady]);
+    return () => { unsub(); };
+  }, [supabaseReady, refreshProfile]);
 
   const handleSignIn    = async () => { try { await signInWithDiscord(); } catch (e) { alert('Sign-in failed: ' + e.message); } };
   const handleDevSignIn = async () => { await signInWithDevAccess(); };
@@ -4379,6 +4397,36 @@ export default function App() {
     }, 30000);
     return () => clearInterval(interval);
   }, [supabaseReady, profile, refreshPending]);
+
+  // The catalog is behind verified-only RLS, so the mount-time loadDB (which
+  // may run before the session is restored) can come back empty. Refetch once
+  // the profile is known — and again the moment verification flips on.
+  useEffect(() => {
+    if (!supabaseReady || !profile?.id || needsVerification) return;
+    refreshDB();
+  }, [supabaseReady, profile?.id, needsVerification, refreshDB]);
+
+  // Red-dot badge for the admin Applications tab. Kept off the shared
+  // schema-db-changes channel so application events never leak into the
+  // Inbox badge logic.
+  useEffect(() => {
+    if (!supabaseReady || !isAdmin) return;
+    let channel = null;
+    try {
+      channel = subscribeToApplicationChanges((payload) => {
+        if (payload?.table === 'join_applications' && payload?.eventType === 'INSERT' && tabRef.current !== 'applications') {
+          setApplicationsHasNew(true);
+        }
+      });
+    } catch (err) {
+      console.warn('[NARP] Failed to subscribe to application changes:', err);
+    }
+    return () => {
+      if (channel) {
+        try { supabase.removeChannel(channel); } catch {}
+      }
+    };
+  }, [supabaseReady, isAdmin]);
 
   // Raise pending-tab badge when count grows while user is on another tab
   useEffect(() => {
@@ -5161,7 +5209,7 @@ export default function App() {
     return { turn, hasUnread, lastMessage: last };
   }, [chatThreadById, profile?.id, chatReadMap]);
 
-  if (loading) {
+  if (loading || authLoading) {
     return (
       <div className="w-full h-screen bg-black flex flex-col items-center justify-center gap-4">
         <div className="w-8 h-8 border-3 border-indigo-500 border-t-transparent rounded-full animate-spin"/>
@@ -5170,17 +5218,45 @@ export default function App() {
     );
   }
 
+  /* --- Community verification gate ------------------------------------------
+     The database is members-only: logged-out visitors get the landing page,
+     unverified users get the application/interview flow, and nothing of the
+     app shell (header, tabs, cached catalog) renders behind either. Dev mode
+     (no Supabase) is untouched except for the explicit "pending" preview. */
+  if (supabaseReady && !profile) {
+    return <LandingPage onSignIn={handleSignIn} onDevSignIn={handleDevSignIn} />;
+  }
+  if (needsVerification) {
+    return (
+      <VerificationScreen
+        profile={profile}
+        onSignOut={handleSignOut}
+        onProfileRefresh={refreshProfile}
+      />
+    );
+  }
+  if (!supabaseReady && devRole === 'pending') {
+    return (
+      <VerificationScreen
+        profile={null}
+        onSignOut={() => setDevRole('user')}
+        onProfileRefresh={() => {}}
+      />
+    );
+  }
+
   const TABS = [
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
     ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
-    ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
+    ...(isAdmin ? [{ id: 'members', label: 'Member Board' }, { id: 'applications', label: 'Applications', hasNew: applicationsHasNew }] : []),
     { id: 'roster', label: 'Roster' },
   ];
 
   const switchTab = (tabId) => {
     setTab(tabId);
     if (tabId === 'inbox') setInboxHasNew(false);
+    if (tabId === 'applications') setApplicationsHasNew(false);
     setExpRow(null);
     clearF();
     setF(p => ({ ...p, sort: 'az', showFilters: false }));
@@ -5477,6 +5553,10 @@ export default function App() {
             visibleRecentChats={visibleRecentChats}
             pendingLoaded={pendingLoaded}
           />
+        )}
+
+        {tab === 'applications' && isAdmin && (
+          <ApplicationsPanel profile={profile} webhookConfig={webhookConfig} />
         )}
 
         {tab === 'members' && isAdmin && (
