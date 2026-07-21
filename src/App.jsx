@@ -37,6 +37,8 @@ import {
   buildJutsuPayload,
   fromRowJutsu,
   fetchRoleChangeLog,
+  logWorkAction,
+  fetchWorkLogMonthly,
   fetchReviewChats,
   claimPendingSubmission,
   recordSecondApprovalPing,
@@ -54,6 +56,7 @@ import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermis
 import { rolesForApprovedOC, applyDiscordRoles } from './lib/discordRoles';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
+import WorkStatsPage from './pages/WorkStatsPage';
 import InboxPage from './pages/InboxPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 
@@ -4614,9 +4617,9 @@ export default function App() {
         const firstReviewer = item.first_reviewer;
         const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id;
         if (item.operation === 'insert' && profile?.work_thread_id) {
+          // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
+          const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
           try {
-            // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
-            const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4635,6 +4638,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] Final approver work log failed:', workLogErr);
           }
+          logWorkAction(actionType).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         // First reviewer's embed — sent at approval so it includes the log URL and all links.
@@ -4658,6 +4662,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] First reviewer work log failed:', workLogErr);
           }
+          logWorkAction('First Reviewer', firstReviewer.id).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         const isSummonOrItem = item.data?.type === 'Summon' || item.data?.type === 'Custom Item';
@@ -4720,6 +4725,7 @@ export default function App() {
           upgradesLink: '',
         }),
       }).catch(err => console.warn('[NARP] Direct upload work log failed:', err));
+      logWorkAction('Direct Upload').catch(err => console.warn('[NARP] Work log stat failed:', err));
     }
   }, [profile, webhookConfig]);
 
@@ -4811,6 +4817,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] Reviewer work log failed:', workLogErr);
           }
+          logWorkAction('Denied').catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         // DM submitter — only when there was real engagement (claimed or chat happened)
@@ -5176,6 +5183,7 @@ export default function App() {
     ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
+    ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -5395,7 +5403,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' ? '' : 'p-4 md:p-6 pb-20'}`}>
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5602,6 +5610,10 @@ export default function App() {
 
         {tab === 'roster' && (
           <RosterPage userRole={role} userId={profile?.id} />
+        )}
+
+        {tab === 'worklog' && (
+          <WorkStatsPage userId={profile?.id} userRole={role} />
         )}
       </div>
 
