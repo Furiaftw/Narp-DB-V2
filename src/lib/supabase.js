@@ -651,6 +651,35 @@ export const fetchRoleChangeLog = async (limit = 100) => {
   return data || [];
 };
 
+/* --- Work log stats (in-app monthly totals; separate from the Discord
+   reviewer-work-log system, which keeps logging the detailed per-item
+   narrative unchanged) ------------------------------------------------------- */
+
+// Increments a counter for this month/actionType by 1. Defaults to the
+// current user; pass targetUserId to credit another reviewer instead (e.g.
+// the final approver crediting the first reviewer at approval time) — the
+// RPC only allows that when the caller is staff+, enforced server-side.
+export const logWorkAction = async (actionType, targetUserId) => {
+  if (!supabase) return;
+  const { error } = await supabase.rpc('increment_work_log', {
+    p_action_type: actionType,
+    p_target_user_id: targetUserId || null,
+  });
+  if (error) throw error;
+};
+
+// monthStart: 'YYYY-MM-01'. Pass all=true (admin/owner) to fetch everyone's
+// rows for that month; otherwise rows are scoped to userId. RLS enforces the
+// same restriction server-side regardless of what the client asks for.
+export const fetchWorkLogMonthly = async (monthStart, { all = false, userId } = {}) => {
+  if (!supabase) return [];
+  let q = supabase.from('work_log_monthly').select('*').eq('month_start', monthStart);
+  if (!all) q = q.eq('user_id', userId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return data || [];
+};
+
 /* --- Row ↔ App-shape converters ------------------------------------------- */
 
 const parseSlots = (s) => {

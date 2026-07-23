@@ -37,6 +37,8 @@ import {
   buildJutsuPayload,
   fromRowJutsu,
   fetchRoleChangeLog,
+  logWorkAction,
+  fetchWorkLogMonthly,
   fetchReviewChats,
   claimPendingSubmission,
   recordSecondApprovalPing,
@@ -54,6 +56,8 @@ import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermis
 import { rolesForApprovedOC, applyDiscordRoles } from './lib/discordRoles';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
+import WorkStatsPage from './pages/WorkStatsPage';
+import JutsuStatsModal from './components/modals/JutsuStatsModal';
 import InboxPage from './pages/InboxPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 
@@ -348,6 +352,7 @@ const ICONS = {
   Lock:     <><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
   Settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
   User:     <><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
+  Stats:    <><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></>,
 };
 
 const Icon = ({ n, size = 24, className = '' }) => (
@@ -1256,7 +1261,7 @@ const HIDE_ONLY = [
   { hideKey: 'hAsk', label: 'Ask Reviewer'  },
 ];
 
-function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF }) {
+function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions, clearF, onOpenStats }) {
   const [ddOpen, setDdOpen] = useState(null);
   const toggleArr = (key, value) =>
     setF(p => ({ ...p, [key]: p[key].includes(value) ? p[key].filter(x => x !== value) : [...p[key], value] }));
@@ -1331,6 +1336,13 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
                 <span className="bg-white text-indigo-600 px-1.5 py-0.5 rounded-md text-[10px]">{activeFilterCount}</span>
               )}
             </button>
+
+            {onOpenStats && (
+              <button onClick={onOpenStats}
+                      className="px-4 py-2.5 rounded-xl text-sm font-bold flex items-center justify-center gap-2 bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 transition-colors shrink-0">
+                <Icon n="Stats" size={16} /> <span className="hidden sm:inline">Stats</span>
+              </button>
+            )}
           </div>
 
           {activeFilterCount > 0 && (
@@ -4084,7 +4096,7 @@ export default function App() {
     return () => observer.disconnect();
   }, [loading]);
 
-  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false, iosInstall: false });
+  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false, iosInstall: false, stats: false });
   const [installPrompt, setInstallPrompt] = useState(null);
   const [appInstalled, setAppInstalled]   = useState(() => window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone);
 
@@ -4614,9 +4626,9 @@ export default function App() {
         const firstReviewer = item.first_reviewer;
         const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id;
         if (item.operation === 'insert' && profile?.work_thread_id) {
+          // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
+          const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
           try {
-            // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
-            const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
             await fetch('/.netlify/functions/reviewer-work-log', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json', ...authHdr },
@@ -4635,6 +4647,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] Final approver work log failed:', workLogErr);
           }
+          logWorkAction(actionType).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         // First reviewer's embed — sent at approval so it includes the log URL and all links.
@@ -4658,6 +4671,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] First reviewer work log failed:', workLogErr);
           }
+          logWorkAction('First Reviewer', firstReviewer.id).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         const isSummonOrItem = item.data?.type === 'Summon' || item.data?.type === 'Custom Item';
@@ -4720,6 +4734,7 @@ export default function App() {
           upgradesLink: '',
         }),
       }).catch(err => console.warn('[NARP] Direct upload work log failed:', err));
+      logWorkAction('Direct Upload').catch(err => console.warn('[NARP] Work log stat failed:', err));
     }
   }, [profile, webhookConfig]);
 
@@ -4811,6 +4826,7 @@ export default function App() {
           } catch (workLogErr) {
             console.warn('[NARP] Reviewer work log failed:', workLogErr);
           }
+          logWorkAction('Denied').catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
         // DM submitter — only when there was real engagement (claimed or chat happened)
@@ -5176,6 +5192,7 @@ export default function App() {
     ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
+    ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -5354,7 +5371,8 @@ export default function App() {
           <FilterBar
             tab={tab} f={f} setF={setF}
             activeFilterCount={fCount}
-            clearF={clearF} />
+            clearF={clearF}
+            onOpenStats={() => setModals(m => ({ ...m, stats: true }))} />
         )}
       </div>
 
@@ -5395,7 +5413,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' ? '' : 'p-4 md:p-6 pb-20'}`}>
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5603,6 +5621,10 @@ export default function App() {
         {tab === 'roster' && (
           <RosterPage userRole={role} userId={profile?.id} />
         )}
+
+        {tab === 'worklog' && (
+          <WorkStatsPage userId={profile?.id} userRole={role} />
+        )}
       </div>
 
       {/* FOOTER */}
@@ -5613,6 +5635,9 @@ export default function App() {
       </div>
 
       {/* MODALS */}
+      {modals.stats && (
+        <JutsuStatsModal db={db} onClose={() => setModals(m => ({ ...m, stats: false }))} />
+      )}
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
       )}
