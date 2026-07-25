@@ -126,10 +126,7 @@ export default async (req) => {
     /* ------------------------------------------------------------------
        STEP 5 — Derive the application role from the verified Discord data.
        ------------------------------------------------------------------ */
-    const discordUserId = memberData?.user?.id || '';
     const memberRoles = memberData?.roles || [];
-
-    const ownerUserId = process.env.DISCORD_OWNER_USER_ID;
 
     // Prefer DB config (editable live from System Tools), fall back to env vars
     let adminRoleId = null;
@@ -149,9 +146,7 @@ export default async (req) => {
     ocStaffRoleId = ocStaffRoleId || process.env.DISCORD_OC_STAFF_ROLE_ID;
 
     let appRole = 'user';
-    if (ownerUserId && String(discordUserId) === String(ownerUserId)) {
-      appRole = 'owner';
-    } else if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
+    if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
       appRole = 'staff';
