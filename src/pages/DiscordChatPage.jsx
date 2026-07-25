@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getCurrentSession } from '../lib/supabase';
+import ConfirmButton from '../components/ui/ConfirmButton';
 
 const POLL_MS = 4000;
 
@@ -138,13 +139,6 @@ export default function DiscordChatPage() {
     }
   };
 
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
-
   const grouped = [];
   {
     const seenCategory = new Set();
@@ -235,18 +229,19 @@ export default function DiscordChatPage() {
                 <textarea
                   value={draft}
                   onChange={e => setDraft(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                  placeholder={`Message #${selectedChannel?.name || ''}`}
-                  rows={1}
+                  placeholder={`Message #${selectedChannel?.name || ''} (Enter for a new line)`}
+                  rows={2}
                   className="flex-1 resize-none border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                 />
-                <button
-                  onClick={handleSend}
+                <ConfirmButton
+                  onConfirm={handleSend}
                   disabled={sending || !draft.trim()}
+                  title="Click to arm, click again to actually post to Discord"
+                  armedLabel="Confirm send?"
                   className="px-4 py-2 rounded-md bg-indigo-600 text-white text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed hover:bg-indigo-700"
                 >
                   Send
-                </button>
+                </ConfirmButton>
               </div>
             </div>
           </>
