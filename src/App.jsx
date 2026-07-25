@@ -79,6 +79,8 @@ const STORAGE = {
   SHUTDOWN_BANNER: 'narp_shutdown_banner_dismissed_v1',
 };
 
+const SHUTDOWN_AT = new Date('2026-08-20T00:00:00Z').getTime();
+
 /* ---------------------------------------------------------------------------
    CONSTANTS
    --------------------------------------------------------------------------- */
@@ -4073,6 +4075,18 @@ export default function App() {
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
   const [bannerDismissed, setBannerDismissed] = useState(() => LS.get(STORAGE.SHUTDOWN_BANNER, false));
   const dismissShutdownBanner = () => { LS.set(STORAGE.SHUTDOWN_BANNER, true); setBannerDismissed(true); };
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const msUntilShutdown = Math.max(0, SHUTDOWN_AT - now);
+  const shutdownCountdown = {
+    days:  Math.floor(msUntilShutdown / 86400000),
+    hours: Math.floor((msUntilShutdown % 86400000) / 3600000),
+    mins:  Math.floor((msUntilShutdown % 3600000) / 60000),
+    secs:  Math.floor((msUntilShutdown % 60000) / 1000),
+  };
 
   const [f, setF] = useState(INITIAL_FILTER_STATE);
   const [bF, setBF] = useState({ q: '', cat: [], sub: [], srt: 'az' });
@@ -5245,11 +5259,13 @@ export default function App() {
             <div className="flex-1">
               <p className="font-bold mb-1">NARP DB is shutting down on August 20th.</p>
               <p>
-                Running this site costs real money — Netlify bills for serverless function calls, bandwidth, and
-                build minutes past the free tier, and Supabase charges for database compute, storage, and API
-                traffic. Between the live catalog, review chat, push notifications, and Discord integrations,
-                that usage has outgrown what this project can keep covering. Please save or export anything you
-                need before then.
+                Running this site costs money to keep online, and that cost isn't sustainable long-term. Please
+                save or export anything you need before then.
+              </p>
+              <p className="mt-1.5 font-mono text-xs sm:text-sm font-semibold tracking-wide">
+                {msUntilShutdown > 0
+                  ? `${shutdownCountdown.days}d ${String(shutdownCountdown.hours).padStart(2, '0')}h ${String(shutdownCountdown.mins).padStart(2, '0')}m ${String(shutdownCountdown.secs).padStart(2, '0')}s remaining`
+                  : 'NARP DB has shut down.'}
               </p>
             </div>
             <button
