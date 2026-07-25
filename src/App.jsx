@@ -76,6 +76,7 @@ const STORAGE = {
   VIEW_MODE:  'narp_view_mode_v1',
   CART:       'narp_cart_v1',
   CHAT_READ:  'narp_chat_read_v1',
+  SHUTDOWN_BANNER: 'narp_shutdown_banner_dismissed_v1',
 };
 
 /* ---------------------------------------------------------------------------
@@ -4070,6 +4071,8 @@ export default function App() {
   const [expRow, setExpRow]     = useState(null);
   const [cart, setCart]         = useState(() => LS.get(STORAGE.CART, []));
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
+  const [bannerDismissed, setBannerDismissed] = useState(() => LS.get(STORAGE.SHUTDOWN_BANNER, false));
+  const dismissShutdownBanner = () => { LS.set(STORAGE.SHUTDOWN_BANNER, true); setBannerDismissed(true); };
 
   const [f, setF] = useState(INITIAL_FILTER_STATE);
   const [bF, setBF] = useState({ q: '', cat: [], sub: [], srt: 'az' });
@@ -5236,6 +5239,28 @@ export default function App() {
 
       {/* HEADER AND FILTER BAR STICKY WRAPPER */}
       <div ref={headerRef} className="sticky top-0 z-40 shrink-0 flex flex-col shadow-lg">
+        {!bannerDismissed && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-sm px-4 py-3 flex items-start gap-3">
+            <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-bold mb-1">NARP DB is shutting down on August 20th.</p>
+              <p>
+                Running this site costs real money — Netlify bills for serverless function calls, bandwidth, and
+                build minutes past the free tier, and Supabase charges for database compute, storage, and API
+                traffic. Between the live catalog, review chat, push notifications, and Discord integrations,
+                that usage has outgrown what this project can keep covering. Please save or export anything you
+                need before then.
+              </p>
+            </div>
+            <button
+              onClick={dismissShutdownBanner}
+              className="text-amber-600 hover:text-amber-900 shrink-0"
+              title="Dismiss"
+            >
+              <Icon n="X" size={18} />
+            </button>
+          </div>
+        )}
         {/* HEADER */}
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
