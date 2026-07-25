@@ -22,7 +22,6 @@ export default async (req) => {
     const discordClientId = Netlify.env.get('VITE_DISCORD_CLIENT_ID') || process.env.VITE_DISCORD_CLIENT_ID;
     const discordClientSecret = Netlify.env.get('DISCORD_CLIENT_SECRET') || process.env.DISCORD_CLIENT_SECRET;
     const discordGuildId = Netlify.env.get('VITE_DISCORD_GUILD_ID') || process.env.VITE_DISCORD_GUILD_ID;
-    const ownerUserId = Netlify.env.get('DISCORD_OWNER_USER_ID') || process.env.DISCORD_OWNER_USER_ID;
     const envAdminRoleId = Netlify.env.get('DISCORD_ADMIN_ROLE_ID') || process.env.DISCORD_ADMIN_ROLE_ID;
     const envReviewerRoleId = Netlify.env.get('DISCORD_REVIEWER_ROLE_ID') || process.env.DISCORD_REVIEWER_ROLE_ID;
 
@@ -117,11 +116,13 @@ export default async (req) => {
 
     // 4b. Role Sync Logic
     // Determine the user's application role (appRole) based on exact hierarchy:
-    // - IF the user's Discord ID strictly matches DISCORD_OWNER_USER_ID, set appRole = 'owner'.
-    // - ELSE IF the member's roles array includes the admin role ID, set appRole = 'admin'.
+    // - IF the member's roles array includes the admin role ID, set appRole = 'admin'.
     // - ELSE IF the member's roles array includes the reviewer role ID, set appRole = 'staff'. (NOTE: Keep the database value as 'staff', do not use 'reviewer').
     // - ELSE IF the member's roles array includes the OC staff role ID, set appRole = 'oc_staff' ("Staff" — OC-only reviewer).
     // - ELSE, set appRole = 'user'.
+    // 'owner' is never auto-derived here — it is only ever set by a direct
+    // database edit (see STEP 6 below, which also never downgrades an
+    // existing owner regardless of what this hierarchy computes).
     // Role IDs prefer the live DB config (System Tools) over the env vars, since
     // env vars are frozen at deploy time and the operator panel edits the DB.
     let adminRoleId = envAdminRoleId;
@@ -138,9 +139,7 @@ export default async (req) => {
     } catch { /* fall through to env vars already read above */ }
 
     let appRole = 'user';
-    if (ownerUserId && String(discordUser.id) === String(ownerUserId)) {
-      appRole = 'owner';
-    } else if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
+    if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
       appRole = 'staff';

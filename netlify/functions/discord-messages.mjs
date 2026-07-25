@@ -1,0 +1,72 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_DATABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
+
+const json = (obj, status = 200) =>
+  new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const SNOWFLAKE = /^\d{17,20}$/;
+
+/*
+ * Fetches recent messages for a channel, for the owner-only Discord chat
+ * page's initial load and poll ticks. Owner only.
+ */
+export default async (req) => {
+  if (req.method !== 'GET') return json({ error: 'Method not allowed' }, 405);
+
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Missing auth token' }, 401);
+  const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
+  if (authError || !user) return json({ error: 'Invalid token' }, 401);
+
+  const { data: profile } = await supabase
+    .from('profiles').select('role').eq('id', user.id).maybeSingle();
+  if (profile?.role !== 'owner') return json({ error: 'Owner access required' }, 403);
+
+  const url = new URL(req.url);
+  const channelId = url.searchParams.get('channelId');
+  if (!SNOWFLAKE.test(channelId || '')) return json({ error: 'Invalid channelId' }, 400);
+  const before = url.searchParams.get('before');
+
+  const botToken = process.env.DISCORD_BOT_TOKEN;
+  if (!botToken) return json({ error: 'DISCORD_BOT_TOKEN not configured' }, 500);
+
+  const params = new URLSearchParams({ limit: '50' });
+  if (before && SNOWFLAKE.test(before)) params.set('before', before);
+
+  const res = await fetch(
+    `https://discord.com/api/v10/channels/${channelId}/messages?${params}`,
+    { headers: { Authorization: `Bot ${botToken}` } }
+  );
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    return json({ error: `Failed to fetch messages: ${res.status} ${text.slice(0, 200)}` }, res.status);
+  }
+
+  const raw = await res.json();
+  const messages = raw
+    .map(m => ({
+      id: m.id,
+      author: {
+        id: m.author?.id,
+        username: m.author?.global_name || m.author?.username || 'Unknown',
+        avatar: m.author?.avatar
+          ? `https://cdn.discordapp.com/avatars/${m.author.id}/${m.author.avatar}.png`
+          : null,
+        bot: !!m.author?.bot,
+      },
+      content: m.content,
+      timestamp: m.timestamp,
+      edited_timestamp: m.edited_timestamp,
+    }))
+    .reverse(); // Discord returns newest-first; UI wants oldest-first.
+
+  return json({ messages });
+};
