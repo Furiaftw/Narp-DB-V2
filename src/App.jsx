@@ -59,6 +59,7 @@ import RosterPage from './pages/RosterPage';
 import WorkStatsPage from './pages/WorkStatsPage';
 import JutsuStatsModal from './components/modals/JutsuStatsModal';
 import InboxPage from './pages/InboxPage';
+import DiscordChatPage from './pages/DiscordChatPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 
 
@@ -5193,6 +5194,7 @@ export default function App() {
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
     ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
+    ...(isOwner ? [{ id: 'discord', label: 'Discord' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -5413,7 +5415,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' || tab === 'discord' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5624,6 +5626,10 @@ export default function App() {
 
         {tab === 'worklog' && (
           <WorkStatsPage userId={profile?.id} userRole={role} />
+        )}
+
+        {tab === 'discord' && isOwner && (
+          <DiscordChatPage />
         )}
       </div>
 
