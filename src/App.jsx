@@ -59,7 +59,6 @@ import RosterPage from './pages/RosterPage';
 import WorkStatsPage from './pages/WorkStatsPage';
 import JutsuStatsModal from './components/modals/JutsuStatsModal';
 import InboxPage from './pages/InboxPage';
-import DiscordChatPage from './pages/DiscordChatPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 
 
@@ -77,7 +76,10 @@ const STORAGE = {
   VIEW_MODE:  'narp_view_mode_v1',
   CART:       'narp_cart_v1',
   CHAT_READ:  'narp_chat_read_v1',
+  SHUTDOWN_BANNER: 'narp_shutdown_banner_dismissed_v1',
 };
+
+const SHUTDOWN_AT = new Date('2026-08-20T00:00:00Z').getTime();
 
 /* ---------------------------------------------------------------------------
    CONSTANTS
@@ -4071,6 +4073,25 @@ export default function App() {
   const [expRow, setExpRow]     = useState(null);
   const [cart, setCart]         = useState(() => LS.get(STORAGE.CART, []));
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    try { return sessionStorage.getItem(STORAGE.SHUTDOWN_BANNER) === '1'; } catch { return false; }
+  });
+  const dismissShutdownBanner = () => {
+    try { sessionStorage.setItem(STORAGE.SHUTDOWN_BANNER, '1'); } catch {}
+    setBannerDismissed(true);
+  };
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const msUntilShutdown = Math.max(0, SHUTDOWN_AT - now);
+  const shutdownCountdown = {
+    days:  Math.floor(msUntilShutdown / 86400000),
+    hours: Math.floor((msUntilShutdown % 86400000) / 3600000),
+    mins:  Math.floor((msUntilShutdown % 3600000) / 60000),
+    secs:  Math.floor((msUntilShutdown % 60000) / 1000),
+  };
 
   const [f, setF] = useState(INITIAL_FILTER_STATE);
   const [bF, setBF] = useState({ q: '', cat: [], sub: [], srt: 'az' });
@@ -5194,7 +5215,6 @@ export default function App() {
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
     ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
-    ...(isOwner ? [{ id: 'discord', label: 'Discord' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -5238,6 +5258,30 @@ export default function App() {
 
       {/* HEADER AND FILTER BAR STICKY WRAPPER */}
       <div ref={headerRef} className="sticky top-0 z-40 shrink-0 flex flex-col shadow-lg">
+        {!bannerDismissed && (
+          <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-sm px-4 py-3 flex items-start gap-3">
+            <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-bold mb-1">NARP DB is shutting down on August 20th.</p>
+              <p>
+                Running this site costs money to keep online, and that cost isn't sustainable long-term. Please
+                save or export anything you need before then.
+              </p>
+              <p className="mt-1.5 font-mono text-xs sm:text-sm font-semibold tracking-wide">
+                {msUntilShutdown > 0
+                  ? `${shutdownCountdown.days}d ${String(shutdownCountdown.hours).padStart(2, '0')}h ${String(shutdownCountdown.mins).padStart(2, '0')}m ${String(shutdownCountdown.secs).padStart(2, '0')}s remaining`
+                  : 'NARP DB has shut down.'}
+              </p>
+            </div>
+            <button
+              onClick={dismissShutdownBanner}
+              className="text-amber-600 hover:text-amber-900 shrink-0"
+              title="Dismiss"
+            >
+              <Icon n="X" size={18} />
+            </button>
+          </div>
+        )}
         {/* HEADER */}
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
@@ -5415,7 +5459,7 @@ export default function App() {
       )}
 
       {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' || tab === 'discord' ? '' : 'p-4 md:p-6 pb-20'}`}>
+      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
         {tab === 'jutsus' && (
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
@@ -5626,10 +5670,6 @@ export default function App() {
 
         {tab === 'worklog' && (
           <WorkStatsPage userId={profile?.id} userRole={role} />
-        )}
-
-        {tab === 'discord' && isOwner && (
-          <DiscordChatPage />
         )}
       </div>
 
