@@ -4073,8 +4073,13 @@ export default function App() {
   const [expRow, setExpRow]     = useState(null);
   const [cart, setCart]         = useState(() => LS.get(STORAGE.CART, []));
   const [pTags, setPTags]       = useState(() => LS.get(STORAGE.TAGS, {}));
-  const [bannerDismissed, setBannerDismissed] = useState(() => LS.get(STORAGE.SHUTDOWN_BANNER, false));
-  const dismissShutdownBanner = () => { LS.set(STORAGE.SHUTDOWN_BANNER, true); setBannerDismissed(true); };
+  const [bannerDismissed, setBannerDismissed] = useState(() => {
+    try { return sessionStorage.getItem(STORAGE.SHUTDOWN_BANNER) === '1'; } catch { return false; }
+  });
+  const dismissShutdownBanner = () => {
+    try { sessionStorage.setItem(STORAGE.SHUTDOWN_BANNER, '1'); } catch {}
+    setBannerDismissed(true);
+  };
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000);
