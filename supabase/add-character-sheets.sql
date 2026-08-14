@@ -30,10 +30,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS character_sheets_name_key
 CREATE INDEX IF NOT EXISTS character_sheets_owner_idx
   ON public.character_sheets (owner_id);
 
--- Keep updated_at honest without relying on the client.
+-- Keep updated_at honest without relying on the client. search_path is pinned
+-- so the trigger can't be redirected by a caller-set path.
 CREATE OR REPLACE FUNCTION public.touch_character_sheet()
 RETURNS trigger
 LANGUAGE plpgsql
+SET search_path = ''
 AS $$
 BEGIN
   NEW.updated_at := now();
