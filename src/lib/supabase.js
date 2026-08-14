@@ -870,6 +870,112 @@ export const updateSubmissionControl = async (key, value, userId) => {
   if (error) throw error;
 };
 
+/* ── Character sheets ────────────────────────────────────────────────────────
+ * The in-database OC sheet (supabase/add-character-sheets.sql). Sheets are
+ * public reference material; writing is gated by RLS to the owner and staff+.
+ * Roster rows are matched to a sheet by character name, which the table keeps
+ * unique case-insensitively.
+ */
+
+const SHEET_COLUMNS = 'id, owner_id, character_name, village, ninja_rank, bloodline, data, created_at, updated_at';
+
+// Index of every sheet, keyed by lowercased name — what the roster needs to
+// know which rows are clickable. `data` is left out so the payload stays small.
+export const fetchCharacterSheetIndex = async () => {
+  if (!supabase) return {};
+  const { data, error } = await supabase
+    .from('character_sheets')
+    .select('id, owner_id, character_name, village, ninja_rank, bloodline, updated_at');
+  // The table may not exist yet on a deploy that hasn't run the migration.
+  if (error) {
+    if (error.code === '42P01') return {};
+    throw error;
+  }
+  const index = {};
+  for (const row of data || []) {
+    index[(row.character_name || '').trim().toLowerCase()] = row;
+  }
+  return index;
+};
+
+export const fetchCharacterSheetById = async (id) => {
+  if (!supabase || !id) return null;
+  const { data, error } = await supabase
+    .from('character_sheets').select(SHEET_COLUMNS).eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
+export const fetchCharacterSheetByName = async (name) => {
+  if (!supabase || !name?.trim()) return null;
+  const { data, error } = await supabase
+    .from('character_sheets').select(SHEET_COLUMNS)
+    .ilike('character_name', name.trim())
+    .maybeSingle();
+  if (error) {
+    if (error.code === '42P01') return null;
+    throw error;
+  }
+  return data;
+};
+
+export const fetchMyCharacterSheets = async () => {
+  if (!supabase) return [];
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) return [];
+  const { data, error } = await supabase
+    .from('character_sheets').select(SHEET_COLUMNS)
+    .eq('owner_id', user.id).order('created_at');
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+};
+
+// Insert or update. `id` absent = create, and the creator becomes the owner
+// unless an explicit ownerId is passed (staff filing a sheet for a player).
+export const saveCharacterSheet = async ({ id, characterName, village, ninjaRank, bloodline, data, ownerId }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('You must be signed in to save a character sheet');
+
+  const payload = {
+    character_name: (characterName || '').trim(),
+    village: village || null,
+    ninja_rank: ninjaRank || null,
+    bloodline: bloodline || null,
+    data: data || {},
+    updated_by: user.id,
+  };
+  if (!payload.character_name) throw new Error('The sheet needs a character name');
+
+  if (id) {
+    if (ownerId !== undefined) payload.owner_id = ownerId;
+    const { data: row, error } = await supabase
+      .from('character_sheets').update(payload).eq('id', id).select(SHEET_COLUMNS).single();
+    if (error) throw error;
+    return row;
+  }
+
+  const { data: row, error } = await supabase
+    .from('character_sheets')
+    .insert({ ...payload, owner_id: ownerId !== undefined ? ownerId : user.id })
+    .select(SHEET_COLUMNS).single();
+  if (error) {
+    // Unique index on lower(btrim(character_name)).
+    if (error.code === '23505') throw new Error('A character sheet with that name already exists');
+    throw error;
+  }
+  return row;
+};
+
+export const deleteCharacterSheet = async (id) => {
+  if (!supabase || !id) return;
+  const { error } = await supabase.from('character_sheets').delete().eq('id', id);
+  if (error) throw error;
+};
+
 export const savePushSubscription = async (sub) => {
   if (!supabase) return;
   const { data: { user } } = await supabase.auth.getUser();

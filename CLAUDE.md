@@ -42,9 +42,19 @@ Catalog constants (natures, ranks, specializations, etc.) are duplicated between
 
 Main tabs (state variable `tab` in App): `jutsus`, `pending`, `roster`, `messages`, plus `bloodlines`/`members` views reachable through admin surfaces.
 
+### Character sheets (the in-database OC sheet)
+
+The OC sheet that used to live in a Google Doc is now a database record:
+
+- `supabase/add-character-sheets.sql` — the `character_sheets` table. Everything volatile lives in a `data` jsonb column; `character_name`, `village`, `ninja_rank`, `bloodline` are pulled out as columns for querying. `character_name` is uniquely indexed on `lower(btrim(...))`.
+- `src/constants/characterSheet.js` — the sheet *shape*: option lists, `emptySheet()`, `normalizeSheet()` (merges a stored sheet over the current shape, so old sheets keep rendering after a section is added), and `computeCU()` (chakra level + control + 5).
+- `src/components/features/CharacterSheetModal.jsx` — the whole sheet, view and edit in one component. Section order matches the original doc (人 家 具 力 技 獣 異 限 術 基 趣 歆 画 僀).
+- Roster rows are matched to a sheet **by character name** — there is no foreign key from `roster_entries` / `roster_squads`. `RosterPage` fetches a name → sheet index once (`fetchCharacterSheetIndex`) and every name renders through its `CharacterName` component, which opens the sheet on click and keeps the old character-area link as a separate icon.
+- Writing is gated by RLS: the owner and staff+ can edit; the owner and admin+ can delete; anyone can read.
+
 ### Data layer: src/lib/supabase.js
 
-All Supabase access goes through this one module — auth (Discord OAuth + dev login), profiles, whitelist, the pending-jutsus queue, review chats, realtime subscriptions (`subscribeToDatabaseChanges`), webhook config, submission controls, and push subscriptions. Jutsu rows are mapped between DB shape and app shape via `fromRowJutsu` / `buildJutsuPayload` — if you add or rename a jutsu column, update both.
+All Supabase access goes through this one module — auth (Discord OAuth + dev login), profiles, whitelist, the pending-jutsus queue, review chats, realtime subscriptions (`subscribeToDatabaseChanges`), webhook config, submission controls, character sheets, and push subscriptions. Jutsu rows are mapped between DB shape and app shape via `fromRowJutsu` / `buildJutsuPayload` — if you add or rename a jutsu column, update both.
 
 Supabase config resolves in this order:
 1. `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (build-time, `.env` or Netlify env)
@@ -63,6 +73,7 @@ Four tiers: `user` → `staff` → `admin` → `owner`. RLS policies and SQL fun
 - Roster changes use a double-approval flow (`supabase/add-roster-approval.sql`).
 - Admins can only flip users between `user`/`staff`; only the owner manages admins. Role changes are audit-logged in `role_change_log`.
 - Roles can also be synced from Discord guild roles via the `sync-discord-roles` function (only when a fresh `provider_token` exists — a plain page reload deliberately skips the sync so a failed Discord lookup can't downgrade anyone).
+- **The app never grants Discord roles.** Role flow is inbound only: Discord guild roles → site tier (`discord-login.js`, `sync-discord-roles.js`). The old OC-approval automation that handed out Has Character / village / rank / Councilor / OC-count roles has been removed — reviewers assign every Discord role by hand.
 
 ### Database migrations
 

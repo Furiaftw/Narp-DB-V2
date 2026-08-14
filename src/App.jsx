@@ -53,7 +53,6 @@ import {
   deletePushSubscription,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
-import { rolesForApprovedOC, applyDiscordRoles } from './lib/discordRoles';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 import RosterPage from './pages/RosterPage';
 import WorkStatsPage from './pages/WorkStatsPage';
@@ -2064,7 +2063,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             />
           </div>
 
-          {/* Which OC — drives the Discord "X oc" count role granted at approval */}
+          {/* Which OC — how many characters the player already runs, shown to reviewers */}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you? (Mandatory)</label>
             <div className="grid grid-cols-3 gap-2">
@@ -4579,29 +4578,6 @@ export default function App() {
             }
           } catch (rosterErr) {
             console.warn('[NARP] Roster auto-insert failed:', rosterErr);
-          }
-        }
-
-        // Automated Discord role grant: village (or Wanderer) + ninja rank
-        // (+ Councilor with Jōnin) + the OC-count role picked at submission
-        // (higher counts strip the lower ones). Failures never block the
-        // approval — the reviewer is told to grant manually instead.
-        if (isCharacter) {
-          if (item.submitter?.discord_id) {
-            try {
-              const { add, remove } = rolesForApprovedOC(item.data);
-              await applyDiscordRoles({
-                discordUserId: item.submitter.discord_id,
-                add,
-                remove,
-                reason: `OC "${item.data?.name || 'OC'}" fully approved`,
-              });
-            } catch (roleErr) {
-              console.warn('[NARP] Approval role grant failed:', roleErr);
-              alert('Approved, but granting the Discord roles (village/rank/OC count) failed — please assign them manually. (' + (roleErr.message || roleErr) + ')');
-            }
-          } else {
-            alert('Approved, but the submitter has no linked Discord ID — assign their village/rank/OC-count roles manually.');
           }
         }
 
