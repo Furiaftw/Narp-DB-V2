@@ -3083,35 +3083,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
   const [pendingDelTtag, setPendingDelTtag] = useState(null);
   const [togglePending, setTogglePending] = useState({});
 
-  const [wlJutsu,  setWlJutsu]  = useState(webhookConfig.discord_jutsu_thread_id || '');
-  const [wlBattle, setWlBattle] = useState(webhookConfig.discord_battlemode_thread_id || '');
-  const [wlOC,     setWlOC]     = useState(webhookConfig.discord_oc_thread_id || '');
-  const [wlCustom, setWlCustom] = useState(webhookConfig.discord_custom_item_thread_id || '');
-  const [wlSummon, setWlSummon] = useState(webhookConfig.discord_summon_thread_id || '');
-  const [wlSaving, setWlSaving] = useState({ jutsu: false, battle: false, oc: false, custom: false, summon: false });
-
-  const saveWorkLog = async (type) => {
-    setWlSaving(s => ({ ...s, [type]: true }));
-    try {
-      if (type === 'jutsu') {
-        onWebhookConfigSave('discord_jutsu_thread_id', wlJutsu);
-      } else if (type === 'battle') {
-        onWebhookConfigSave('discord_battlemode_thread_id', wlBattle);
-      } else if (type === 'oc') {
-        onWebhookConfigSave('discord_oc_thread_id', wlOC);
-      } else if (type === 'custom') {
-        onWebhookConfigSave('discord_custom_item_thread_id', wlCustom);
-      } else if (type === 'summon') {
-        onWebhookConfigSave('discord_summon_thread_id', wlSummon);
-      }
-      setMsg('Log thread ID saved.');
-    } catch (e) {
-      setMsg('Failed to save: ' + (e.message || e));
-    } finally {
-      setWlSaving(s => ({ ...s, [type]: false }));
-    }
-  };
-
   const handleToggle = async (key) => {
     if (!isOwner || !isSupabaseConfigured()) return;
     const newVal = !(submissionControls?.[key]);
@@ -3322,49 +3293,6 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                         className="w-full bg-violet-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-violet-700">
                   <Icon n="Download" size={16}/> Download HTML
                 </button>
-              </div>
-            )}
-
-            {/* Log Thread IDs — owner only */}
-            {isOwner && isSupabaseConfigured() && (
-              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
-                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
-                  <Icon n="MessageSquare" size={20} className="text-sky-500" /> Log Thread IDs
-                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
-                </h3>
-                <p className="text-xs text-slate-500 mb-4">Discord thread IDs where logs are posted when entries are approved.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[
-                    { label: 'Jutsu',          val: wlJutsu,  set: setWlJutsu,  type: 'jutsu' },
-                    { label: 'Battlemode',     val: wlBattle, set: setWlBattle, type: 'battle' },
-                    { label: 'OC / Character', val: wlOC,     set: setWlOC,     type: 'oc' },
-                    { label: 'Custom Item',    val: wlCustom, set: setWlCustom, type: 'custom' },
-                    { label: 'Summon',         val: wlSummon, set: setWlSummon, type: 'summon' },
-                  ].map(({ label, val, set, type }) => (
-                    <div key={type}>
-                      <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1.5">
-                        {label}
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          value={val}
-                          onChange={e => set(e.target.value)}
-                          placeholder="Thread ID"
-                          className="flex-1 min-w-0 text-xs border border-slate-300 bg-white rounded-lg px-2 py-1.5 text-slate-800 focus:outline-none focus:border-sky-400"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => saveWorkLog(type)}
-                          disabled={wlSaving[type]}
-                          className="bg-slate-800 hover:bg-slate-700 text-white font-bold text-xs px-3 py-1 rounded-lg disabled:opacity-30 transition-colors shrink-0"
-                        >
-                          {wlSaving[type] ? '...' : 'Save'}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
 
