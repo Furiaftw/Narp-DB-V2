@@ -51,6 +51,8 @@ import {
   updateMySiteNickname,
   savePushSubscription,
   deletePushSubscription,
+  saveJutsuReviewHistory,
+  fetchJutsuReviewHistory,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
@@ -59,6 +61,9 @@ import WorkStatsPage from './pages/WorkStatsPage';
 import JutsuStatsModal from './components/modals/JutsuStatsModal';
 import InboxPage from './pages/InboxPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
+import JutsuSheetModal from './components/features/JutsuSheetModal';
+import JutsuHistoryModal from './components/features/JutsuHistoryModal';
+import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent } from './constants/jutsuSheet';
 
 
 /* ============================================================================
@@ -161,7 +166,7 @@ const getNatureColor = (n) => ({
      • staff queue (double-approver)  → submitter !== reviewer
      • admin direct write (single)    → submitter === reviewer (same user id)
    --------------------------------------------------------------------------- */
-async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null, config = {}) {
+async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, config = {}) {
   const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
   if (!baseUrl) return; // Logging not configured — skip silently.
 
@@ -203,6 +208,8 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
   const typeVal = Array.isArray(itemData?.types) ? itemData.types.join(', ') : (itemData?.types || 'N/A');
   const specVal = Array.isArray(itemData?.spec) ? itemData.spec.join(', ') : (itemData?.spec || 'N/A');
   const bloodlineVal = itemData?.bloodline || 'N/A';
+  // Summon/Custom Item still capture a plain doc link; Character and Jutsu
+  // both keep their full write-up in the app now, so there's no URL to show.
   const linkVal = itemData?.link || 'N/A';
 
   const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
@@ -221,7 +228,7 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
       '',
       '**OC Details:**',
       `Type of Submission: Character`,
-      `Link to sheet: ${linkVal}`,
+      `Sheet: view in the app (Roster → click the character's name)`,
     ];
     if (itemData?.myCharactersLink) {
       characterDesc.push(`My-Characters Link: ${itemData.myCharactersLink}`);
@@ -268,9 +275,6 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
       `Spec: ${specVal}`,
       `Bloodline: ${bloodlineVal}`,
       '',
-      '**Link to sheet:**',
-      `${linkVal}`,
-      '',
       '**Dates:**',
       `Creation Date: ${creationDate}`,
       `Approval Date: ${approvalDate}`
@@ -289,11 +293,6 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     }],
   };
 
-  const nameSlug = (itemData?.name || 'entry')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '');
-
   try {
     const sess = await getCurrentSession();
     const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
@@ -301,13 +300,7 @@ async function sendDiscordLog(itemData, actionType, submitterProfile, firstRevie
     const res = await fetch('/.netlify/functions/send-discord-log', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHdr },
-      body: JSON.stringify({
-        threadId,
-        payload,
-        docUrl: itemData?.link || '',
-        docName: nameSlug || 'entry',
-        chatTranscript: chatTranscript || null,
-      }),
+      body: JSON.stringify({ threadId, payload }),
     });
 
     if (!res.ok) throw new Error(`Discord log function returned ${res.status}`);
@@ -468,7 +461,6 @@ const MANAGE_TABLES = {
     label: 'Jutsus',
     fields: [
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
-      { k: 'link',        l: 'Doc Link',                               col: 1 },
       { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
       { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
       { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', col: 1 },
@@ -873,7 +865,7 @@ function SlotsEditor({ value, onChange, defCount = 1 }) {
    COMPONENT: JutsuCard
    UPDATED: Clean layout, proper rounded corners, inset rank/cost box.
    ============================================================================ */
-function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, isActualAdmin = false }) {
+function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, onViewSheet, onViewHistory, isActualAdmin = false }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
   const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
@@ -1073,15 +1065,11 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
 
           {/* Action Buttons (Footer) */}
           <div className="flex gap-2">
-            {j.link && j.link !== '#' ? (
-              <a href={j.link} target="_blank" rel="noopener noreferrer"
-                 className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
-                <Icon n="ExtLink" size={16}/> Doc
-              </a>
-            ) : (
-              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Link</span>
-            )}
-            
+            <button onClick={(e) => { e.stopPropagation(); onViewSheet && onViewSheet(j); }}
+                    className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
+              <Icon n="Book" size={16}/> {jutsuSheetHasContent(j.sheet) ? 'Sheet' : 'No Sheet'}
+            </button>
+
             {j.limited && (
               <button onClick={(e) => { e.stopPropagation(); onViewSlots && onViewSlots(j); }}
                       className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 flex items-center justify-center min-w-[50px] transition-colors shadow-sm"
@@ -1089,7 +1077,15 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
                 <Icon n="Eye" size={18}/>
               </button>
             )}
-            
+
+            {onViewHistory && (
+              <button onClick={(e) => { e.stopPropagation(); onViewHistory(j); }}
+                      className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 flex items-center justify-center min-w-[50px] transition-colors shadow-sm"
+                      title="Review history (reviewer+ only)">
+                <Icon n="Clock" size={18}/>
+              </button>
+            )}
+
             <button onClick={(e) => { e.stopPropagation(); handleCopy(j); }}
                     className={`p-2.5 rounded-xl border flex items-center justify-center min-w-[50px] transition-colors shadow-sm ${
                       copiedId === j._id ? 'bg-emerald-500 border-emerald-500 text-white'
@@ -1803,7 +1799,6 @@ const ocNeedLevel = (val, max) => {
 function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null }) {
   const initial = editPending?.data || {};
   const [name, setName] = useState(initial.name || '');
-  const [link, setLink] = useState(initial.link || '');
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
   const [village, setVillage] = useState(initial.village || '');
   const [bloodline, setBloodline] = useState(initial.bloodline || CLANLESS);
@@ -1944,7 +1939,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const bloodlineFull = selectedInfo.status === 'full';
 
   const squadRequired = !!squadType && !!village;
-  const submitDisabled = !name.trim() || !link.trim() || !ninjaRank || !village || !ocNumber
+  const submitDisabled = !name.trim() || !ninjaRank || !village || !ocNumber
     || (squadRequired && !squadChoice) || bloodlineFull || submitting;
 
   const handleSubmit = async (e) => {
@@ -1967,7 +1962,6 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         await onSavedEdit({
           ...editPending.data,
           name: name.trim(),
-          link: link.trim(),
           ninja_rank: ninjaRank,
           village,
           bloodline,
@@ -1993,7 +1987,6 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
       const data = {
         type: 'Character',
         name: name.trim(),
-        link: link.trim(),
         ninja_rank: ninjaRank,
         village,
         bloodline,
@@ -2039,6 +2032,12 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+          {!isEdit && (
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 text-xs text-emerald-800">
+              <Icon n="Info" size={14} className="shrink-0 mt-0.5" />
+              <span>No Google Doc needed — once your character is approved, click their name in the Roster tab to fill in their full character sheet right here on the site.</span>
+            </div>
+          )}
           <div>
             <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">OC Name (Mandatory)</label>
             <input
@@ -2047,18 +2046,6 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
               value={name}
               onChange={e => setName(e.target.value)}
               placeholder="e.g. Hana Yuki"
-              className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500"
-            />
-          </div>
-
-          <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">OC Sheet — Google Doc Link (Mandatory)</label>
-            <input
-              type="url"
-              required
-              value={link}
-              onChange={e => setLink(e.target.value)}
-              placeholder="https://docs.google.com/..."
               className="w-full text-sm border border-slate-300 bg-white rounded-xl px-3 py-2 text-slate-800 focus:outline-none focus:border-emerald-500"
             />
           </div>
@@ -2688,6 +2675,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showSheet, setShowSheet] = useState(false);
   // Admins creating a NEW jutsu default to requesting a second approval;
   // they can still switch the toggle off for a direct write.
   const [askSecondApproval, setAskSecondApproval] = useState(
@@ -2722,6 +2710,8 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
       if (eRow.limited) conds.push('Limited');
       if (conds.length) next.conditions = conds.join(', ');
       next._cCost = !!(eRow._id && eRow.cost && !toArray(eRow.types).includes('Battlemode'));
+      // The sheet is a nested object, not a schema field — carried separately.
+      next._sheet = normalizeJutsuSheet(eRow.sheet);
     }
     setFd(next);
   }, [eRow, tab]);
@@ -2763,13 +2753,16 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         origin:      p.origin || '',
         spec:        toArray(p.spec),
         custom_tags: toArray(p.custom_tags),
-        link:        p.link || '',
+        // No longer editable here — the sheet replaces it — but preserve
+        // whatever a legacy jutsu already had rather than wiping it on save.
+        link:        eRow.link || '',
         bloodline:   p.bloodline || '',
         limited:     conds.includes('Limited'),
         locked:      conds.includes('Locked'),
         multiRank:   rank.length > 1 && !isBm,
         slots:       conds.includes('Limited') ? (p.slots || '') : '',
         bm_tier:     bmTier,
+        sheet:       p._sheet || {},
         _createdAt:  eRow._createdAt || new Date().toISOString(),
       };
     } else if (tab === 'bloodlines') {
@@ -2940,6 +2933,23 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
             )}
           </div>
 
+          {/* Jutsu Sheet — replaces the old Doc Link with the full in-app write-up */}
+          {tab === 'jutsus' && (
+            <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
+              <div>
+                <p className="text-sm font-bold text-slate-800">Jutsu Sheet</p>
+                <p className="text-xs text-slate-500">
+                  Description, mechanics, restrictions, and multi-rank scaling — no Google Doc needed.
+                  {jutsuSheetHasContent(fd._sheet) ? ' Filled in.' : ' Not started yet.'}
+                </p>
+              </div>
+              <button type="button" onClick={() => setShowSheet(true)}
+                      className="shrink-0 bg-white border-2 border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-50 flex items-center gap-2">
+                <Icon n="Edit" size={14}/> {jutsuSheetHasContent(fd._sheet) ? 'Edit Sheet' : 'Add Sheet'}
+              </button>
+            </div>
+          )}
+
           {/* Ask Second Approval Toggle (Admins/Owners only) */}
           {isAdmin && tab === 'jutsus' && !isPendingEdit && (
             <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
@@ -2969,6 +2979,15 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
           </div>
         </div>
       </div>
+      {showSheet && tab === 'jutsus' && (
+        <JutsuSheetModal
+          sheet={fd._sheet || emptyJutsuSheet()}
+          onChange={next => setFd({ ...fd, _sheet: next })}
+          multiRank={toArray(fd.rank).length > 1 && !toArray(fd.types).includes('Battlemode')}
+          jutsuName={fd.name || ''}
+          onClose={() => setShowSheet(false)}
+        />
+      )}
     </div>
   );
 }
@@ -3313,6 +3332,42 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* Discord Notifications Mute — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Alert" size={20} className="text-rose-500" /> Discord Notifications
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">
+                  Temporarily mute every outbound Discord message tied to submissions — new-submission alerts, the second-reviewer-needed ping, the reviewer nudge DM, and the approval/denial log post. Everything still works normally in the app; Discord just stays quiet.
+                </p>
+                {(() => {
+                  const key = 'discord_notifications_paused';
+                  const paused  = !!(submissionControls?.[key]);
+                  const pending = !!togglePending[key];
+                  return (
+                    <div className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors max-w-sm ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                      <div>
+                        <div className="text-sm font-bold text-slate-800">All Discord Notifications</div>
+                        <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {paused ? 'Muted' : 'Active'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleToggle(key)}
+                        disabled={pending}
+                        title={paused ? 'Unmute Discord notifications' : 'Mute Discord notifications'}
+                        className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : 'bg-slate-700 focus:ring-slate-400'} disabled:opacity-50 shrink-0`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -3948,7 +4003,7 @@ export default function App() {
   const [webhookConfig, setWebhookConfig] = useState({});
   const [devRole, setDevRole] = useState(() => LS.get(STORAGE.ROLE, 'user'));
   const [viewAsRole, setViewAsRole] = useState(null);
-  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false });
+  const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false, discord_notifications_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
   const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
@@ -4131,6 +4186,8 @@ export default function App() {
   const [ocEdit, setOcEdit] = useState(null);
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
+  const [sheetView, setSheetView]   = useState(null);
+  const [historyView, setHistoryView] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
   useEffect(() => { LS.set(STORAGE.VIEW_MODE, viewMode); }, [viewMode]);
@@ -4479,7 +4536,7 @@ export default function App() {
               // Direct admin write bypasses the staff queue, so log it as a
               // single-approver action (current user as both submitter and
               // reviewer) before persisting the change.
-              await sendDiscordLog(entity, 'Approved', profile, profile, profile, null, webhookConfig);
+              await sendDiscordLog(entity, 'Approved', profile, profile, profile, webhookConfig);
               await upsertJutsu(entity);
             }
             else if (t === 'bloodlines') await upsertBloodline(entity);
@@ -4581,6 +4638,11 @@ export default function App() {
           }
         }
 
+        // Chat transcript: no longer shipped to Discord as a .txt attachment —
+        // it's saved straight to jutsu_review_history instead, attached to the
+        // jutsu it belongs to. Reviewer+ only (matches who could see the
+        // pending review chat in the first place).
+        const isPlainJutsu = !isCharacter && item.data?.type !== 'Summon' && item.data?.type !== 'Custom Item';
         let logData = null;
         try {
           const chats = await fetchReviewChats(id);
@@ -4597,13 +4659,29 @@ export default function App() {
               return `[${time}] ${name}:\n${msgText}${editNote}`;
             }).join('\n\n') + '\n\n';
           }
+          if (isPlainJutsu && !isDelete && chatTranscript) {
+            const jutsuId = item.operation === 'insert' ? item.data?._id : item.target_id;
+            if (jutsuId) {
+              try {
+                await saveJutsuReviewHistory({
+                  jutsuId,
+                  itemName: displayData?.name || 'Unknown',
+                  operation: item.operation,
+                  transcript: chatTranscript,
+                  submittedBy: item.submitted_by,
+                  reviewedBy: profile?.id,
+                });
+              } catch (histErr) {
+                console.warn('[NARP] Saving jutsu review history failed:', histErr);
+              }
+            }
+          }
           logData = await sendDiscordLog(
             displayData,
             isDelete ? 'Deleted' : 'Approved',
             item.submitter,
             item.first_reviewer,
             profile,
-            chatTranscript,
             webhookConfig
           );
         } catch (discordErr) {
@@ -4614,7 +4692,7 @@ export default function App() {
           ? (displayData?.name && displayData.name !== 'OC Submission' ? displayData.name : 'OC Submission')
           : (displayData?.name || 'Unknown');
         const approvalDocLink = displayData?.link || 'N/A';
-        const mainLogUrl = logData
+        const mainLogUrl = logData?.messageId
           ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
           : '';
         const sess = await getCurrentSession();
@@ -4709,12 +4787,12 @@ export default function App() {
 
   const handleDirectSummonItemUpload = useCallback(async (data) => {
     const entryData = { ...data, _createdAt: new Date().toISOString() };
-    const logData = await sendDiscordLog(entryData, 'Approved', profile, null, profile, null, webhookConfig);
+    const logData = await sendDiscordLog(entryData, 'Approved', profile, null, profile, webhookConfig);
 
     if (profile?.work_thread_id) {
       const sess = await getCurrentSession();
       const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-      const mainLogUrl = logData
+      const mainLogUrl = logData?.messageId
         ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
         : '';
       await fetch('/.netlify/functions/reviewer-work-log', {
@@ -4780,27 +4858,14 @@ export default function App() {
         let logData = null;
         try {
           chats = (await fetchReviewChats(id)) || [];
-          let chatTranscript = null;
-          if (chats.length > 0) {
-            chatTranscript = chats.map(c => {
-              const time = c.created_at ? new Date(c.created_at).toLocaleString() : 'N/A';
-              const name = c.profiles?.site_nickname || c.profiles?.username || 'Unknown';
-              if (c.is_deleted) return `[${time}] ${name}:\n[Message deleted by sender]`;
-              const msgText = c.message || '';
-              const editNote = c.is_edited && c.original_message
-                ? `\n  [Edited — original: ${c.original_message}]`
-                : c.is_edited ? '\n  [Edited]' : '';
-              return `[${time}] ${name}:\n${msgText}${editNote}`;
-            }).join('\n\n') + '\n\n';
-          }
-          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, chatTranscript, webhookConfig);
+          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, webhookConfig);
         } catch (discordErr) {
           console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
         }
 
         const denialItemName = displayData?.name || 'Unknown';
         const denialDocLink = displayData?.link || 'N/A';
-        const denialLogUrl = logData
+        const denialLogUrl = logData?.messageId
           ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
           : '';
         const sess = await getCurrentSession();
@@ -5457,7 +5522,9 @@ export default function App() {
                                isActualAdmin={isAdmin}
                                onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
-                               onViewSlots={(jutsu) => setSlotsView(jutsu)} />
+                               onViewSlots={(jutsu) => setSlotsView(jutsu)}
+                               onViewSheet={(jutsu) => setSheetView(jutsu)}
+                               onViewHistory={isStaff ? (jutsu) => setHistoryView(jutsu) : null} />
                   ))}
                 </div>
                 {filtJ.length > visibleCount && (
@@ -5662,6 +5729,19 @@ export default function App() {
       )}
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
+      )}
+      {sheetView && (
+        <JutsuSheetModal
+          sheet={normalizeJutsuSheet(sheetView.sheet)}
+          onChange={() => {}}
+          readOnly
+          multiRank={!!sheetView.multiRank}
+          jutsuName={sheetView.name}
+          onClose={() => setSheetView(null)}
+        />
+      )}
+      {historyView && (
+        <JutsuHistoryModal jutsuId={historyView._id} jutsuName={historyView.name} onClose={() => setHistoryView(null)} />
       )}
       {adminForm     && (() => {
         const formTab = adminForm.tab || (MANAGE_TABLES[tab] ? tab : 'jutsus');

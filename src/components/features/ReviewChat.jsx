@@ -120,7 +120,6 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
           reviewerDiscordId: pending.data.second_reviewer_discord_id,
           myCharactersLink: pending.data.myCharactersLink,
           upgradesLink: pending.data.upgradesLink || '',
-          docLink: pending.data.link,
         }),
       });
       if (res.ok) { setNudged(true); }

@@ -17,6 +17,12 @@ import {
   ACADEMY_JUTSUS, LIMITS, RANK_LIMITS,
   normalizeSheet, computeCU, sheetHasContent,
 } from '../../constants/characterSheet';
+import {
+  PAPER, PAPER_BG, CARD, INK, INK_MUTED, HAIRLINE, RULE, HANKO, LINK_COLOR,
+  inputCls, inputStyle, zebraRow, chartCardStyle, chartTooltipStyle,
+  Dash, Text, Choice, Area, Link, Field, Section, Table, Cell, SubHead,
+  SheetShell, HankoStamp,
+} from './SheetKit';
 
 /*
  * The NARP OC sheet, rendered from the database instead of a Google Doc.
@@ -28,147 +34,11 @@ import {
  *
  * Read-only for everyone; the owner and staff+ get an Edit toggle that turns
  * every value into an input in place.
+ *
+ * Shared visual primitives (colors, Field/Section/Table/etc.) live in
+ * ./SheetKit — JutsuSheetModal uses the same ones so the two sheets stay
+ * visually identical.
  */
-
-const PAPER   = '#f3e9d6';
-const PAPER_BG = 'radial-gradient(ellipse at top, #f8f1df 0%, #f3e9d6 55%, #ecdec0 100%)';
-const CARD    = '#faf3e3';
-const INK     = '#251e15';
-const INK_MUTED = '#8c7d61';
-const HAIRLINE = 'rgba(37,30,21,0.16)';
-const RULE    = 'rgba(37,30,21,0.85)';
-const HANKO   = '#a23a2c';
-const LINK_COLOR = '#3c5c8c';
-
-// ─── PRIMITIVES ──────────────────────────────────────────────────────────────
-
-const inputCls = 'w-full rounded-sm px-2.5 py-1.5 text-[13px] outline-none border transition-shadow ' +
-  'focus:shadow-[0_0_0_2px_rgba(37,30,21,0.22)]';
-const inputStyle = { background: CARD, borderColor: 'rgba(37,30,21,0.22)', color: INK };
-
-// Zebra striping applied per <tr>, since arbitrary-value Tailwind covers the
-// custom palette without a separate stylesheet.
-const zebraRow = 'odd:bg-[#f9f2e1] even:bg-[#efe1c3] hover:bg-[#e8d8b6] transition-colors';
-
-const Dash = () => <span className="font-mono text-[13px]" style={{ color: INK_MUTED }}>----</span>;
-
-function Text({ value, onChange, editing, placeholder = '', type = 'text' }) {
-  if (!editing) return value ? <span className="break-words" style={{ color: INK }}>{value}</span> : <Dash />;
-  return (
-    <input type={type} value={value || ''} placeholder={placeholder}
-           onChange={e => onChange(e.target.value)} className={inputCls} style={inputStyle} />
-  );
-}
-
-function Choice({ value, onChange, editing, options, placeholder = 'Select' }) {
-  if (!editing) return value ? <span style={{ color: INK }}>{value}</span> : <Dash />;
-  return (
-    <div className="relative">
-      <select value={value || ''} onChange={e => onChange(e.target.value)}
-              className={inputCls + ' appearance-none pr-7 cursor-pointer'} style={inputStyle}>
-        <option value="">{placeholder}</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
-      </select>
-      <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: INK_MUTED }} />
-    </div>
-  );
-}
-
-function Area({ value, onChange, editing, placeholder = '', rows = 5 }) {
-  if (!editing) {
-    return value
-      ? <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words" style={{ color: INK }}>{value}</p>
-      : <p className="text-[13px] italic" style={{ color: INK_MUTED }}>Not written yet</p>;
-  }
-  return (
-    <textarea value={value || ''} rows={rows} placeholder={placeholder}
-              onChange={e => onChange(e.target.value)}
-              className={inputCls + ' leading-relaxed resize-y'} style={inputStyle} />
-  );
-}
-
-function Link({ value, onChange, editing, placeholder = 'Hyperlink' }) {
-  if (!editing) {
-    if (!value) return <Dash />;
-    return (
-      <a href={value} target="_blank" rel="noopener noreferrer"
-         className="inline-flex items-center gap-1 text-[12px] font-semibold underline underline-offset-2 hover:opacity-70 transition-opacity"
-         style={{ color: LINK_COLOR }}>
-        Open <ExternalLink size={10} />
-      </a>
-    );
-  }
-  return (
-    <input type="url" value={value || ''} placeholder={placeholder}
-           onChange={e => onChange(e.target.value)} className={inputCls} style={inputStyle} />
-  );
-}
-
-// Label / value pair — right-aligned bold serif label on larger screens,
-// stacked on mobile, hairline divider beneath, mirroring the printed sheet.
-function Field({ label, note, children }) {
-  return (
-    <div className="grid grid-cols-1 sm:grid-cols-[11rem_1fr] gap-x-4 gap-y-0.5 py-2 items-baseline"
-         style={{ borderBottom: `1px solid ${HAIRLINE}` }}>
-      <div className="sm:text-right">
-        <span className="text-[11px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{label}</span>
-        {note && <span className="block sm:inline sm:ml-1.5 text-[10px] font-normal normal-case italic" style={{ color: INK_MUTED }}>{note}</span>}
-      </div>
-      <div className="min-w-0 text-sm">{children}</div>
-    </div>
-  );
-}
-
-function Section({ kanji, title, note, children }) {
-  return (
-    <section className="mb-9">
-      <div className="flex items-baseline gap-2.5 mb-1.5">
-        <span className="text-xl font-serif font-bold leading-none" style={{ color: INK }}>{kanji}</span>
-        <h3 className="text-base sm:text-lg font-serif font-bold tracking-tight" style={{ color: INK }}>{title}</h3>
-      </div>
-      <div className="h-[2px] mb-3" style={{ background: RULE }} />
-      {note && <p className="text-[12px] italic mb-3 leading-relaxed" style={{ color: INK_MUTED }}>{note}</p>}
-      {children}
-    </section>
-  );
-}
-
-function Table({ headers, children, minWidth = '26rem' }) {
-  return (
-    <div className="overflow-x-auto rounded-sm" style={{ border: `1px solid ${HAIRLINE}` }}>
-      <table className="w-full text-sm border-collapse" style={{ minWidth }}>
-        <thead>
-          <tr style={{ background: INK }}>
-            {headers.map((h, i) => (
-              <th key={i} className="text-left text-[10px] font-bold uppercase tracking-wide px-3 py-2 font-serif whitespace-nowrap"
-                  style={{ color: PAPER }}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
-  );
-}
-
-const Cell = ({ children, className = '' }) => (
-  <td className={`py-2 px-3 align-middle text-[13px] ${className}`} style={{ borderBottom: `1px solid ${HAIRLINE}`, color: INK }}>
-    {children}
-  </td>
-);
-
-const SubHead = ({ children, note }) => (
-  <p className="text-[10px] font-bold uppercase tracking-wide font-serif mt-5 mb-1.5" style={{ color: INK }}>
-    {children} {note && <span className="normal-case font-normal italic" style={{ color: INK_MUTED }}>{note}</span>}
-  </p>
-);
-
-// ─── CHARTS ──────────────────────────────────────────────────────────────────
-
-const chartCardStyle = { background: CARD, border: `1px solid ${HAIRLINE}` };
-const chartTooltipStyle = { background: PAPER, border: `1px solid ${HAIRLINE}`, borderRadius: 2, fontSize: 12, color: INK };
 
 function StatRadar({ data, accent }) {
   return (

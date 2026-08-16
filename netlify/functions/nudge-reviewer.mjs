@@ -1,3 +1,11 @@
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_DATABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY,
+  { auth: { persistSession: false, autoRefreshToken: false } }
+);
+
 export default async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -16,11 +24,20 @@ export default async (req) => {
     });
   }
 
-  const { reviewerDiscordId, submitterName, docLink, myCharactersLink, upgradesLink } = body;
+  const { reviewerDiscordId, submitterName, myCharactersLink, upgradesLink } = body;
 
   if (!reviewerDiscordId) {
     return new Response(JSON.stringify({ error: 'Missing reviewerDiscordId' }), {
       status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: controls } = await supabase
+    .from('submission_controls').select('discord_notifications_paused').eq('id', 1).maybeSingle();
+  if (controls?.discord_notifications_paused) {
+    return new Response(JSON.stringify({ success: true, skipped: true, reason: 'discord_notifications_paused' }), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -35,7 +52,6 @@ export default async (req) => {
 
   const submitter = submitterName || 'A player';
   let message = `⏰ **${submitter}** has completed their OC submission steps and is waiting for your final approval!`;
-  if (docLink) message += `\n📄 Doc: ${docLink}`;
   if (myCharactersLink) message += `\n🔗 My-Characters: ${myCharactersLink}`;
   if (upgradesLink) message += `\n🔗 Upgrades: ${upgradesLink}`;
 

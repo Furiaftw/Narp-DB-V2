@@ -52,6 +52,26 @@ The OC sheet that used to live in a Google Doc is now a database record:
 - Roster rows are matched to a sheet **by character name** — there is no foreign key from `roster_entries` / `roster_squads`. `RosterPage` fetches a name → sheet index once (`fetchCharacterSheetIndex`) and every name renders through its `CharacterName` component, which opens the sheet on click and keeps the old character-area link as a separate icon.
 - Writing is gated by RLS: the owner and staff+ can edit; the owner and admin+ can delete; anyone can read.
 
+Both this and the jutsu sheet below share one visual toolkit — `src/components/features/SheetKit.jsx` — the cream-paper/ink-black/hanko-stamp "parchment" primitives (`Field`, `Section`, `Table`, `Text`, `Choice`, `Area`, `Link`, `SheetShell`, `HankoStamp`, plus the color tokens). Change the look in one place and both sheets stay identical.
+
+### Jutsu sheets (the in-database jutsu write-up)
+
+The Google Doc a jutsu submission used to link to (NARP Jutsu Template — image, description, step-by-step mechanics, restrictions, multi-rank stat/skill scaling) is now captured directly in the app, same principle as the character sheet:
+
+- `jutsus.sheet` (jsonb, default `{}`) holds it — no separate table, since a jutsu row already *is* the record (unlike characters, which have no dedicated row). `pending_jutsus.data.sheet` carries it through the review queue; `approve_pending_jutsu()` writes it (and `jutsu_type`/`pve`, which the RPC had been silently dropping since those columns were added — fixed in the same migration) to `jutsus` on approval.
+- `src/constants/jutsuSheet.js` — the shape: `emptyJutsuSheet()`, `normalizeJutsuSheet()`, `jutsuSheetHasContent()`.
+- `src/components/features/JutsuSheetModal.jsx` — fully controlled (`sheet` + `onChange`, no internal save/load). `AdminFormModal` folds it into `fd._sheet` alongside the rest of the jutsu form; `JutsuCard`'s "Sheet" button opens the same component read-only, fed straight from the jutsu row.
+- Fields the original doc template also had — a top-level Mechanics category, Casting Category, and two Combat Type selects — are deliberately left out: there's no existing taxonomy for them in this app. Add them as staff-editable tag lists (same pattern as `jutsu_type_tags`) if that's ever wanted.
+- The jutsu form's old "Doc Link" field is gone; `jutsus.link` (and `bloodlines.link`, untouched) stay as columns for backward compatibility with old data but are no longer editable from the UI.
+
+### Jutsu review history (moved off Discord)
+
+The review chat transcript no longer ships to Discord as a `.txt` webhook attachment (nor does `send-discord-log.mjs` re-export the submitter's Google Doc as a PDF anymore — both removed together, since neither makes sense without a doc link). Instead, on a plain-jutsu approval, `handleApprovePending` saves the transcript straight to `jutsu_review_history` (`jutsu_id`, `operation`, `transcript`, `submitted_by`, `reviewed_by`) via `saveJutsuReviewHistory`. RLS restricts the table to `is_staff_or_above()` (reviewer+; `oc_staff` — Character-only reviewers — can't see it). `JutsuHistoryModal`, opened from the clock icon on `JutsuCard` (staff+ only), is the read side. Denials aren't stored — there's no resulting jutsu to attach them to.
+
+### Discord notifications mute
+
+`submission_controls.discord_notifications_paused` (owner-toggleable from System Tools, same switch pattern as the per-type submission gates) is checked **server-side** inside `reviewer-ping.mjs`, `nudge-reviewer.mjs`, `send-discord-log.mjs`, and `reviewer-work-log.mjs` — each queries the row itself and no-ops if muted, rather than trusting client state. Flipping it silences everything: new-submission alerts, the second-reviewer-needed ping, the reviewer nudge DM, and the approval/denial log post.
+
 ### Data layer: src/lib/supabase.js
 
 All Supabase access goes through this one module — auth (Discord OAuth + dev login), profiles, whitelist, the pending-jutsus queue, review chats, realtime subscriptions (`subscribeToDatabaseChanges`), webhook config, submission controls, character sheets, and push subscriptions. Jutsu rows are mapped between DB shape and app shape via `fromRowJutsu` / `buildJutsuPayload` — if you add or rename a jutsu column, update both.
@@ -74,6 +94,7 @@ Four tiers: `user` → `staff` → `admin` → `owner`. RLS policies and SQL fun
 - Admins can only flip users between `user`/`staff`; only the owner manages admins. Role changes are audit-logged in `role_change_log`.
 - Roles can also be synced from Discord guild roles via the `sync-discord-roles` function (only when a fresh `provider_token` exists — a plain page reload deliberately skips the sync so a failed Discord lookup can't downgrade anyone).
 - **The app never grants Discord roles.** Role flow is inbound only: Discord guild roles → site tier (`discord-login.js`, `sync-discord-roles.js`). The old OC-approval automation that handed out Has Character / village / rank / Councilor / OC-count roles has been removed — reviewers assign every Discord role by hand.
+- **Summon and Custom Item submissions are currently paused** (`submission_controls.summon_paused` / `custom_item_paused`) — their forms only ever captured a mandatory Google Doc link and nothing else, and that requirement is gone server-wide. Proper in-app sheets for these (same treatment as jutsus/characters) are a future update; the form code (`StatelessSubmissionModal` in App.jsx) is untouched and ready to re-enable once that ships.
 
 ### Database migrations
 
@@ -85,7 +106,7 @@ Server-side code using the `SUPABASE_SERVICE_ROLE_KEY` — anything that must by
 
 - `sync-discord-roles.js` — recompute a user's role from their Discord guild roles
 - `send-chat-push.mjs` / `send-test-push.mjs` — Web Push (VAPID) delivery for review-chat messages
-- `discord-dm.mjs`, `send-discord-log.mjs`, `nudge-reviewer.mjs`, `reviewer-ping.mjs`, `reviewer-work-log.mjs` — Discord webhook/DM notifications around the review workflow
+- `discord-dm.mjs`, `send-discord-log.mjs`, `nudge-reviewer.mjs`, `reviewer-ping.mjs`, `reviewer-work-log.mjs` — Discord webhook/DM notifications around the review workflow. The last four each check `submission_controls.discord_notifications_paused` first and no-op if muted (see "Discord notifications mute" above). `send-discord-log.mjs` no longer fetches a Google Doc PDF or attaches a chat transcript `.txt` — it just posts the embed.
 - `ensure-profile.mjs` — profile bootstrap
 - `dev-login.js` — password sign-in as a dev account, hard-gated behind `EXPERIMENTAL_MODE=true` in Netlify env
 
