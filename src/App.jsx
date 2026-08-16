@@ -3185,6 +3185,58 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
     setMsg('JSON Exported Successfully');
   };
 
+  // Snapshot the live DOM (what's actually rendered right now, not the
+  // server-shell index.html) with every stylesheet inlined, so the file
+  // renders standalone — handy for handing the current design to another AI.
+  // Scripts are stripped: this is a static visual snapshot, not a working
+  // copy of the app.
+  const exportHtmlDesign = async () => {
+    setMsg('Preparing HTML export...');
+    try {
+      const styleLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+      const cssChunks = await Promise.all(styleLinks.map(async (link) => {
+        try {
+          const res = await fetch(link.href);
+          if (!res.ok) return '';
+          return `/* ${link.href} */\n${await res.text()}`;
+        } catch {
+          return '';
+        }
+      }));
+
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelectorAll('script').forEach(el => el.remove());
+      clone.querySelectorAll('link[rel="stylesheet"]').forEach(el => el.remove());
+      clone.querySelectorAll('[src], [href]').forEach(el => {
+        for (const attr of ['src', 'href']) {
+          const v = el.getAttribute(attr);
+          if (v && v.startsWith('/') && !v.startsWith('//')) {
+            el.setAttribute(attr, window.location.origin + v);
+          }
+        }
+      });
+
+      const head = clone.querySelector('head');
+      if (head) head.insertAdjacentHTML('beforeend', `<style>\n${cssChunks.join('\n\n')}\n</style>`);
+
+      const html = '<!doctype html>\n'
+        + `<!-- Static design export of ${window.location.href} — captured ${new Date().toISOString()}. `
+        + `Snapshot only, not a working app: scripts are stripped. -->\n`
+        + clone.outerHTML;
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `narp-design-export-${new Date().toISOString().slice(0, 10)}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg('HTML design exported.');
+    } catch (e) {
+      setMsg('HTML export failed: ' + (e.message || 'unknown error'));
+    }
+  };
+
   const handleSync = async () => {
     setMsg('Syncing...');
     try {
@@ -3255,6 +3307,23 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 </button>
               </div>
             </div>
+
+            {/* Export Site Design (HTML) — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Book" size={20} className="text-violet-500" /> Export Site Design
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-6">
+                  Download the current page as a self-contained HTML file — live markup with every stylesheet inlined, no scripts. Handy for handing the design to another AI.
+                </p>
+                <button onClick={exportHtmlDesign}
+                        className="w-full bg-violet-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-violet-700">
+                  <Icon n="Download" size={16}/> Download HTML
+                </button>
+              </div>
+            )}
 
             {/* Log Thread IDs — owner only */}
             {isOwner && isSupabaseConfigured() && (
