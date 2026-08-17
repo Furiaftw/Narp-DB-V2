@@ -3,6 +3,13 @@
   publish = "dist"
   functions = "netlify/functions"
 
+# dev-login is an EXPERIMENTAL_MODE-only account-minting endpoint (mints an
+# owner-role account on POST). It must never ship in a production deploy,
+# so it is deleted from the functions dir after build rather than relying
+# solely on the env-var gate inside the function.
+[context.production]
+  command = "npm run build && rm -f netlify/functions/dev-login.js"
+
 [[edge_functions]]
   function = "serve-markdown"
   path = "/*"

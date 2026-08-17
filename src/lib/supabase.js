@@ -85,7 +85,10 @@ export const fetchMyProfile = async () => {
     try {
       const syncRes = await fetch('/.netlify/functions/sync-discord-roles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           provider_token: session.provider_token,
           userId: session.user.id

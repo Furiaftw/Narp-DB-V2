@@ -35,6 +35,25 @@ export default async (req) => {
     });
 
     /* ------------------------------------------------------------------
+       STEP 0 — Authenticate the caller. Require the caller's own Supabase
+       JWT and reject unless it belongs to the same user as `userId`, so an
+       unauthenticated (or mismatched) request can never confirm/unban or
+       reassign the role of an arbitrary account.
+       ------------------------------------------------------------------ */
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader?.startsWith('Bearer ')) {
+      return json({ error: 'Missing auth token' }, 401);
+    }
+    const { data: { user: callerUser }, error: callerAuthError } =
+      await supabaseAdmin.auth.getUser(authHeader.slice(7));
+    if (callerAuthError || !callerUser) {
+      return json({ error: 'Invalid token' }, 401);
+    }
+    if (callerUser.id !== userId) {
+      return json({ error: 'Forbidden: token does not match userId' }, 403);
+    }
+
+    /* ------------------------------------------------------------------
        STEP 1 — Read the current profile BEFORE making any change.
        If we cannot read the profile we have no idea whether this user is
        the owner, so we must abort rather than risk an unsafe write.

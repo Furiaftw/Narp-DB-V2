@@ -28,11 +28,11 @@ There is no test suite and no linter configured. Verification is manual: run the
 
 `src/App.jsx` (~5,500 lines) contains most of the UI and business logic: the root `App` component, tab routing, data loading, dev-mode fallback, and many components defined inline (JutsuCard, FilterBar, SessionListCart, PendingJutsuCard, AdminFormModal, SystemToolsModal, UserMenu, AuditLogModal, and more).
 
-**Important:** `src/components/` contains extracted copies of several of those same components (`features/JutsuCard.jsx`, `features/FilterBar.jsx`, `features/SessionCart.jsx`, `features/PendingCard.jsx`, `modals/AdminForm.jsx`, `modals/SystemTools.jsx`, `layout/UserMenu.jsx`, `NotificationBell.jsx`) that are **not imported by anything** — App.jsx uses its own inline versions. Editing those files has no effect on the running app. Before touching a component, check what actually imports it.
+**Important:** `src/components/` contains extracted copies of several of those same components (`features/JutsuCard.jsx`, `features/FilterBar.jsx`, `modals/AdminForm.jsx`, `modals/SystemTools.jsx`, `layout/UserMenu.jsx`) that are **not imported by anything** — App.jsx uses its own inline versions. Editing those files has no effect on the running app. Before touching a component, check what actually imports it. (The equivalent dead copies of SessionCart, PendingCard, and NotificationBell, plus the dead `modals/StatelessForm.jsx`, have been deleted outright rather than left to bit-rot.)
 
 What App.jsx *does* import from elsewhere:
 - `src/pages/RosterPage.jsx` — bloodline roster tab
-- `src/pages/MessagesPage.jsx` — messages inbox tab
+- `src/pages/InboxPage.jsx` — messages inbox tab
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
 - `src/components/ErrorBoundary.jsx` (via `main.jsx`)
 - `src/hooks/useIsDesktop.js`, `src/utils/helpers.jsx`
@@ -126,6 +126,6 @@ Edge functions run on Deno (`deno.lock`); regular functions run on Node.
 - Env vars exposed to the browser must be prefixed `VITE_`; everything else is server-only. Secrets (service role key, VAPID private key) live only in Netlify env vars and are read only by functions.
 - Console logging uses the `[NARP]` prefix (e.g. `[NARP] submitPendingJutsu failed`).
 - Review-chat system messages are ordinary `pending_chats` rows with a marker prefix: `[SYSTEM_FINAL_STEP]` (OC final-approval block) and `[SYSTEM_JOIN]` (reviewer joined the chat — also serves as join-state persistence: anyone with a message in a thread counts as having entered it). `fetchChatOverview`/`fetchRecentChats` filter out `[SYSTEM_JOIN]` so joins don't affect turn/unread logic.
-- The README's setup guide is the authoritative operational doc (Supabase/Discord/Netlify wiring, env-var table, troubleshooting), but parts of its "Project structure" section are stale — e.g. `App.claude-preview.jsx` and `supabase/schema.sql` do not exist in this repo.
+- The README's setup guide is the authoritative operational doc (Supabase/Discord/Netlify wiring, env-var table, troubleshooting). There is no consolidated base `schema.sql` in this repo — only incremental `add-*.sql` patch scripts plus `auth-trigger.sql`/`submission-queue-updates.sql` — so standing up a brand-new Supabase project requires a schema-only export from an existing deployment first (see the README's "Run the schema" section).
 - `netlify.toml` routes every non-asset path to `index.html` (SPA) and runs `serve-markdown` on all paths; asset caching is immutable, so filenames must stay hashed (Vite default).
 - The owner email is hardcoded in the Supabase `handle_new_user()` trigger (see `supabase/auth-trigger.sql` and README).

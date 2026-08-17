@@ -266,7 +266,7 @@ export default function CharacterSheetModal({
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-1 font-serif" style={{ color: INK_MUTED }}>
-                籍 NARP Character Sheet
+                籍 SARP Character Sheet
               </p>
               {ed ? (
                 <input value={name} onChange={e => setName(e.target.value)}
@@ -580,7 +580,7 @@ export default function CharacterSheetModal({
 
               {/* 術 TECHNIQUES */}
               <Section kanji="術" title="Techniques"
-                       note={`Every jutsu listed here must already exist in this database. ${rankLimits ? `${sheet.personal.shinobi_rank} — ${rankLimits.techniques}` : 'Check the NARP documentation for your allowed jutsu number and rank.'}`}>
+                       note={`Every jutsu listed here must already exist in this database. ${rankLimits ? `${sheet.personal.shinobi_rank} — ${rankLimits.techniques}` : 'Check the SARP documentation for your allowed jutsu number and rank.'}`}>
                 {anyJutsuRanked && <JutsuRankChart data={jutsuRankData} accent={accent} />}
                 <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
                   {sheet.techniques.jutsu.map((j, i) => (

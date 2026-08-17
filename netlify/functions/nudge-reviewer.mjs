@@ -14,6 +14,21 @@ export default async (req) => {
     });
   }
 
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response(JSON.stringify({ error: 'Missing auth token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   let body;
   try {
     body = await req.json();

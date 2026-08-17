@@ -138,7 +138,7 @@ export const formatSessionList = (items) => {
   if (groups.has('Other'))      ordered.push('Other');
   if (groups.has('Battlemode')) ordered.push('Battlemode');
 
-  const out = ['**My NARP List**'];
+  const out = ['**My SARP List**'];
   ordered.forEach(name => {
     const grp = groups.get(name);
     const heading = grp.type === 'bloodline' ? `${name} (Bloodline)` : name;

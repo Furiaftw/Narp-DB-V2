@@ -20,9 +20,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'icons/*.png', 'icons/*.svg'],
       manifest: {
-        name: 'NARP Database',
-        short_name: 'NARP DB',
-        description: 'Official Database for the NARP community.',
+        name: 'SARP Database',
+        short_name: 'SARP DB',
+        description: 'Official Database for the SARP community.',
         theme_color: '#4F46E5',
         background_color: '#0f172a',
         display: 'standalone',

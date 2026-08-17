@@ -91,7 +91,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
   };
 
   const handleSave = async () => {
-    if (!myLinkComplete) { setError('Paste your Character Area thread link from the NARP server (right-click your thread → Copy Link).'); return; }
+    if (!myLinkComplete) { setError('Paste your Character Area thread link from the SARP server (right-click your thread → Copy Link).'); return; }
     if (!areaChecked || !upgradesChecked) { setError('Check both boxes once the threads are created.'); return; }
     setError('');
     setSaving(true);
@@ -111,9 +111,13 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
     }
     setNudging(true);
     try {
+      const sess = await getCurrentSession();
       const res = await fetch('/.netlify/functions/nudge-reviewer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           pendingId: pending.id,
           submitterName: pending.submitter?.username || 'Player',
@@ -205,7 +209,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
                 placeholder="https://discord.com/channels/.../your-thread-id"
                 className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
               />
-              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Paste your thread's link from the NARP server (right-click the thread → Copy Link)</p>}
+              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Paste your thread's link from the SARP server (right-click the thread → Copy Link)</p>}
             </div>
 
             <div className="flex items-start gap-2.5 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">

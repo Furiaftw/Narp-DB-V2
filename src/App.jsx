@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 import {
   supabase,
@@ -56,10 +56,10 @@ import {
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
-import RosterPage from './pages/RosterPage';
-import WorkStatsPage from './pages/WorkStatsPage';
-import JutsuStatsModal from './components/modals/JutsuStatsModal';
-import InboxPage from './pages/InboxPage';
+const RosterPage = lazy(() => import('./pages/RosterPage'));
+const WorkStatsPage = lazy(() => import('./pages/WorkStatsPage'));
+const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
+const InboxPage = lazy(() => import('./pages/InboxPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
@@ -67,7 +67,7 @@ import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent, jutsuDocsHa
 
 
 /* ============================================================================
-   NARP DATABASE — Clean Unified Build
+   SARP DATABASE — Clean Unified Build
    ============================================================================ */
 
 /* ---------------------------------------------------------------------------
@@ -1191,7 +1191,7 @@ const formatSessionList = (items) => {
   if (groups.has('Other'))      ordered.push('Other');
   if (groups.has('Battlemode')) ordered.push('Battlemode');
 
-  const out = ['**My NARP List**'];
+  const out = ['**My SARP List**'];
   ordered.forEach(name => {
     const grp = groups.get(name);
     const heading = grp.type === 'bloodline' ? `${name} (Bloodline)` : name;
@@ -1673,9 +1673,13 @@ function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpl
       const data = buildData();
       await submitPendingJutsu('insert', null, data, 'pending_review');
 
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: data.name,
@@ -2033,9 +2037,13 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
       };
       await submitPendingJutsu('insert', null, data, 'pending_review');
 
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
@@ -3226,7 +3234,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(db, null, 2));
     const a = document.createElement('a');
     a.href = dataStr;
-    a.download = 'narp_database_backup.json';
+    a.download = 'sarp_database_backup.json';
     a.click();
     setMsg('JSON Exported Successfully');
   };
@@ -4580,9 +4588,13 @@ export default function App() {
       await submitPendingJutsu(operation, targetId, payload, status);
 
       const tab = t;
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: entity?.name || 'Unknown',
@@ -5007,9 +5019,13 @@ export default function App() {
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
 
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: 1 }),
       }).catch((pingErr) => {
         console.warn('Failed to send reviewer second approval ping:', pingErr);
@@ -5095,9 +5111,13 @@ export default function App() {
 
       await recordSecondApprovalPing(id, nextCount);
 
+      const _pingSess = await getCurrentSession();
       await fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: nextCount }),
       });
     } catch (e) {
@@ -5113,9 +5133,13 @@ export default function App() {
       const itemType = 'Jutsu';
 
       // Post a plain retraction notice to the Discord log channel — no work log
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'retracted', itemName, itemType }),
       }).catch(err => console.warn('[NARP] Retraction ping failed:', err));
 
@@ -5376,7 +5400,7 @@ export default function App() {
           <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-sm px-4 py-3 flex items-start gap-3">
             <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <p className="font-bold mb-1">NARP DB is shutting down on August 20th.</p>
+              <p className="font-bold mb-1">SARP DB is shutting down on August 20th.</p>
               <p>
                 Running this site costs money to keep online, and that cost isn't sustainable long-term. Please
                 save or export anything you need before then.
@@ -5384,7 +5408,7 @@ export default function App() {
               <p className="mt-1.5 font-mono text-xs sm:text-sm font-semibold tracking-wide">
                 {msUntilShutdown > 0
                   ? `${shutdownCountdown.days}d ${String(shutdownCountdown.hours).padStart(2, '0')}h ${String(shutdownCountdown.mins).padStart(2, '0')}m ${String(shutdownCountdown.secs).padStart(2, '0')}s remaining`
-                  : 'NARP DB has shut down.'}
+                  : 'SARP DB has shut down.'}
               </p>
             </div>
             <button
@@ -5399,8 +5423,8 @@ export default function App() {
         {/* HEADER */}
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-            <Icon n="Book" size={18} className="text-red-500" />
-            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
+            <Icon n="Book" size={18} className="text-blue-600" />
+            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">SARP Database</button>
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
@@ -5629,6 +5653,7 @@ export default function App() {
         )}
 
         {tab === 'inbox' && profile && (
+          <Suspense fallback={null}>
           <InboxPage
             inboxItems={inboxItems}
             pendingGroups={pendingGroups}
@@ -5657,6 +5682,7 @@ export default function App() {
             visibleRecentChats={visibleRecentChats}
             pendingLoaded={pendingLoaded}
           />
+          </Suspense>
         )}
 
         {tab === 'members' && isAdmin && (
@@ -5781,11 +5807,15 @@ export default function App() {
         )}
 
         {tab === 'roster' && (
-          <RosterPage userRole={role} userId={profile?.id} />
+          <Suspense fallback={null}>
+            <RosterPage userRole={role} userId={profile?.id} />
+          </Suspense>
         )}
 
         {tab === 'worklog' && (
-          <WorkStatsPage userId={profile?.id} userRole={role} />
+          <Suspense fallback={null}>
+            <WorkStatsPage userId={profile?.id} userRole={role} />
+          </Suspense>
         )}
       </div>
 
@@ -5798,7 +5828,9 @@ export default function App() {
 
       {/* MODALS */}
       {modals.stats && (
-        <JutsuStatsModal db={db} onClose={() => setModals(m => ({ ...m, stats: false }))} />
+        <Suspense fallback={null}>
+          <JutsuStatsModal db={db} onClose={() => setModals(m => ({ ...m, stats: false }))} />
+        </Suspense>
       )}
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
@@ -5962,7 +5994,7 @@ export default function App() {
                         if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); setModals(m => ({ ...m, credits: false })); }
                       }}
                       className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
-                      <Icon n="Download" size={14} /> Install NARP Database
+                      <Icon n="Download" size={14} /> Install SARP Database
                     </button>
                   ) : (
                     <button
@@ -5989,7 +6021,7 @@ export default function App() {
               <button onClick={() => setModals(m => ({ ...m, iosInstall: false }))} className="text-slate-400 hover:text-white"><Icon n="X" size={18} /></button>
             </div>
             <div className="p-6 space-y-4 text-sm text-slate-700">
-              <p className="font-semibold text-slate-800">Add NARP Database to your home screen in 3 steps:</p>
+              <p className="font-semibold text-slate-800">Add SARP Database to your home screen in 3 steps:</p>
               <ol className="space-y-3">
                 <li className="flex items-start gap-3">
                   <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">1</span>
