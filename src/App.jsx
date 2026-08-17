@@ -63,7 +63,7 @@ import InboxPage from './pages/InboxPage';
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
-import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent } from './constants/jutsuSheet';
+import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent, jutsuDocsHaveContent } from './constants/jutsuSheet';
 
 
 /* ============================================================================
@@ -461,14 +461,14 @@ const MANAGE_TABLES = {
     label: 'Jutsus',
     fields: [
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
-      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
-      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
-      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', col: 1 },
-      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
+      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, req: true, col: 2 },
+      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, req: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, col: 1 },
+      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, req: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
-      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
-      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited', 'Pve'], multi: true, col: 1 },
-      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', col: 1 },
+      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, req: true, col: 1 },
+      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited'], multi: true, col: 1 },
+      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', req: true, col: 1 },
       { k: 'bloodline',   l: 'Bloodline',       t: 'bl-select', col: 1 },
       { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },
       { k: 'cost',        l: 'Cost', hidden: true },
@@ -1067,7 +1067,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
           <div className="flex gap-2">
             <button onClick={(e) => { e.stopPropagation(); onViewSheet && onViewSheet(j); }}
                     className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
-              <Icon n="Book" size={16}/> {jutsuSheetHasContent(j.sheet) ? 'Sheet' : 'No Sheet'}
+              <Icon n="Book" size={16}/> {jutsuDocsHaveContent(j.sheet, j.multiRank) ? 'Documentation' : 'No Documentation'}
             </button>
 
             {j.limited && (
@@ -1097,6 +1097,45 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
             </button>
           </div>
           
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Multi-rank jutsus keep separate documentation per rank — this picks which
+// one to open before handing off to the read-only JutsuSheetModal.
+function JutsuDocRankPicker({ jutsu, onPick, onClose }) {
+  const ranks = toArray(jutsu.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
+  return (
+    <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
+      <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-5">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Choose a version</p>
+              <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">{jutsu.name}</h2>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full shrink-0 transition-colors">
+              <Icon n="X" size={18} />
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">This jutsu has separate documentation for each rank.</p>
+          <div className="flex flex-col gap-2">
+            {ranks.map(r => {
+              const filled = jutsuSheetHasContent(jutsu.sheet?.[r]);
+              return (
+                <button key={r} onClick={() => onPick(r)}
+                        className="flex items-center justify-between gap-3 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-xl px-4 py-3 transition-colors">
+                  <span className="flex items-center gap-2.5">
+                    <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md text-xs font-black border border-slate-300 shadow-sm">{r}</span>
+                    <span className="text-sm font-bold text-slate-700">{r}-Rank</span>
+                  </span>
+                  {!filled && <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wide">No doc</span>}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>
@@ -1251,7 +1290,6 @@ function SessionListCart({ list, onClear, onRemove }) {
 const TOGGLE_PAIRS = [
   { showKey: 'lck', hideKey: 'hLck', label: 'Locked'     },
   { showKey: 'lim', hideKey: 'hLim', label: 'Limited'    },
-  { showKey: 'pve', hideKey: 'hPve', label: 'Pve'        },
   { showKey: 'mul', hideKey: 'hMul', label: 'Multi-Rank' },
 ];
 const HIDE_ONLY = [
@@ -2675,7 +2713,9 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [showSheet, setShowSheet] = useState(false);
+  // Which rank's documentation is currently open for editing; '__single__'
+  // for a non-multi-rank jutsu (only one doc), null when closed.
+  const [editingDocRank, setEditingDocRank] = useState(null);
   // Admins creating a NEW jutsu default to requesting a second approval;
   // they can still switch the toggle off for a direct write.
   const [askSecondApproval, setAskSecondApproval] = useState(
@@ -2710,8 +2750,17 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
       if (eRow.limited) conds.push('Limited');
       if (conds.length) next.conditions = conds.join(', ');
       next._cCost = !!(eRow._id && eRow.cost && !toArray(eRow.types).includes('Battlemode'));
-      // The sheet is a nested object, not a schema field — carried separately.
-      next._sheet = normalizeJutsuSheet(eRow.sheet);
+      // The doc(s) are a nested object, not a schema field — carried
+      // separately. Internally always keyed by rank ('__single__' when the
+      // jutsu isn't multi-rank) so toggling rank selection mid-edit can't
+      // scramble which doc belongs to which rank.
+      next._sheet = {};
+      if (eRow.multiRank) {
+        const stored = (eRow.sheet && typeof eRow.sheet === 'object') ? eRow.sheet : {};
+        toArray(eRow.rank).forEach(r => { next._sheet[r] = normalizeJutsuSheet(stored[r]); });
+      } else {
+        next._sheet.__single__ = normalizeJutsuSheet(eRow.sheet);
+      }
     }
     setFd(next);
   }, [eRow, tab]);
@@ -2742,6 +2791,16 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       }
       const conds = toArray(p.conditions);
+      const isMultiRank = rank.length > 1 && !isBm;
+      let sheetToSave = {};
+      if (isMultiRank) {
+        rank.forEach(r => {
+          const s = (p._sheet || {})[r];
+          if (s) sheetToSave[r] = s;
+        });
+      } else {
+        sheetToSave = (p._sheet || {}).__single__ || {};
+      }
       entity = {
         _id:         eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `j-${Date.now()}`),
         name:        p.name || '',
@@ -2759,10 +2818,10 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
         bloodline:   p.bloodline || '',
         limited:     conds.includes('Limited'),
         locked:      conds.includes('Locked'),
-        multiRank:   rank.length > 1 && !isBm,
+        multiRank:   isMultiRank,
         slots:       conds.includes('Limited') ? (p.slots || '') : '',
         bm_tier:     bmTier,
-        sheet:       p._sheet || {},
+        sheet:       sheetToSave,
         _createdAt:  eRow._createdAt || new Date().toISOString(),
       };
     } else if (tab === 'bloodlines') {
@@ -2799,6 +2858,16 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
     (!field.hideUnlessInc || toArray(fd[field.hideUnlessInc.f]).includes(field.hideUnlessInc.v)) &&
     (!field.hideIfInc     || !toArray(fd[field.hideIfInc.f]).includes(field.hideIfInc.v))
   );
+
+  // Multi-rank jutsus get one documentation doc per rank instead of one
+  // shared doc — computed live off the current rank selection, not the
+  // hydrated eRow, so toggling ranks in the form updates the doc list too.
+  const docIsMultiRank = tab === 'jutsus' && toArray(fd.rank).length > 1 && !toArray(fd.types).includes('Battlemode');
+  const docRanks = docIsMultiRank
+    ? toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0))
+    : ['__single__'];
+  const docFor = (rankKey) => (fd._sheet || {})[rankKey] || emptyJutsuSheet();
+  const setDocFor = (rankKey, next) => setFd({ ...fd, _sheet: { ...(fd._sheet || {}), [rankKey]: next } });
 
   return (
     <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
@@ -2933,20 +3002,27 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
             )}
           </div>
 
-          {/* Jutsu Sheet — replaces the old Doc Link with the full in-app write-up */}
+          {/* Jutsu Documentation — replaces the old Doc Link with the full in-app write-up */}
           {tab === 'jutsus' && (
-            <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
-              <div>
-                <p className="text-sm font-bold text-slate-800">Jutsu Sheet</p>
-                <p className="text-xs text-slate-500">
-                  Description, mechanics, restrictions, and multi-rank scaling — no Google Doc needed.
-                  {jutsuSheetHasContent(fd._sheet) ? ' Filled in.' : ' Not started yet.'}
-                </p>
+            <div className="mt-8 p-4 bg-slate-50 border rounded-2xl">
+              <p className="text-sm font-bold text-slate-800">Jutsu Documentation</p>
+              <p className="text-xs text-slate-500 mb-3">
+                {docIsMultiRank
+                  ? 'This jutsu is multi-rank — each rank gets its own documentation.'
+                  : 'Description, mechanics, and restrictions for this jutsu.'}
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                {docRanks.map(rankKey => {
+                  const filled = jutsuSheetHasContent(docFor(rankKey));
+                  return (
+                    <button key={rankKey} type="button" onClick={() => setEditingDocRank(rankKey)}
+                            className="bg-white border-2 border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-50 flex items-center gap-2">
+                      <Icon n="Edit" size={14}/>
+                      {docIsMultiRank ? `${filled ? 'Edit' : 'Add'} ${rankKey}-Rank Doc` : (filled ? 'Edit Documentation' : 'Add Documentation')}
+                    </button>
+                  );
+                })}
               </div>
-              <button type="button" onClick={() => setShowSheet(true)}
-                      className="shrink-0 bg-white border-2 border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-50 flex items-center gap-2">
-                <Icon n="Edit" size={14}/> {jutsuSheetHasContent(fd._sheet) ? 'Edit Sheet' : 'Add Sheet'}
-              </button>
             </div>
           )}
 
@@ -2972,20 +3048,19 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
           <div className="flex justify-end gap-4 mt-10 pt-6 border-t">
             <button onClick={onClose} className="bg-white border-2 px-8 py-3 rounded-xl font-bold hover:bg-slate-50">Cancel</button>
             <button onClick={handleSave}
-                    disabled={submitting || schema.fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
+                    disabled={submitting || visibleFields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold flex gap-2 disabled:opacity-50 hover:bg-indigo-700 shadow-md">
               <Icon n="Save" size={18}/> {submitting ? 'Saving...' : ((willGoToPending || askSecondApproval) ? 'Submit for Approval' : 'Save')}
             </button>
           </div>
         </div>
       </div>
-      {showSheet && tab === 'jutsus' && (
+      {editingDocRank && tab === 'jutsus' && (
         <JutsuSheetModal
-          sheet={fd._sheet || emptyJutsuSheet()}
-          onChange={next => setFd({ ...fd, _sheet: next })}
-          multiRank={toArray(fd.rank).length > 1 && !toArray(fd.types).includes('Battlemode')}
-          jutsuName={fd.name || ''}
-          onClose={() => setShowSheet(false)}
+          sheet={docFor(editingDocRank)}
+          onChange={next => setDocFor(editingDocRank, next)}
+          jutsuName={docIsMultiRank ? `${fd.name || ''} (${editingDocRank}-Rank)` : (fd.name || '')}
+          onClose={() => setEditingDocRank(null)}
         />
       )}
     </div>
@@ -3962,14 +4037,14 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
 const INITIAL_FILTER_STATE = {
   q: '',
   nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [], jty: [],
-  lck: false, lim: false, pve: false, mul: false,
-  hLck: false, hLim: false, hPve: false, hMul: false, hMP: false, hAsk: false,
+  lck: false, lim: false, mul: false,
+  hLck: false, hLim: false, hMul: false, hMP: false, hAsk: false,
   showFilters: false,
   sort: 'az',
 };
 
 const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm', 'jty'];
-const BOOL_FILTER_KEYS  = ['lck', 'lim', 'pve', 'mul', 'hLck', 'hLim', 'hPve', 'hMul', 'hMP', 'hAsk'];
+const BOOL_FILTER_KEYS  = ['lck', 'lim', 'mul', 'hLck', 'hLim', 'hMul', 'hMP', 'hAsk'];
 
 const getPendingAssignedId = (p) => {
   if (!p?.assigned_to) return null;
@@ -4184,6 +4259,7 @@ export default function App() {
   const [adminForm, setAdminForm]   = useState(null);
   const [slotsView, setSlotsView]   = useState(null);
   const [sheetView, setSheetView]   = useState(null);
+  const [sheetViewRank, setSheetViewRank] = useState(null);
   const [historyView, setHistoryView] = useState(null);
   const [confirmDel, setConfirmDel] = useState(null);
   const [askSecondApprovalDelete, setAskSecondApprovalDelete] = useState(false);
@@ -5141,8 +5217,8 @@ export default function App() {
       (!f.rnk.length || f.rnk.some(r => toArray(j.rank).includes(r))) &&
       (!f.bm.length  || f.bm.includes(j.bm_tier)) &&
       (!f.bl.length  || f.bl.includes(j.bloodline)) &&
-      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.pve || j.pve)    && (!f.mul || j.multiRank) &&
-      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hPve || !j.pve)  && (!f.hMul || !j.multiRank) &&
+      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.mul || j.multiRank) &&
+      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hMul || !j.multiRank) &&
       (!f.hMP  || !toArray(j.types).includes('Multi-Post')) &&
       (!f.hAsk || !getSlotStatus(j.slots).showAskStaff)
     ).sort(sortByJutsu);
@@ -5520,7 +5596,7 @@ export default function App() {
                                onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
                                onViewSlots={(jutsu) => setSlotsView(jutsu)}
-                               onViewSheet={(jutsu) => setSheetView(jutsu)}
+                               onViewSheet={(jutsu) => { setSheetView(jutsu); setSheetViewRank(null); }}
                                onViewHistory={isStaff ? (jutsu) => setHistoryView(jutsu) : null} />
                   ))}
                 </div>
@@ -5727,14 +5803,20 @@ export default function App() {
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
       )}
-      {sheetView && (
+      {sheetView && sheetView.multiRank && !sheetViewRank && (
+        <JutsuDocRankPicker
+          jutsu={sheetView}
+          onPick={(rank) => setSheetViewRank(rank)}
+          onClose={() => setSheetView(null)}
+        />
+      )}
+      {sheetView && (!sheetView.multiRank || sheetViewRank) && (
         <JutsuSheetModal
-          sheet={normalizeJutsuSheet(sheetView.sheet)}
+          sheet={normalizeJutsuSheet(sheetView.multiRank ? sheetView.sheet?.[sheetViewRank] : sheetView.sheet)}
           onChange={() => {}}
           readOnly
-          multiRank={!!sheetView.multiRank}
-          jutsuName={sheetView.name}
-          onClose={() => setSheetView(null)}
+          jutsuName={sheetView.multiRank ? `${sheetView.name} (${sheetViewRank}-Rank)` : sheetView.name}
+          onClose={() => { setSheetView(null); setSheetViewRank(null); }}
         />
       )}
       {historyView && (

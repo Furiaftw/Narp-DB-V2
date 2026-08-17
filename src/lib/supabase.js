@@ -939,6 +939,30 @@ export const fetchCharacterSheetIndex = async () => {
   return index;
 };
 
+// Every approved OC name on the roster (flat entries + squad members),
+// regardless of whether that character has filled in a character sheet yet.
+// Used to populate "pick an OC" pickers elsewhere — a character sheet is a
+// separate, opt-in record, so most roster names won't have one yet.
+export const fetchRosterCharacterNames = async () => {
+  if (!supabase) return [];
+  const [entries, squads] = await Promise.all([
+    supabase.from('roster_entries').select('name').eq('status', 'approved'),
+    supabase.from('roster_squads').select('name').eq('status', 'approved'),
+  ]);
+  if (entries.error) throw entries.error;
+  if (squads.error) throw squads.error;
+  const seen = new Set();
+  const names = [];
+  for (const row of [...(entries.data || []), ...(squads.data || [])]) {
+    const name = (row.name || '').trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names.sort((a, b) => a.localeCompare(b));
+};
+
 export const fetchCharacterSheetById = async (id) => {
   if (!supabase || !id) return null;
   const { data, error } = await supabase

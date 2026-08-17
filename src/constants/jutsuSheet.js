@@ -6,27 +6,27 @@
  * specialization, bloodline, limited status) stay on the jutsu row itself,
  * unchanged.
  *
+ * A multi-rank jutsu (rank.length > 1) doesn't share one write-up across
+ * ranks — each rank gets its own documentation, since the mechanics usually
+ * differ. For those, `sheet` holds a map of rank -> single-doc shape instead
+ * of a single-doc shape directly; the reader picks a rank before opening one.
+ *
  * Fields the original template also had — a top-level Mechanics category,
  * Casting Category, and a pair of Combat Type selects — are intentionally
  * left out: there's no existing vocabulary for them in this app yet.
  */
 
-export const JUTSU_RANKS_ORDER = ['E', 'D', 'C', 'B', 'A', 'S'];
-
 const rows = (n, shape) => Array.from({ length: n }, () => ({ ...shape }));
 
+export const emptyDevelopedBy = () => ({ type: 'unknown', oc_name: '', npc_name: '' });
+
 export const emptyJutsuSheet = () => ({
-  image: '',
-  developed_by: '',
+  developed_by: emptyDevelopedBy(),
   prerequisites: '',
   description: '',
   mechanics_steps: rows(7, { text: '' }),
   restrictions: '',
   wiki_link: '',
-  multi_rank: {
-    stat: JUTSU_RANKS_ORDER.map(rank => ({ rank, scaled: '', details: '', casting_types: '', mechanics: '' })),
-    skill: JUTSU_RANKS_ORDER.map(rank => ({ rank, scaled: '', details: '', casting_types: '', mechanics: '' })),
-  },
 });
 
 /*
@@ -44,18 +44,22 @@ export const normalizeJutsuSheet = (stored) => {
     return out.slice(0, baseArr.length);
   };
 
+  // Older sheets stored developed_by as a plain free-text name — treat any
+  // non-empty legacy string as an NPC name rather than dropping it.
+  let developedBy = emptyDevelopedBy();
+  if (stored.developed_by && typeof stored.developed_by === 'object') {
+    developedBy = { ...emptyDevelopedBy(), ...stored.developed_by };
+  } else if (typeof stored.developed_by === 'string' && stored.developed_by.trim()) {
+    developedBy = { ...emptyDevelopedBy(), type: 'npc', npc_name: stored.developed_by.trim() };
+  }
+
   return {
-    image:          typeof stored.image === 'string' ? stored.image : '',
-    developed_by:   typeof stored.developed_by === 'string' ? stored.developed_by : '',
+    developed_by:   developedBy,
     prerequisites:  typeof stored.prerequisites === 'string' ? stored.prerequisites : '',
     description:    typeof stored.description === 'string' ? stored.description : '',
     mechanics_steps: mergeRows(base.mechanics_steps, stored.mechanics_steps),
     restrictions:   typeof stored.restrictions === 'string' ? stored.restrictions : '',
     wiki_link:      typeof stored.wiki_link === 'string' ? stored.wiki_link : '',
-    multi_rank: {
-      stat:  mergeRows(base.multi_rank.stat, stored.multi_rank?.stat),
-      skill: mergeRows(base.multi_rank.skill, stored.multi_rank?.skill),
-    },
   };
 };
 
@@ -63,10 +67,19 @@ export const normalizeJutsuSheet = (stored) => {
 // empty state instead of a page of dashes.
 export const jutsuSheetHasContent = (sheet) => {
   if (!sheet) return false;
+  const db = sheet.developed_by;
+  const developedByFilled = db && typeof db === 'object'
+    ? ((db.type === 'oc' && db.oc_name) || (db.type === 'npc' && db.npc_name))
+    : !!db;
   return Boolean(
-    sheet.description || sheet.restrictions || sheet.developed_by || sheet.prerequisites ||
-    (sheet.mechanics_steps || []).some(s => s.text) ||
-    (sheet.multi_rank?.stat || []).some(r => r.scaled || r.details) ||
-    (sheet.multi_rank?.skill || []).some(r => r.scaled || r.details)
+    sheet.description || sheet.restrictions || developedByFilled || sheet.prerequisites ||
+    (sheet.mechanics_steps || []).some(s => s.text)
   );
+};
+
+// Same check, but for the rank -> doc map a multi-rank jutsu stores.
+export const jutsuDocsHaveContent = (sheetOrMap, isMultiRank) => {
+  if (!sheetOrMap) return false;
+  if (isMultiRank) return Object.values(sheetOrMap).some(jutsuSheetHasContent);
+  return jutsuSheetHasContent(sheetOrMap);
 };
