@@ -239,7 +239,7 @@ export const fetchAllProfiles = async () => {
 
 export const setUserRole = async (userId, role) => {
   if (!supabase) return;
-  if (!['user', 'staff', 'oc_staff', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
+  if (!['user', 'grader', 'reviewer', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
   if (error) throw error;
 };
@@ -299,7 +299,7 @@ export const fetchWhitelist = async () => {
 
 export const addToWhitelist = async (email, role) => {
   if (!supabase) return;
-  if (!['staff', 'admin'].includes(role)) throw new Error('Whitelist role must be staff or admin');
+  if (!['grader', 'reviewer', 'admin'].includes(role)) throw new Error('Whitelist role must be grader, reviewer, or admin');
   const session = await getCurrentSession();
   const { error } = await supabase
     .from('whitelist')
@@ -1042,6 +1042,198 @@ export const deleteCharacterSheet = async (id) => {
   if (!supabase || !id) return;
   const { error } = await supabase.from('character_sheets').delete().eq('id', id);
   if (error) throw error;
+};
+
+/* --- RP grading & upgrade credits (Phase 1) ---------------------------------
+   The two-gate pipeline: players submit RPs, a grader approves them (minting
+   one single-use credit per participating character), players spend credits
+   on upgrade requests, a reviewer approves those (auto-updating the sheet).
+   All state transitions run through SECURITY DEFINER RPCs — see
+   supabase/add-rp-grading-upgrades.sql. RLS scopes reads: players see their
+   own rows, grader+ sees the grading queue, reviewer+ the upgrade queue. */
+
+const RP_SUBMISSION_COLUMNS = `
+  id, submitter_id, rp_type, description, thread_url, status, grader_id,
+  sol_only, grader_notes, created_at, graded_at,
+  submitter:profiles!rp_submissions_submitter_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+  grader:profiles!rp_submissions_grader_id_fkey (id, username, site_nickname, avatar_url),
+  participants:rp_participants (
+    id, user_id, discord_user_id, character_id, claimed_tags,
+    profile:profiles!rp_participants_user_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+    character:character_sheets!rp_participants_character_id_fkey (id, character_name, ninja_rank, owner_id)
+  )
+`;
+
+export const submitRpSubmission = async ({ rpType, description, threadUrl, participants }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('You must be signed in to submit an RP');
+
+  const { data: submission, error } = await supabase
+    .from('rp_submissions')
+    .insert({
+      submitter_id: user.id,
+      rp_type: rpType,
+      description: (description || '').trim(),
+      thread_url: (threadUrl || '').trim(),
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+
+  const rows = (participants || []).map(p => ({
+    submission_id: submission.id,
+    user_id: p.userId,
+    discord_user_id: p.discordUserId || '',
+    character_id: p.characterId,
+    claimed_tags: p.claimedTags || [],
+  }));
+  const { error: pErr } = await supabase.from('rp_participants').insert(rows);
+  if (pErr) {
+    // Participants failed — don't leave a participant-less submission behind.
+    await supabase.from('rp_submissions').delete().eq('id', submission.id);
+    throw pErr;
+  }
+  return submission.id;
+};
+
+// RLS already scopes this: players get their own submissions (plus ones
+// they participate in), grader+ gets everything.
+export const fetchRpSubmissions = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('rp_submissions')
+    .select(RP_SUBMISSION_COLUMNS)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return []; // migration not run yet
+    throw error;
+  }
+  return data || [];
+};
+
+export const cancelRpSubmission = async (id) => {
+  if (!supabase || !id) return;
+  const { error } = await supabase.from('rp_submissions').delete().eq('id', id);
+  if (error) throw error;
+};
+
+// Gate 1 verdict. tagsByParticipant: { [participantRowId]: string[] } — the
+// eligible tags the grader approved for each participant's credit.
+export const gradeRpSubmission = async (id, { approve, solOnly, tagsByParticipant, notes }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('grade_rp_submission', {
+    p_submission_id: id,
+    p_approve: !!approve,
+    p_sol_only: !!solOnly,
+    p_participant_tags: tagsByParticipant || {},
+    p_notes: notes || '',
+  });
+  if (error) throw error;
+};
+
+export const fetchCreditsForCharacters = async (characterIds) => {
+  if (!supabase || !characterIds?.length) return [];
+  const { data, error } = await supabase
+    .from('rp_credits')
+    .select(`
+      id, submission_id, character_id, eligible_tags, status,
+      spent_on_upgrade_id, credit_value, created_at,
+      submission:rp_submissions!rp_credits_submission_id_fkey (
+        id, rp_type, description, thread_url, grader_notes, graded_at,
+        grader:profiles!rp_submissions_grader_id_fkey (username, site_nickname)
+      )
+    `)
+    .in('character_id', characterIds)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+};
+
+export const submitUpgradeRequest = async ({ characterId, upgradeType, target, computedCost, attachedCreditIds, warnings }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('You must be signed in to request an upgrade');
+  const { data, error } = await supabase
+    .from('upgrade_requests')
+    .insert({
+      character_id: characterId,
+      requester_id: user.id,
+      upgrade_type: upgradeType,
+      target,
+      computed_cost: computedCost,
+      attached_credit_ids: attachedCreditIds || [],
+      warnings: warnings || [],
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id;
+};
+
+// RLS-scoped like submissions: requester/owner sees their own, reviewer+ all.
+// The joined sheet `data` feeds the reviewer's live warning recompute.
+export const fetchUpgradeRequests = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('upgrade_requests')
+    .select(`
+      id, character_id, requester_id, upgrade_type, target, computed_cost,
+      attached_credit_ids, warnings, status, reviewer_id, override_reason,
+      review_note, before_value, cycle_key, created_at, reviewed_at,
+      reverted_by, reverted_at,
+      character:character_sheets!upgrade_requests_character_id_fkey (id, character_name, ninja_rank, owner_id, data),
+      requester:profiles!upgrade_requests_requester_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+      reviewer:profiles!upgrade_requests_reviewer_id_fkey (id, username, site_nickname)
+    `)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+};
+
+export const cancelUpgradeRequest = async (id) => {
+  if (!supabase || !id) return;
+  const { error } = await supabase.from('upgrade_requests').delete().eq('id', id);
+  if (error) throw error;
+};
+
+export const approveUpgradeRequest = async (id, overrideReason) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('approve_upgrade_request', {
+    p_request_id: id,
+    p_override_reason: overrideReason || null,
+  });
+  if (error) throw error;
+};
+
+export const rejectUpgradeRequest = async (id, reason) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('reject_upgrade_request', {
+    p_request_id: id,
+    p_reason: reason || null,
+  });
+  if (error) throw error;
+};
+
+export const revertUpgrade = async (id) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('revert_upgrade', { p_request_id: id });
+  if (error) throw error;
+};
+
+export const fetchApprovedThisCycle = async (characterId) => {
+  if (!supabase || !characterId) return 0;
+  const { data, error } = await supabase.rpc('approved_upgrades_this_cycle', {
+    p_character_id: characterId,
+  });
+  if (error) return 0;
+  return data || 0;
 };
 
 export const savePushSubscription = async (sub) => {

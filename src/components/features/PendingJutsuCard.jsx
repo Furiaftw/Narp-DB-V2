@@ -221,17 +221,17 @@ export default function PendingJutsuCard({
   const op = pending.operation;
   // Characters can't be approved until the player finishes the final step
   // (see isCharacterEntry/ocFinalStepDone below) — also doubles as the scope
-  // gate for 'oc_staff' ("Staff"), a reviewer tier restricted to OCs only.
+  // gate for 'grader', a review tier restricted to OCs only.
   const isCharacterEntry = pending.data?.type === 'Character';
-  const isOcStaffRole = currentUser.role === 'oc_staff';
+  const isGraderRole = currentUser.role === 'grader';
 
-  const hasStaffPrivileges = (['staff', 'admin', 'owner'].includes(currentUser.role) || (isOcStaffRole && isCharacterEntry)) && !isStrictSubmitter;
+  const hasStaffPrivileges = (['reviewer', 'admin', 'owner'].includes(currentUser.role) || (isGraderRole && isCharacterEntry)) && !isStrictSubmitter;
 
   const isMine     = pending.submitted_by === currentUserId;
   const submitter  = pending.submitter;
   const submitterName = submitter?.username || 'Unknown';
 
-  const isReviewerOrAdmin = ['staff', 'admin', 'owner'].includes(currentUserRole) || (isOcStaffRole && isCharacterEntry);
+  const isReviewerOrAdmin = ['reviewer', 'admin', 'owner'].includes(currentUserRole) || (isGraderRole && isCharacterEntry);
   const isStaff = isReviewerOrAdmin;
 
   const opColors = OP_BADGE_COLORS;

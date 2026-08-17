@@ -57,12 +57,12 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending, pa
     isServerThreadLink(d.myCharactersLink) &&
     (d.upgradesConfirmed || d.upgradesLink);
 
-  // Discord mentions of every reviewer involved: staff who entered this chat
-  // (claimer, joiners, anyone who messaged), plus the recorded first/second
-  // reviewers as a fallback when chat data hasn't loaded.
+  // Discord mentions of every reviewer involved: team members who entered
+  // this chat (claimer, joiners, anyone who messaged), plus the recorded
+  // first/second reviewers as a fallback when chat data hasn't loaded.
   const reviewerMentions = [...new Set([
     ...participants
-      .filter(p => ['staff', 'admin', 'owner'].includes(p.role) && p.id !== pending?.submitted_by)
+      .filter(p => ['reviewer', 'admin', 'owner'].includes(p.role) && p.id !== pending?.submitted_by)
       .map(p => p.discord_id),
     pending?.assignee?.discord_id,
     pending?.first_reviewer?.discord_id,
@@ -662,7 +662,7 @@ export default function ReviewChat({
   };
 
   const lastStaffMsgTime = messages
-    .filter(m => ['staff', 'admin', 'owner'].includes(m.profiles?.role))
+    .filter(m => ['reviewer', 'admin', 'owner'].includes(m.profiles?.role))
     .reduce((latest, m) => Math.max(latest, new Date(m.created_at).getTime()), 0);
   const nudgeReviewerLocked = lastStaffMsgTime > 0 && Date.now() - lastStaffMsgTime < 30 * 60 * 1000;
 
@@ -902,10 +902,11 @@ export default function ReviewChat({
                                     isMe
                                       ? 'bg-indigo-500/30 text-indigo-50'
                                       : r === 'admin' ? 'bg-indigo-100 text-indigo-700'
-                                      : r === 'staff' ? 'bg-emerald-100 text-emerald-700'
+                                      : r === 'reviewer' || r === 'staff' ? 'bg-emerald-100 text-emerald-700'
+                                      : r === 'grader' || r === 'oc_staff' ? 'bg-teal-100 text-teal-700'
                                       : 'bg-slate-100 text-slate-600'
                                   }`}>
-                                    {r === 'staff' ? 'Reviewer' : r}
+                                    {r === 'staff' || r === 'reviewer' ? 'Reviewer' : r === 'oc_staff' || r === 'grader' ? 'Grader' : r}
                                   </span>
                                 );
                               })()}

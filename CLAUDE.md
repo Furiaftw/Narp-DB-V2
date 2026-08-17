@@ -33,6 +33,7 @@ There is no test suite and no linter configured. Verification is manual: run the
 What App.jsx *does* import from elsewhere:
 - `src/pages/RosterPage.jsx` — bloodline roster tab
 - `src/pages/InboxPage.jsx` — messages inbox tab
+- `src/pages/RpHubPage.jsx` — RP grading & upgrade credits tab (see "RP grading & upgrade credits" below)
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
 - `src/components/ErrorBoundary.jsx` (via `main.jsx`)
 - `src/hooks/useIsDesktop.js`, `src/utils/helpers.jsx`
@@ -50,7 +51,7 @@ The OC sheet that used to live in a Google Doc is now a database record:
 - `src/constants/characterSheet.js` — the sheet *shape*: option lists, `emptySheet()`, `normalizeSheet()` (merges a stored sheet over the current shape, so old sheets keep rendering after a section is added), and `computeCU()` (chakra level + control + 5).
 - `src/components/features/CharacterSheetModal.jsx` — the whole sheet, view and edit in one component. Section order matches the original doc (人 家 具 力 技 獣 異 限 術 基 趣 歆 画 僀).
 - Roster rows are matched to a sheet **by character name** — there is no foreign key from `roster_entries` / `roster_squads`. `RosterPage` fetches a name → sheet index once (`fetchCharacterSheetIndex`) and every name renders through its `CharacterName` component, which opens the sheet on click and keeps the old character-area link as a separate icon.
-- Writing is gated by RLS: the owner and staff+ can edit; the owner and admin+ can delete; anyone can read.
+- Writing is gated by RLS: the owner and grader+ can edit; the owner and admin+ can delete; anyone can read.
 
 Both this and the jutsu sheet below share one visual toolkit — `src/components/features/SheetKit.jsx` — the cream-paper/ink-black/hanko-stamp "parchment" primitives (`Field`, `Section`, `Table`, `Text`, `Choice`, `Area`, `Link`, `SheetShell`, `HankoStamp`, plus the color tokens). Change the look in one place and both sheets stay identical.
 
@@ -66,7 +67,19 @@ The Google Doc a jutsu submission used to link to (NARP Jutsu Template — image
 
 ### Jutsu review history (moved off Discord)
 
-The review chat transcript no longer ships to Discord as a `.txt` webhook attachment (nor does `send-discord-log.mjs` re-export the submitter's Google Doc as a PDF anymore — both removed together, since neither makes sense without a doc link). Instead, on a plain-jutsu approval, `handleApprovePending` saves the transcript straight to `jutsu_review_history` (`jutsu_id`, `operation`, `transcript`, `submitted_by`, `reviewed_by`) via `saveJutsuReviewHistory`. RLS restricts the table to `is_staff_or_above()` (reviewer+; `oc_staff` — Character-only reviewers — can't see it). `JutsuHistoryModal`, opened from the clock icon on `JutsuCard` (staff+ only), is the read side. Denials aren't stored — there's no resulting jutsu to attach them to.
+The review chat transcript no longer ships to Discord as a `.txt` webhook attachment (nor does `send-discord-log.mjs` re-export the submitter's Google Doc as a PDF anymore — both removed together, since neither makes sense without a doc link). Instead, on a plain-jutsu approval, `handleApprovePending` saves the transcript straight to `jutsu_review_history` (`jutsu_id`, `operation`, `transcript`, `submitted_by`, `reviewed_by`) via `saveJutsuReviewHistory`. RLS restricts the table to `is_reviewer_or_above()` (graders — Character-only reviewers — can't see it). `JutsuHistoryModal`, opened from the clock icon on `JutsuCard` (reviewer+ only), is the read side. Denials aren't stored — there's no resulting jutsu to attach them to.
+
+### RP grading & upgrade credits (Phase 1)
+
+The two Discord-manual workflows — RP grading (`#rp-grading-submission`) and character upgrades (the "My Character Upgrade Area") — run through the site now, while the human read step stays on Discord (graders open the thread link to read the RP). Core model: **a graded RP is a single-use credit** — one credit minted per participating character, tagged with the eligible uses the grader approved; spending it on one upgrade consumes it whole.
+
+- **Pipeline:** player submits an RP → Gate 1 (grader) approves → credits minted → player attaches credits to an upgrade request → Gate 2 (reviewer) approves → the sheet is auto-updated (revert available to reviewer+). Slice-of-Life-only RPs mint no credit.
+- `supabase/add-rp-grading-upgrades.sql` — tables (`rp_submissions`, `rp_participants`, `rp_credits`, `upgrade_requests`, plus `character_sheets.credit_multiplier` for the v2 Elite Jōnin passive), RLS, and the atomic SECURITY DEFINER functions: `grade_rp_submission()` (blocks self-grading by site account or Discord ID), `approve_upgrade_request()` (blocks self-OC approval and malformed targets; requires a logged `override_reason` for insufficient credits / weekly cap), `reject_upgrade_request()`, `revert_upgrade()` (restores `before_value`, refunds credits), and `current_upgrade_cycle_key()` / `approved_upgrades_this_cycle()`.
+- **Weekly cap:** 2 approved upgrades per character per cycle, counted at approval time, keyed by ISO week evaluated in `America/New_York` (`'2026-W34'`). `currentCycleKey()` in `src/constants/upgradeRules.js` must produce the same string as the SQL function — both are tested against each other; change them together.
+- `src/constants/upgradeRules.js` — cost tables (jutsu by rank 1/2/3; stat by level reached 1/1/2/3/4; skill by band 1/2/3/4; dojutsu on its own band table), machine-readable `RANK_CAPS` (the prose `RANK_LIMITS` in characterSheet.js, structured), the target builders (`{ label, tag, path, new_value }` — `path` is the jsonb path `approve_upgrade_request()` writes), and `computeUpgradeWarnings()`. **Warnings never block** — the reviewer approves past them with a logged override reason; only self-grading/self-approval/spent-credit/malformed-target checks are hard server-side blocks.
+- `src/pages/RpHubPage.jsx` — the "RP Hub" tab (lazy-loaded): wallet (per-OC ledger + cycle usage), submit-RP form, grading queue (grader+), upgrade queue (reviewer+, with the warning panel and revert). Discord pings reuse `reviewer-ping.mjs` (trigger types `rp_submission` / `upgrade_request`) and verdict DMs reuse `discord-dm.mjs`.
+- Upgrade targets write into the sheet's existing structured fields (`stats.*` ranks, `skills.*` percentages, `limited.dojutsu_skill`, the whole `techniques.jutsu` array for learning/dropping a jutsu) — no new sheet schema was needed.
+- **Explicitly deferred to v2:** OOC promotions, stat-ceiling increases, character-slot expansion, private multi-specialty jutsu, and the Elite Jōnin path that grants `credit_multiplier = 2`.
 
 ### Discord notifications mute
 
@@ -74,7 +87,7 @@ The review chat transcript no longer ships to Discord as a `.txt` webhook attach
 
 ### Data layer: src/lib/supabase.js
 
-All Supabase access goes through this one module — auth (Discord OAuth + dev login), profiles, whitelist, the pending-jutsus queue, review chats, realtime subscriptions (`subscribeToDatabaseChanges`), webhook config, submission controls, character sheets, and push subscriptions. Jutsu rows are mapped between DB shape and app shape via `fromRowJutsu` / `buildJutsuPayload` — if you add or rename a jutsu column, update both.
+All Supabase access goes through this one module — auth (Discord OAuth + dev login), profiles, whitelist, the pending-jutsus queue, review chats, realtime subscriptions (`subscribeToDatabaseChanges`), webhook config, submission controls, character sheets, the RP grading/upgrade pipeline, and push subscriptions. Jutsu rows are mapped between DB shape and app shape via `fromRowJutsu` / `buildJutsuPayload` — if you add or rename a jutsu column, update both.
 
 Supabase config resolves in this order:
 1. `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` (build-time, `.env` or Netlify env)
@@ -86,12 +99,12 @@ If none resolve, `isSupabaseConfigured()` is false and the app runs in dev mode.
 
 ### Permission model (enforced in Postgres, not just UI)
 
-Four tiers: `user` → `staff` → `admin` → `owner`. RLS policies and SQL functions are the real gate; the UI only mirrors them.
+Five tiers: `user` → `grader` → `reviewer` → `admin` → `owner`. RLS policies and SQL functions are the real gate; the UI only mirrors them. (The old `staff` role became `reviewer`, and `oc_staff` became `grader` — see `supabase/migrate-roles-grader-reviewer.sql`, which migrated the data, constraints, policies, and helper functions `is_reviewer_or_above()` / `is_grader_or_above()` in one pass. Historical strings still appear in `role_change_log` rows, so label helpers stay tolerant of both.)
 
-- Anyone can browse jutsus. Staff edits (insert/update/delete) go to the `pending_jutsus` queue and need approval from someone other than the submitter. Admin+ writes directly.
+- Anyone can browse jutsus. Reviewer edits (insert/update/delete) go to the `pending_jutsus` queue and need approval from someone other than the submitter. Admin+ writes directly. Graders are scoped to Character-type pending entries only, plus RP grading (Gate 1 below).
 - Approval is atomic via the `approve_pending_jutsu()` Postgres RPC.
 - Roster changes use a double-approval flow (`supabase/add-roster-approval.sql`).
-- Admins can only flip users between `user`/`staff`; only the owner manages admins. Role changes are audit-logged in `role_change_log`.
+- Admins can only flip users between `user`/`grader`/`reviewer`; only the owner manages admins. Role changes are audit-logged in `role_change_log`.
 - Roles can also be synced from Discord guild roles via the `sync-discord-roles` function (only when a fresh `provider_token` exists — a plain page reload deliberately skips the sync so a failed Discord lookup can't downgrade anyone).
 - **The app never grants Discord roles.** Role flow is inbound only: Discord guild roles → site tier (`discord-login.js`, `sync-discord-roles.js`). The old OC-approval automation that handed out Has Character / village / rank / Councilor / OC-count roles has been removed — reviewers assign every Discord role by hand.
 - **Summon and Custom Item submissions are currently paused** (`submission_controls.summon_paused` / `custom_item_paused`) — their forms only ever captured a mandatory Google Doc link and nothing else, and that requirement is gone server-wide. Proper in-app sheets for these (same treatment as jutsus/characters) are a future update; the form code (`StatelessSubmissionModal` in App.jsx) is untouched and ready to re-enable once that ships.
@@ -99,6 +112,8 @@ Four tiers: `user` → `staff` → `admin` → `owner`. RLS policies and SQL fun
 ### Database migrations
 
 `supabase/*.sql` are incremental patch scripts, run manually in the Supabase SQL Editor — there is no migration runner. The full base schema (`schema.sql` referenced by the README) is **not in this repo**; only the incremental `add-*.sql` / trigger scripts are. When changing the schema, add a new idempotent SQL file here, and keep client code tolerant of the column not existing yet (see the `42703` fallback in `fetchMyProfile`).
+
+**Deploy coupling:** `migrate-roles-grader-reviewer.sql` and `add-rp-grading-upgrades.sql` (in that order) must be run **together with** deploying the client code that uses the new role names — the pre-migration client checks for `staff`, so running the SQL first breaks its gates, and deploying the code first leaves it checking for roles that don't exist yet. Old SQL files that mention `staff` are applied history; the migration file recreated everything they defined, so don't edit them.
 
 ### Netlify functions (netlify/functions/)
 

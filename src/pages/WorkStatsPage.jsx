@@ -149,7 +149,7 @@ export default function WorkStatsPage({ userId, userRole }) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-black text-white truncate">{u.username}</span>
-                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{u.role === 'staff' ? 'Reviewer' : u.role === 'oc_staff' ? 'Staff' : u.role}</span>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-500">{['staff', 'reviewer'].includes(u.role) ? 'Reviewer' : ['oc_staff', 'grader'].includes(u.role) ? 'Grader' : u.role}</span>
                       </div>
                       <div className="flex gap-3 flex-wrap">
                         {ACTION_TYPES.filter(a => u.byAction[a]).map(a => (

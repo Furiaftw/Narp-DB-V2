@@ -147,30 +147,33 @@ export default async (req) => {
        ------------------------------------------------------------------ */
     const memberRoles = memberData?.roles || [];
 
-    // Prefer DB config (editable live from System Tools), fall back to env vars
+    // Prefer DB config (editable live from System Tools), fall back to env
+    // vars. The grader key falls back to the old oc_staff key so existing
+    // Discord role assignments keep working after the role migration.
     let adminRoleId = null;
     let reviewerRoleId = null;
-    let ocStaffRoleId = null;
+    let graderRoleId = null;
     try {
       const { data: cfgRows } = await supabaseAdmin
         .from('webhook_config')
         .select('config_key, config_value')
-        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_oc_staff_role_id']);
+        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_grader_role_id', 'discord_oc_staff_role_id']);
       adminRoleId = cfgRows?.find(r => r.config_key === 'discord_admin_role_id')?.config_value || null;
       reviewerRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || null;
-      ocStaffRoleId = cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || null;
+      graderRoleId = cfgRows?.find(r => r.config_key === 'discord_grader_role_id')?.config_value
+        || cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || null;
     } catch { /* fall through to env vars */ }
     adminRoleId = adminRoleId || process.env.DISCORD_ADMIN_ROLE_ID;
     reviewerRoleId = reviewerRoleId || process.env.DISCORD_REVIEWER_ROLE_ID;
-    ocStaffRoleId = ocStaffRoleId || process.env.DISCORD_OC_STAFF_ROLE_ID;
+    graderRoleId = graderRoleId || process.env.DISCORD_GRADER_ROLE_ID || process.env.DISCORD_OC_STAFF_ROLE_ID;
 
     let appRole = 'user';
     if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
-      appRole = 'staff';
-    } else if (ocStaffRoleId && memberRoles.includes(String(ocStaffRoleId))) {
-      appRole = 'oc_staff';
+      appRole = 'reviewer';
+    } else if (graderRoleId && memberRoles.includes(String(graderRoleId))) {
+      appRole = 'grader';
     }
 
     /* ------------------------------------------------------------------

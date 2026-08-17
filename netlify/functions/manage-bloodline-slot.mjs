@@ -53,16 +53,16 @@ export default async (req) => {
   if (!bloodline || typeof bloodline !== 'string') return json({ error: 'Missing bloodline' }, 400);
   if (!pendingId) return json({ error: 'Missing pendingId' }, 400);
 
-  // Permission: staff+ for everything; the entry's own submitter for release.
+  // Permission: reviewer+ for everything; the entry's own submitter for release.
   const { data: profile } = await supabase
     .from('profiles').select('role').eq('id', user.id).maybeSingle();
-  const isStaff = ['staff', 'admin', 'owner'].includes(profile?.role);
-  if (!isStaff) {
-    if (action !== 'release') return json({ error: 'Staff access required' }, 403);
+  const isReviewer = ['reviewer', 'admin', 'owner'].includes(profile?.role);
+  if (!isReviewer) {
+    if (action !== 'release') return json({ error: 'Reviewer access required' }, 403);
     const { data: pendingRow } = await supabase
       .from('pending_jutsus').select('submitted_by').eq('id', pendingId).maybeSingle();
     if (!pendingRow || pendingRow.submitted_by !== user.id) {
-      return json({ error: 'Staff access required' }, 403);
+      return json({ error: 'Reviewer access required' }, 403);
     }
   }
 

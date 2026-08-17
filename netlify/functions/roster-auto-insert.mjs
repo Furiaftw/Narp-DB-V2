@@ -41,8 +41,8 @@ export default async (req) => {
 
   const { data: profile } = await supabase
     .from('profiles').select('role').eq('id', user.id).maybeSingle();
-  if (!['staff', 'admin', 'owner'].includes(profile?.role)) {
-    return json({ error: 'Staff access required' }, 403);
+  if (!['grader', 'reviewer', 'admin', 'owner'].includes(profile?.role)) {
+    return json({ error: 'Reviewer access required' }, 403);
   }
 
   let body;

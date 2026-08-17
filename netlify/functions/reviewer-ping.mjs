@@ -97,6 +97,12 @@ export default async (req) => {
     if (triggerType === 'creation') {
       const byLine = submitterName ? ` by ${submitterName}` : '';
       messageString = `A new technique submission entry was uploaded: **${itemName}**${byLine}.`;
+    } else if (triggerType === 'rp_submission') {
+      const byLine = submitterName ? ` by ${submitterName}` : '';
+      messageString = `📖 A new RP grading submission is waiting in the queue: **${itemName}**${byLine}.`;
+    } else if (triggerType === 'upgrade_request') {
+      const byLine = submitterName ? ` by ${submitterName}` : '';
+      messageString = `⬆️ A new character upgrade request is waiting for review: **${itemName}**${byLine}.`;
     } else if (triggerType === 'retracted') {
       messageString = `Technique submission **${itemName}** was retracted by the player.`;
     } else if (triggerType === 'second_approval') {

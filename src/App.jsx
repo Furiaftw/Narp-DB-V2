@@ -60,6 +60,7 @@ const RosterPage = lazy(() => import('./pages/RosterPage'));
 const WorkStatsPage = lazy(() => import('./pages/WorkStatsPage'));
 const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
+const RpHubPage = lazy(() => import('./pages/RpHubPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
@@ -361,7 +362,9 @@ const Icon = ({ n, size = 24, className = '' }) => (
    UNIVERSAL RANK PROFILE LOGO
    --------------------------------------------------------------------------- */
 function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
-  const cleanRole = ['owner', 'admin', 'staff', 'user'].includes(role) ? role : 'user';
+  // Legacy DB values from before the grader/reviewer migration still render.
+  const mapped = role === 'staff' ? 'reviewer' : role === 'oc_staff' ? 'grader' : role;
+  const cleanRole = ['owner', 'admin', 'reviewer', 'grader', 'user'].includes(mapped) ? mapped : 'user';
 
   const config = {
     owner: {
@@ -383,12 +386,21 @@ function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
         </svg>
       )
     },
-    staff: {
+    reviewer: {
       gradient: "from-emerald-400 to-emerald-600 text-emerald-50 shadow-emerald-500/20",
       svg: (
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
           {/* Star Badge */}
           <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+        </svg>
+      )
+    },
+    grader: {
+      gradient: "from-teal-400 to-teal-600 text-teal-50 shadow-teal-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Quill Check */}
+          <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
         </svg>
       )
     },
@@ -3099,8 +3111,9 @@ function AuditLogModal({ onClose }) {
   }, []);
 
   const arrow = (from, to) => {
-    const colors = { user: 'text-slate-500', staff: 'text-emerald-600', oc_staff: 'text-teal-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
-    const label = (r) => r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff' : (r || '∅');
+    // 'staff'/'oc_staff' appear in historical audit-log rows — keep rendering them.
+    const colors = { user: 'text-slate-500', reviewer: 'text-emerald-600', staff: 'text-emerald-600', grader: 'text-teal-600', oc_staff: 'text-teal-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
+    const label = (r) => r === 'staff' || r === 'reviewer' ? 'Reviewer' : r === 'oc_staff' || r === 'grader' ? 'Grader' : (r || '∅');
     return (
       <span className="text-xs font-bold">
         <span className={colors[from] || ''}>{label(from)}</span>
@@ -3158,7 +3171,7 @@ const SUBMISSION_GATE_TYPES = [
 ];
 const SUBMISSION_GATE_LABELS = Object.fromEntries(SUBMISSION_GATE_TYPES.map(({ key, label }) => [key, label]));
 
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isReviewer, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
@@ -3791,7 +3804,9 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
   const roleColors = {
     owner: 'bg-amber-500 text-amber-50 border-amber-600',
     admin: 'bg-indigo-500 text-indigo-50 border-indigo-600',
+    reviewer: 'bg-emerald-500 text-emerald-50 border-emerald-600',
     staff: 'bg-emerald-500 text-emerald-50 border-emerald-600',
+    grader: 'bg-teal-500 text-teal-50 border-teal-600',
     oc_staff: 'bg-teal-500 text-teal-50 border-teal-600',
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
@@ -3803,7 +3818,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'oc_staff' ? 'Staff' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
+          {['staff', 'reviewer'].includes(activeProfile.role) ? 'Reviewer' : ['oc_staff', 'grader'].includes(activeProfile.role) ? 'Grader' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -3822,8 +3837,8 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
             </div>
           </div>
 
-          {/* Site Nickname — staff / oc_staff / admin / owner only */}
-          {supabaseReady && profile && ['staff', 'oc_staff', 'admin', 'owner'].includes(profile.role) && (
+          {/* Site Nickname — grader / reviewer / admin / owner only */}
+          {supabaseReady && profile && ['grader', 'reviewer', 'admin', 'owner'].includes(profile.role) && (
             <div className="border-b border-slate-100 px-4 py-3">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Site Nickname</div>
               {!nicknameEditing ? (
@@ -3904,8 +3919,8 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               >
                 <option value="owner">Operator (default)</option>
                 <option value="admin">Admin</option>
-                <option value="staff">Reviewer</option>
-                <option value="oc_staff">Staff (OC only)</option>
+                <option value="reviewer">Reviewer</option>
+                <option value="grader">Grader</option>
                 <option value="user">User</option>
               </select>
             </div>
@@ -3916,7 +3931,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['user', 'staff', 'oc_staff', 'admin', 'owner'].map(r => (
+                {['user', 'grader', 'reviewer', 'admin', 'owner'].map(r => (
                   <button key={r} type="button"
                     onClick={() => onToggleDevRole(r)}
                     className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
@@ -3924,7 +3939,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
                     }`}>
-                    {r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff (OC)' : r === 'owner' ? 'Operator' : r}
+                    {r === 'owner' ? 'Operator' : r}
                   </button>
                 ))}
               </div>
@@ -4068,7 +4083,7 @@ const getPendingAssignedId = (p) => {
 const getChatTurn = (lastMsg, myId, iAmSubmitter) => {
   if (!lastMsg) return null;
   if (iAmSubmitter) return lastMsg.sender_id === myId ? 'them' : 'you';
-  return ['staff', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
+  return ['reviewer', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
 };
 
 export default function App() {
@@ -4086,14 +4101,17 @@ export default function App() {
   const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false, discord_notifications_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
-  const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
-  const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
+  // Legacy role strings from a session cached before the grader/reviewer
+  // migration normalize to the new names; the DB migration renames the rest.
+  const rawRole = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
+  const role    = rawRole === 'staff' ? 'reviewer' : rawRole === 'oc_staff' ? 'grader' : rawRole;
+  const isReviewer = role === 'reviewer' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
-  // 'oc_staff' ("Staff" in the UI) is a narrower reviewer tier that can only
-  // claim/review/approve OC (Character) submissions — everything else in the
-  // app treats them like a plain 'user'.
-  const isOcStaff = role === 'oc_staff';
+  // 'grader' is the narrower tier: it can claim/review/approve OC (Character)
+  // submissions and grade RPs (Gate 1) — everything else in the app treats
+  // them like a plain 'user'.
+  const isGrader = role === 'grader';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const pendingJutsusRef = useRef([]);
@@ -4392,7 +4410,7 @@ export default function App() {
   const handleSignOut = async () => { try { await signOut(); setProfile(null); setViewAsRole(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
-    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
+    if (!supabaseReady || (!isReviewer && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
 
@@ -4403,9 +4421,9 @@ export default function App() {
 
       // Staff see all submissions EXCEPT their own in the Pending review tab.
       // OC Staff see the same, narrowed to Character (OC) entries only.
-      const filtered = isStaff
+      const filtered = isReviewer
         ? list.filter(p => p.submitted_by !== profile?.id)
-        : isOcStaff
+        : isGrader
           ? list.filter(p => p.submitted_by !== profile?.id && p.data?.type === 'Character')
           : [];
       
@@ -4454,15 +4472,15 @@ export default function App() {
     } catch (e) {
       console.warn('[NARP] fetchPendingJutsus failed:', e);
     }
-  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
+  }, [supabaseReady, isReviewer, isGrader, profile?.id]);
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
   useEffect(() => {
     if (!supabaseReady || !profile?.id) return;
     fetchChatOverview().then(setChatThreads).catch(() => {});
-    if (isStaff || isOcStaff) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
-  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
+    if (isReviewer || isGrader) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+  }, [supabaseReady, isReviewer, isGrader, profile?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
@@ -4540,7 +4558,7 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB, refreshPending, isStaff]);
+  }, [supabaseReady, profile, refreshDB, refreshPending, isReviewer]);
 
   // 30-second polling to catch submissions missed by realtime
   useEffect(() => {
@@ -4574,7 +4592,7 @@ export default function App() {
     }
 
     const shouldGoToPending = isJutsus && (
-      ((role === 'user' || role === 'staff') && !isAdmin) ||
+      ((role === 'user' || role === 'reviewer') && !isAdmin) ||
       (isAdmin && askSecondApproval)
     );
 
@@ -4635,7 +4653,7 @@ export default function App() {
     }
 
     throw new Error('Permission denied');
-  }, [isAdmin, isStaff, role, adminForm, supabaseReady, refreshPending, profile]);
+  }, [isAdmin, isReviewer, role, adminForm, supabaseReady, refreshPending, profile]);
 
   const applyChangeLocally = (t, operation, targetId, entity) => {
     setDb(d => {
@@ -5284,7 +5302,7 @@ export default function App() {
     if (!profile?.id) return [];
     const seen = new Set();
     const source = [];
-    for (const p of [...myOwnSubmissions, ...((isStaff || isOcStaff) ? pendingJutsus : [])]) {
+    for (const p of [...myOwnSubmissions, ...((isReviewer || isGrader) ? pendingJutsus : [])]) {
       if (!seen.has(p.id)) { seen.add(p.id); source.push(p); }
     }
     return source.map(p => {
@@ -5305,7 +5323,7 @@ export default function App() {
         : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
       return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
     });
-  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, isOcStaff, chatReadMap]);
+  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isReviewer, isGrader, chatReadMap]);
 
   const inboxItemById = useMemo(
     () => new Map(inboxItems.map(it => [it.pending.id, it])),
@@ -5350,9 +5368,10 @@ export default function App() {
     { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
     { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
     ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
+    ...(profile || !supabaseReady ? [{ id: 'rp', label: 'RP Hub' }] : []),
     ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
     { id: 'roster', label: 'Roster' },
-    ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
+    ...(isReviewer ? [{ id: 'worklog', label: 'Work Log' }] : []),
   ];
 
   const switchTab = (tabId) => {
@@ -5428,7 +5447,7 @@ export default function App() {
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
-              {isStaff && (
+              {isReviewer && (
                 <button
                   onClick={refreshDB}
                   disabled={refreshing}
@@ -5437,7 +5456,7 @@ export default function App() {
                   <Icon n="Refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
                 </button>
               )}
-              {isStaff && (
+              {isReviewer && (
                 <button onClick={() => setModals(m => ({ ...m, system: true }))}
                         className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
                   <Icon n="Settings" size={14}/>
@@ -5526,7 +5545,7 @@ export default function App() {
             </div>
             {viewAsRole && (
               <span className="text-[10px] font-bold px-2 py-1 bg-amber-500 text-white rounded-full shrink-0">
-                Previewing as {viewAsRole === 'staff' ? 'Reviewer' : viewAsRole}
+                Previewing as {viewAsRole === 'owner' ? 'Operator' : viewAsRole}
               </span>
             )}
             <AddSubmissionMenu
@@ -5615,13 +5634,13 @@ export default function App() {
                                viewMode={viewMode} expRow={expRow} setExpRow={setExpRow}
                                pTags={pTags} setPersonalTagsForJutsu={setPersonalTagsForJutsu}
                                handleCopy={handleCopy} cart={cart} copiedId={modals.copiedId}
-                               isAdmin={isStaff}
+                               isAdmin={isReviewer}
                                isActualAdmin={isAdmin}
                                onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
                                onViewSlots={(jutsu) => setSlotsView(jutsu)}
                                onViewSheet={(jutsu) => { setSheetView(jutsu); setSheetViewRank(null); }}
-                               onViewHistory={isStaff ? (jutsu) => setHistoryView(jutsu) : null} />
+                               onViewHistory={isReviewer ? (jutsu) => setHistoryView(jutsu) : null} />
                   ))}
                 </div>
                 {filtJ.length > visibleCount && (
@@ -5660,7 +5679,7 @@ export default function App() {
             profile={profile}
             role={role}
             isAdmin={isAdmin}
-            isStaff={isStaff || isOcStaff}
+            isStaff={isReviewer || isGrader}
             selectedId={selectedInboxId}
             onSelect={setSelectedInboxId}
             onMarkRead={markChatRead}
@@ -5789,8 +5808,8 @@ export default function App() {
                                   className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer transition-all"
                                 >
                                   <option value="user">User</option>
-                                  <option value="staff">Reviewer</option>
-                                  <option value="oc_staff">Staff (OC only)</option>
+                                  <option value="grader">Grader</option>
+                                  <option value="reviewer">Reviewer</option>
                                   <option value="admin">Admin</option>
                                 </select>
                               </td>
@@ -5804,6 +5823,12 @@ export default function App() {
               </div>
             </div>
           </div>
+        )}
+
+        {tab === 'rp' && (
+          <Suspense fallback={null}>
+            <RpHubPage profile={profile} role={role} jutsus={db.jutsus || []} />
+          </Suspense>
         )}
 
         {tab === 'roster' && (
@@ -5863,7 +5888,7 @@ export default function App() {
             onClose={() => setAdminForm(null)}
             db={db}
             onSubmit={submitChange}
-            willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'staff') && !isAdmin && !adminForm.isPendingEdit}
+            willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'reviewer') && !isAdmin && !adminForm.isPendingEdit}
             isAdmin={isAdmin}
             isPendingEdit={adminForm.isPendingEdit}
           />
@@ -5877,7 +5902,7 @@ export default function App() {
           refreshing={refreshing}
           isOwner={isOwner}
           isAdmin={isAdmin}
-          isStaff={isStaff}
+          isReviewer={isReviewer}
           webhookConfig={webhookConfig}
           onWebhookConfigSave={(key, value) => {
             saveWebhookConfig(key, value).then(() => {
@@ -5909,7 +5934,7 @@ export default function App() {
       {confirmDel && (() => {
         const effectiveTab = confirmDel.tab || tab;
         const isPendingDelete = effectiveTab === 'jutsus' && (
-          (isStaff && !isAdmin) || (isAdmin && askSecondApprovalDelete)
+          (isReviewer && !isAdmin) || (isAdmin && askSecondApprovalDelete)
         );
         return (
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={() => { setConfirmDel(null); setAskSecondApprovalDelete(false); }}>
