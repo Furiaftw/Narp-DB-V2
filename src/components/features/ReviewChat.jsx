@@ -9,7 +9,6 @@ import {
   getCurrentSession,
 } from '../../lib/supabase';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
-import { DISCORD_ROLES, applyDiscordRoles } from '../../lib/discordRoles';
 import Icon from '../ui/Icon';
 import ConfirmButton from '../ui/ConfirmButton';
 import useIsDesktop from '../../hooks/useIsDesktop';
@@ -121,7 +120,6 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
           reviewerDiscordId: pending.data.second_reviewer_discord_id,
           myCharactersLink: pending.data.myCharactersLink,
           upgradesLink: pending.data.upgradesLink || '',
-          docLink: pending.data.link,
         }),
       });
       if (res.ok) { setNudged(true); }
@@ -652,26 +650,6 @@ export default function ReviewChat({
       if (refreshPending) await refreshPending();
       const fresh = await fetchReviewChats(pending.id);
       if (fresh) setMessages(fresh);
-
-      // Grant "Has Character" immediately — without it the player can't post
-      // in the character-area forum this final step sends them to. Also strip
-      // "No Character" (a no-op past their first submission). A failure here
-      // must not undo the activation; the reviewer just grants manually.
-      if (pending.submitter?.discord_id) {
-        try {
-          await applyDiscordRoles({
-            discordUserId: pending.submitter.discord_id,
-            add: [DISCORD_ROLES.HAS_CHARACTER],
-            remove: [DISCORD_ROLES.NO_CHARACTER],
-            reason: `Final step activated for "${pending.data?.name || 'OC'}"`,
-          });
-        } catch (roleErr) {
-          console.warn('[NARP] Has Character role grant failed:', roleErr);
-          alert('Final step started, but granting the "Has Character" Discord role failed — please give it to the player manually so they can post their threads. (' + (roleErr.message || roleErr) + ')');
-        }
-      } else {
-        alert('Final step started, but the submitter has no linked Discord ID — grant the "Has Character" role manually.');
-      }
     } catch {
       alert("Couldn't start the OC approval flow. Refresh the page and try again.");
     } finally {

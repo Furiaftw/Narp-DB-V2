@@ -58,6 +58,15 @@ export default async (req) => {
   }
 
   try {
+    const { data: controls } = await supabase
+      .from('submission_controls').select('discord_notifications_paused').eq('id', 1).maybeSingle();
+    if (controls?.discord_notifications_paused) {
+      return new Response(JSON.stringify({ success: true, skipped: true, reason: 'discord_notifications_paused' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const baseUrl = process.env.DISCORD_WORK_LOG_WEBHOOK_URL;
     if (!baseUrl) {
       return new Response(JSON.stringify({ error: 'DISCORD_WORK_LOG_WEBHOOK_URL not configured' }), {

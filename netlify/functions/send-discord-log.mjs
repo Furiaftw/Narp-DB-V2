@@ -6,62 +6,6 @@ const supabase = createClient(
   { auth: { persistSession: false, autoRefreshToken: false } }
 );
 
-const MAX_PDF_BYTES = 8 * 1024 * 1024; // 8 MB — Discord webhook file limit
-const PDF_TIMEOUT_MS = 7000;
-
-/** Extract the Google Docs export-as-PDF URL from any Google Docs share link. */
-function googleExportUrl(url) {
-  if (!url) return null;
-  const m = url.match(/docs\.google\.com\/document\/d\/([A-Za-z0-9_-]+)/);
-  return m ? `https://docs.google.com/document/d/${m[1]}/export?format=pdf` : null;
-}
-
-/** Fetch a PDF from Google Docs. Returns a Buffer or null on any failure. */
-async function fetchGoogleDocPDF(url) {
-  const exportUrl = googleExportUrl(url);
-  if (!exportUrl) return null;
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), PDF_TIMEOUT_MS);
-
-  try {
-    const res = await fetch(exportUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; NARP-DB/1.0)',
-      },
-      redirect: 'follow',
-    });
-
-    if (!res.ok) return null;
-
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('pdf') && !contentType.includes('octet-stream')) {
-      // Google returned an HTML page (e.g. virus-scan warning) — skip
-      return null;
-    }
-
-    // Stream into a buffer, aborting if it exceeds the size limit
-    const reader = res.body.getReader();
-    const chunks = [];
-    let total = 0;
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.length;
-      if (total > MAX_PDF_BYTES) { reader.cancel(); return null; }
-      chunks.push(value);
-    }
-
-    return Buffer.concat(chunks.map(c => Buffer.from(c)));
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
 export default async (req) => {
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
@@ -97,11 +41,20 @@ export default async (req) => {
     });
   }
 
-  const { threadId, payload, docUrl, docName, chatTranscript } = body;
+  const { threadId, payload } = body;
 
   if (!payload) {
     return new Response(JSON.stringify({ error: 'Missing payload' }), {
       status: 400,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  const { data: controls } = await supabase
+    .from('submission_controls').select('discord_notifications_paused').eq('id', 1).maybeSingle();
+  if (controls?.discord_notifications_paused) {
+    return new Response(JSON.stringify({ messageId: null, threadId: threadId ?? null, skipped: true }), {
+      status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -114,47 +67,13 @@ export default async (req) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
-  const sep = webhookBase.includes('?') ? '&' : '?';
-  const threadParam = threadId ? `?thread_id=${threadId}` : '';
   const webhookUrl = `${webhookBase}${threadId ? `?thread_id=${threadId}&wait=true` : '?wait=true'}`;
 
-  // Fetch PDF (best-effort — failures are silently skipped)
-  const [pdfBuffer] = await Promise.all([
-    fetchGoogleDocPDF(docUrl),
-  ]);
-
-  const nameSlug = (docName || 'entry').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'entry';
-  const hasFiles = pdfBuffer || chatTranscript;
-
-  let discordRes;
-  if (hasFiles) {
-    const form = new FormData();
-    form.append('payload_json', JSON.stringify(payload));
-
-    let fileIndex = 0;
-    if (pdfBuffer) {
-      form.append(
-        `files[${fileIndex++}]`,
-        new Blob([pdfBuffer], { type: 'application/pdf' }),
-        `${nameSlug}.pdf`
-      );
-    }
-    if (chatTranscript) {
-      form.append(
-        `files[${fileIndex++}]`,
-        new Blob([chatTranscript], { type: 'text/plain' }),
-        `transcript-${nameSlug}.txt`
-      );
-    }
-
-    discordRes = await fetch(webhookUrl, { method: 'POST', body: form });
-  } else {
-    discordRes = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-  }
+  const discordRes = await fetch(webhookUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 
   if (!discordRes.ok) {
     const errText = await discordRes.text();

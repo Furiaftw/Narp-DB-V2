@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useContext } from 'react';
 import {
   BookOpen, Users, ChevronRight, BarChart2, TrendingUp, AlertTriangle,
   CheckCircle, ArrowRight, Crown, Skull, Compass, Sword, Flame,
-  Plus, Pencil, Trash2, X, Loader2, GripVertical,
+  Plus, Pencil, Trash2, X, Loader2, GripVertical, FileText, ExternalLink,
 } from 'lucide-react';
 import {
   DndContext, closestCenter, PointerSensor, TouchSensor, useSensor, useSensors,
@@ -16,7 +16,8 @@ import {
   RadarChart, PolarGrid, PolarAngleAxis, Radar,
   PieChart, Pie, Cell, Legend,
 } from 'recharts';
-import { supabase } from '../lib/supabase';
+import { supabase, fetchCharacterSheetIndex } from '../lib/supabase';
+import CharacterSheetModal from '../components/features/CharacterSheetModal';
 
 // ─── STATIC CONFIG (never changes) ───────────────────────────────────────────
 
@@ -82,6 +83,38 @@ async function approveRows(table, ids, userId) {
     .update({ status: 'approved', approved_by: userId })
     .in('id', ids);
   if (error) throw error;
+}
+
+// ─── CHARACTER SHEETS ─────────────────────────────────────────────────────────
+// Every name on the roster is a doorway into that character's sheet. The
+// external character-area link the name used to point at moves to a small icon
+// beside it, so both are still one click away.
+
+const SheetContext = React.createContext({ index: {}, open: () => {} });
+
+function CharacterName({ name, link, color = '#e2e8f0', bold = false }) {
+  const { index, open } = useContext(SheetContext);
+  if (!name) return null;
+  const hasSheet = !!index[name.trim().toLowerCase()];
+  return (
+    <span className="flex items-center gap-1.5 min-w-0">
+      <button
+        type="button"
+        onClick={() => open(name, link, color)}
+        title={hasSheet ? `Open ${name}'s character sheet` : `${name} — no character sheet yet`}
+        className={`text-sm ${bold ? 'font-bold' : 'font-semibold'} tracking-wide truncate text-left hover:brightness-125 transition-all underline-offset-2 hover:underline`}
+        style={{ color }}>
+        {name}
+      </button>
+      {hasSheet && <FileText size={10} className="shrink-0" style={{ color, opacity: 0.65 }} />}
+      {link && (
+        <a href={link} target="_blank" rel="noopener noreferrer" title="Character area"
+           className="shrink-0 text-slate-600 hover:text-slate-300 transition-colors">
+          <ExternalLink size={10} />
+        </a>
+      )}
+    </span>
+  );
 }
 
 function useSortSensors() {
@@ -603,13 +636,7 @@ const AdminBtn = ({ icon: IconComp, onClick, color = '#64748b', title, loading =
 );
 
 const Person = ({ name, link, t, canEdit, onEdit, onDelete, meta, deleteLoading = false, pending = false, onApprove = null, approveLoading = false }) => {
-  const nameEl = link
-    ? <a href={link} target="_blank" rel="noopener noreferrer"
-         style={{ color: t.accent }}
-         className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
-        {name}
-      </a>
-    : <span className="text-sm font-semibold tracking-wide truncate text-slate-200">{name}</span>;
+  const nameEl = <CharacterName name={name} link={link} color={t.accent} />;
   return (
     <div className="flex items-center justify-between py-2 px-3 border-b border-white/5 group transition-colors"
          onMouseEnter={e => e.currentTarget.style.background = t.accentFaint}
@@ -715,14 +742,7 @@ const MemberRow = ({ m, t, canEdit, onEdit, onDelete, deleteLoading = false, onA
        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
     <div className="flex items-center gap-2 min-w-0">
       <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
-      {m.discord_link
-        ? <a href={m.discord_link} target="_blank" rel="noopener noreferrer"
-             style={{ color: t.accent }}
-             className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
-            {m.name}
-          </a>
-        : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{m.name}</span>
-      }
+      <CharacterName name={m.name} link={m.discord_link} color={t.accent} />
     </div>
     <div className="flex items-center gap-1 shrink-0 ml-2">
       {m.role === 'part_time' && (
@@ -881,14 +901,7 @@ function SquadCard({ village, squadType, squadNumber, rows, t, perms, onRefresh,
             <div className="flex items-center gap-2 min-w-0">
               <ChevronRight size={12} strokeWidth={3} style={{ color: t.accent, opacity: 0.6, flexShrink: 0 }} />
               <div className="flex flex-col min-w-0">
-                {captain.discord_link
-                  ? <a href={captain.discord_link} target="_blank" rel="noopener noreferrer"
-                       style={{ color: t.accent }}
-                       className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline">
-                      {captain.name}
-                    </a>
-                  : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate">{captain.name}</span>
-                }
+                <CharacterName name={captain.name} link={captain.discord_link} color={t.accent} />
                 <span className="text-[8px] font-black uppercase tracking-[0.15em]"
                       style={{ color: t.accent, opacity: 0.55 }}>Captain</span>
               </div>
@@ -1110,11 +1123,7 @@ function WandererSection({ wanderers, perms, onRefresh, wandererModal, setWander
       <div className="flex items-center justify-between gap-2 mb-3 pb-3" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
         <div className="flex items-center gap-2 min-w-0">
           <Compass size={13} style={{ color: ta.accent, opacity: 0.7, flexShrink: 0 }} />
-          {w.discord_link
-            ? <a href={w.discord_link} target="_blank" rel="noopener noreferrer"
-                 style={{ color: ta.accent }}
-                 className="text-sm font-bold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline truncate">{w.name}</a>
-            : <span className="text-sm font-bold tracking-wide text-slate-200 truncate">{w.name}</span>}
+          <CharacterName name={w.name} link={w.discord_link} color={ta.accent} bold />
           {w.status === 'pending' && <PendingBadge />}
         </div>
         {(canModifyRow(perms, w) || canApproveRow(perms, w)) && (
@@ -1464,12 +1473,18 @@ export default function RosterPage({ userRole, userId }) {
   const [mainTab, setMainTab]         = useState('roster');
   const [deletingRosterId, setDeletingRosterId] = useState(null);
   const [approvingRosterId, setApprovingRosterId] = useState(null);
+  // name → sheet stub, so a roster row knows whether a sheet exists before it
+  // is opened; sheetModal holds the character whose sheet is on screen.
+  const [sheetIndex, setSheetIndex] = useState({});
+  const [sheetModal, setSheetModal] = useState(null);
 
   const canEdit   = isAdmin(userRole);
   const reviewer  = isReviewer(userRole);
   const canAdd    = canEdit || reviewer;
   const staffView = canEdit || reviewer;
   const perms = useMemo(() => ({ admin: canEdit, reviewer, userId }), [canEdit, reviewer, userId]);
+  // Staff tiers may edit anyone's sheet; players edit only their own.
+  const canEditAnySheet = ['staff', 'oc_staff', 'admin', 'owner'].includes(userRole);
 
   const handleApproveEntry = async (id) => {
     setApprovingRosterId(id);
@@ -1493,7 +1508,21 @@ export default function RosterPage({ userRole, userId }) {
     setLoading(false);
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  const refreshSheetIndex = useCallback(async () => {
+    try {
+      setSheetIndex(await fetchCharacterSheetIndex());
+    } catch (err) {
+      // A missing index only costs the little sheet marker next to a name.
+      console.warn('[NARP] Character sheet index fetch failed:', err);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); refreshSheetIndex(); }, [fetchData, refreshSheetIndex]);
+
+  const sheetCtx = useMemo(() => ({
+    index: sheetIndex,
+    open: (name, link, color) => setSheetModal({ name, link, color }),
+  }), [sheetIndex]);
 
   // Real-time: refresh roster when any entry/squad changes in another tab or for another user
   useEffect(() => {
@@ -1572,6 +1601,7 @@ export default function RosterPage({ userRole, userId }) {
   );
 
   return (
+    <SheetContext.Provider value={sheetCtx}>
     <div className="min-h-screen text-slate-200 font-sans overflow-x-hidden"
          style={{ background: 'radial-gradient(ellipse at 20% 0%, rgba(15,25,20,1) 0%, #050a0f 60%, #020408 100%)' }}>
 
@@ -1753,9 +1783,7 @@ export default function RosterPage({ userRole, userId }) {
                       <span className="text-[10px] font-black uppercase tracking-[0.12em] w-36 shrink-0" style={{ color: bearer ? ta.accent : '#334155' }}>{sword}</span>
                       <div className="flex-1 min-w-0 flex items-center gap-2">
                         {bearer
-                          ? bearer.discord_link
-                            ? <a href={bearer.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0' }} className="text-sm font-semibold tracking-wide truncate hover:brightness-125 transition-all underline-offset-2 hover:underline block">{bearer.name}</a>
-                            : <span className="text-sm font-semibold text-slate-200 tracking-wide truncate block">{bearer.name}</span>
+                          ? <CharacterName name={bearer.name} link={bearer.discord_link} />
                           : <span className="text-xs italic text-slate-600">Vacant</span>
                         }
                         {bearer?.status === 'pending' && <PendingBadge />}
@@ -1814,9 +1842,7 @@ export default function RosterPage({ userRole, userId }) {
                         </p>
                         <div className="mt-0.5 flex items-center gap-2">
                           {host
-                            ? host.discord_link
-                              ? <a href={host.discord_link} target="_blank" rel="noopener noreferrer" style={{ color: '#e2e8f0' }} className="text-sm font-semibold tracking-wide hover:brightness-125 transition-all underline-offset-2 hover:underline">{host.name}</a>
-                              : <span className="text-sm font-semibold text-slate-200 tracking-wide">{host.name}</span>
+                            ? <CharacterName name={host.name} link={host.discord_link} />
                             : <span className="text-xs italic text-slate-600">No host</span>
                           }
                           {host?.status === 'pending' && <PendingBadge />}
@@ -1867,6 +1893,20 @@ export default function RosterPage({ userRole, userId }) {
           onClose={() => setNewSquadConfig(null)}
         />
       )}
+
+      {sheetModal && (
+        <CharacterSheetModal
+          sheetId={sheetIndex[sheetModal.name.trim().toLowerCase()]?.id || null}
+          characterName={sheetModal.name}
+          characterLink={sheetModal.link || ''}
+          accent={sheetModal.color || '#38bdf8'}
+          canEditAny={canEditAnySheet}
+          currentUserId={userId}
+          onClose={() => setSheetModal(null)}
+          onSaved={() => refreshSheetIndex()}
+        />
+      )}
     </div>
+    </SheetContext.Provider>
   );
 }
