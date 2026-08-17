@@ -1,20 +1,24 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   X, BookOpen, Image as ImageIcon, User, FileText, ListChecks,
-  ShieldAlert, TrendingUp, ExternalLink,
+  ShieldAlert, ExternalLink,
 } from 'lucide-react';
+import { fetchCharacterSheetIndex } from '../../lib/supabase';
+import CharacterSheetModal from './CharacterSheetModal';
 
 /*
  * The jutsu write-up — styled to match JutsuCard (white cards, slate-50
  * inset boxes, indigo accents, the same rank-pill badges) rather than the
- * parchment "document" look used by the character sheet. Same sections as
- * before: image, basics, description, step-by-step mechanics, restrictions,
- * and the multi-rank stat/skill scaling tables.
+ * parchment "document" look used by the character sheet. Sections: image,
+ * basics (who developed it), description, step-by-step mechanics, and
+ * restrictions.
  *
  * Fully controlled: the caller owns `sheet` and gets every edit back through
  * `onChange(nextSheet)`. There's no internal save/load here — AdminFormModal
  * folds the sheet into the same entity it already submits, and JutsuCard
- * renders it read-only fed straight from the jutsu row.
+ * renders it read-only fed straight from the jutsu row. For multi-rank
+ * jutsus, the caller is responsible for picking which rank's doc to show —
+ * this component only ever renders one.
  */
 
 const inputCls = 'w-full text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 outline-none ' +
@@ -76,43 +80,104 @@ function Section({ icon: SectionIcon, title, note, children }) {
   );
 }
 
-// Same rank-pill styling as JutsuCard's Rank block.
-const RankBadge = ({ rank }) => (
-  <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md text-xs font-black border border-slate-300 shadow-sm shrink-0">
-    {rank}
-  </span>
-);
-
-function Table({ headers, children }) {
+// Opens the OC's character sheet on click — the character sheet modal handles
+// its own fetching, so this just needs the id.
+function OcLink({ ocId, name }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="overflow-x-auto rounded-xl border border-slate-200">
-      <table className="w-full text-sm border-collapse min-w-[36rem]">
-        <thead>
-          <tr className="bg-slate-50">
-            {headers.map((h, i) => (
-              <th key={i} className="text-left text-[10px] font-bold text-slate-400 uppercase tracking-widest px-3 py-2.5 border-b border-slate-200 whitespace-nowrap">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>{children}</tbody>
-      </table>
-    </div>
+    <>
+      <button type="button" onClick={() => setOpen(true)}
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
+        {name} <span className="text-slate-400 font-medium normal-case">(OC)</span>
+      </button>
+      {open && (
+        <CharacterSheetModal sheetId={ocId} characterName={name} onClose={() => setOpen(false)} />
+      )}
+    </>
   );
 }
 
-const Cell = ({ children, className = '' }) => (
-  <td className={`px-3 py-2 text-sm text-slate-700 border-b border-slate-100 align-middle ${className}`}>
-    {children}
-  </td>
-);
+function DevelopedBy({ value, onChange, editing }) {
+  const v = value && typeof value === 'object' ? value : { type: 'unknown', oc_id: '', oc_name: '', npc_name: '' };
+  const [ocOptions, setOcOptions] = useState(null);
+  const [ocLoading, setOcLoading] = useState(false);
+  const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (!editing || v.type !== 'oc' || fetchedRef.current) return;
+    fetchedRef.current = true;
+    let cancelled = false;
+    setOcLoading(true);
+    fetchCharacterSheetIndex()
+      .then(index => {
+        if (cancelled) return;
+        setOcOptions(Object.values(index)
+          .map(r => ({ id: r.id, name: r.character_name }))
+          .sort((a, b) => a.name.localeCompare(b.name)));
+      })
+      .catch(() => { if (!cancelled) setOcOptions([]); })
+      .finally(() => { if (!cancelled) setOcLoading(false); });
+    return () => { cancelled = true; };
+  }, [editing, v.type]);
+
+  if (!editing) {
+    if (v.type === 'oc' && v.oc_name) return <OcLink ocId={v.oc_id} name={v.oc_name} />;
+    if (v.type === 'npc' && v.npc_name) {
+      return <p className="text-sm font-semibold text-slate-700">{v.npc_name} <span className="text-slate-400 font-medium">(NPC)</span></p>;
+    }
+    return <p className="text-sm text-slate-300 italic">Unknown</p>;
+  }
+
+  const TYPES = [
+    { key: 'unknown', label: 'Unknown' },
+    { key: 'oc', label: 'OC' },
+    { key: 'npc', label: 'NPC' },
+  ];
+
+  return (
+    <div>
+      <div className="flex gap-2 mb-2.5">
+        {TYPES.map(t => (
+          <button key={t.key} type="button"
+                  onClick={() => onChange(
+                    t.key === 'oc'  ? { type: 'oc', oc_id: v.oc_id || '', oc_name: v.oc_name || '', npc_name: '' }
+                    : t.key === 'npc' ? { type: 'npc', npc_name: v.npc_name || '', oc_id: '', oc_name: '' }
+                    : { type: 'unknown', oc_id: '', oc_name: '', npc_name: '' }
+                  )}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
+                    v.type === t.key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
+                  }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      {v.type === 'oc' && (
+        ocLoading ? (
+          <p className="text-xs text-slate-400 font-medium">Loading roster…</p>
+        ) : (
+          <select value={v.oc_id || ''}
+                  onChange={e => {
+                    const opt = (ocOptions || []).find(o => o.id === e.target.value);
+                    onChange({ type: 'oc', oc_id: e.target.value, oc_name: opt?.name || '' });
+                  }}
+                  className={inputCls}>
+            <option value="">Select a character…</option>
+            {(ocOptions || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+          </select>
+        )
+      )}
+      {v.type === 'npc' && (
+        <input value={v.npc_name || ''} placeholder="NPC name"
+               onChange={e => onChange({ type: 'npc', npc_name: e.target.value })} className={inputCls} />
+      )}
+    </div>
+  );
+}
 
 export default function JutsuSheetModal({
   sheet,
   onChange,
   readOnly = false,
-  multiRank = false,
   jutsuName = '',
   onClose,
 }) {
@@ -123,20 +188,8 @@ export default function JutsuSheetModal({
     ...sheet,
     mechanics_steps: sheet.mechanics_steps.map((s, idx) => (idx === i ? { ...s, text: value } : s)),
   });
-  const patchRankRow = (kind, i, key, value) => onChange({
-    ...sheet,
-    multi_rank: {
-      ...sheet.multi_rank,
-      [kind]: sheet.multi_rank[kind].map((r, idx) => (idx === i ? { ...r, [key]: value } : r)),
-    },
-  });
 
   const filledSteps = ed ? sheet.mechanics_steps : sheet.mechanics_steps.filter(s => s.text);
-  const statRows = sheet.multi_rank?.stat || [];
-  const skillRows = sheet.multi_rank?.skill || [];
-  const showMultiRank = multiRank
-    || statRows.some(r => r.scaled || r.details)
-    || skillRows.some(r => r.scaled || r.details);
 
   return (
     <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
@@ -150,7 +203,7 @@ export default function JutsuSheetModal({
                 <BookOpen size={18} className="text-indigo-600" />
               </div>
               <div className="min-w-0">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jutsu Sheet</p>
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jutsu Documentation</p>
                 <h2 className="text-xl font-extrabold text-slate-900 truncate tracking-tight">{jutsuName || 'Unnamed technique'}</h2>
               </div>
             </div>
@@ -174,8 +227,12 @@ export default function JutsuSheetModal({
 
           {/* Basics */}
           <Section icon={User} title="Basics">
-            <Field label="Developed by"><Text editing={ed} value={sheet.developed_by} onChange={v => patch('developed_by', v)} placeholder="Unnamed" /></Field>
-            <Field label="Prerequisites" note="list them if any"><Text editing={ed} value={sheet.prerequisites} onChange={v => patch('prerequisites', v)} /></Field>
+            <Field label="Developed by">
+              <DevelopedBy editing={ed} value={sheet.developed_by} onChange={v => patch('developed_by', v)} />
+            </Field>
+            <div className="mt-3.5">
+              <Field label="Prerequisites" note="list them if any"><Text editing={ed} value={sheet.prerequisites} onChange={v => patch('prerequisites', v)} /></Field>
+            </div>
           </Section>
 
           {/* Description */}
@@ -195,7 +252,7 @@ export default function JutsuSheetModal({
                     </span>
                     <div className="flex-1 min-w-0">
                       {ed ? (
-                        <input value={s.text} placeholder={realIndex === 6 ? 'Max step' : `Step ${realIndex + 1}`}
+                        <input value={s.text}
                                onChange={e => patchStep(realIndex, e.target.value)} className={inputCls} />
                       ) : (
                         <p className="text-sm text-slate-700 leading-relaxed">{s.text}</p>
@@ -219,40 +276,6 @@ export default function JutsuSheetModal({
               </Field>
             </div>
           </Section>
-
-          {/* Multi-Rank Tab */}
-          {(ed || showMultiRank) && (
-            <Section icon={TrendingUp} title="Multi-Rank Scaling"
-                     note="For techniques usable at different ranks, or that scale off a stat or skill. Leave blank if the technique has only one rank.">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Rank / stat scaling</p>
-              <div className="mb-4">
-                <Table headers={['Rank', 'Stat scaled', 'Details / effects', 'Casting type(s)', 'Mechanics']}>
-                  {statRows.map((r, i) => (
-                    <tr key={i} className="odd:bg-white even:bg-slate-50/60">
-                      <Cell className="w-14"><RankBadge rank={r.rank} /></Cell>
-                      <Cell className="w-32"><Text editing={ed} value={r.scaled} onChange={v => patchRankRow('stat', i, 'scaled', v)} /></Cell>
-                      <Cell><Text editing={ed} value={r.details} onChange={v => patchRankRow('stat', i, 'details', v)} /></Cell>
-                      <Cell className="w-36"><Text editing={ed} value={r.casting_types} onChange={v => patchRankRow('stat', i, 'casting_types', v)} /></Cell>
-                      <Cell className="w-36"><Text editing={ed} value={r.mechanics} onChange={v => patchRankRow('stat', i, 'mechanics', v)} /></Cell>
-                    </tr>
-                  ))}
-                </Table>
-              </div>
-
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Rank / skill scaling</p>
-              <Table headers={['Rank', 'Skill scaled', 'Details / effects', 'Casting type(s)', 'Mechanics']}>
-                {skillRows.map((r, i) => (
-                  <tr key={i} className="odd:bg-white even:bg-slate-50/60">
-                    <Cell className="w-14"><RankBadge rank={r.rank} /></Cell>
-                    <Cell className="w-32"><Text editing={ed} value={r.scaled} onChange={v => patchRankRow('skill', i, 'scaled', v)} /></Cell>
-                    <Cell><Text editing={ed} value={r.details} onChange={v => patchRankRow('skill', i, 'details', v)} /></Cell>
-                    <Cell className="w-36"><Text editing={ed} value={r.casting_types} onChange={v => patchRankRow('skill', i, 'casting_types', v)} /></Cell>
-                    <Cell className="w-36"><Text editing={ed} value={r.mechanics} onChange={v => patchRankRow('skill', i, 'mechanics', v)} /></Cell>
-                  </tr>
-                ))}
-              </Table>
-            </Section>
-          )}
 
         </div>
       </div>
