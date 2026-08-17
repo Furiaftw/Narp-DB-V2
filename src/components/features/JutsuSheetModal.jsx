@@ -1,16 +1,15 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  X, BookOpen, Image as ImageIcon, User, FileText, ListChecks,
-  ShieldAlert, ExternalLink,
+  X, BookOpen, User, FileText, ListChecks, ShieldAlert, ExternalLink,
 } from 'lucide-react';
-import { fetchCharacterSheetIndex } from '../../lib/supabase';
+import { fetchRosterCharacterNames } from '../../lib/supabase';
 import CharacterSheetModal from './CharacterSheetModal';
 
 /*
  * The jutsu write-up — styled to match JutsuCard (white cards, slate-50
  * inset boxes, indigo accents, the same rank-pill badges) rather than the
- * parchment "document" look used by the character sheet. Sections: image,
- * basics (who developed it), description, step-by-step mechanics, and
+ * parchment "document" look used by the character sheet. Sections: basics
+ * (who developed it), description, step-by-step mechanics, and
  * restrictions.
  *
  * Fully controlled: the caller owns `sheet` and gets every edit back through
@@ -24,6 +23,10 @@ import CharacterSheetModal from './CharacterSheetModal';
 const inputCls = 'w-full text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 outline-none ' +
   'focus:ring-2 focus:ring-indigo-500 transition-shadow placeholder:text-slate-300';
 
+// Every read-only text render here must be able to wrap: an unbroken run of
+// characters (a pasted link with no spaces, a long word) will otherwise
+// blow past its box instead of wrapping, so `break-words` is load-bearing,
+// not decorative — don't drop it when touching these.
 function Text({ value, onChange, editing, placeholder = '' }) {
   if (!editing) return value
     ? <p className="text-sm font-semibold text-slate-700 break-words">{value}</p>
@@ -46,8 +49,8 @@ function LinkField({ value, onChange, editing, placeholder = 'https://…' }) {
     if (!value) return <p className="text-sm text-slate-300 italic">Not set</p>;
     return (
       <a href={value} target="_blank" rel="noopener noreferrer"
-         className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
-        <ExternalLink size={13} /> Open link
+         className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors break-all">
+        <ExternalLink size={13} className="shrink-0" /> Open link
       </a>
     );
   }
@@ -73,57 +76,57 @@ function Section({ icon: SectionIcon, title, note, children }) {
         <h3 className="text-xs font-extrabold text-slate-700 uppercase tracking-widest">{title}</h3>
       </div>
       {note && <p className="text-xs text-slate-400 font-medium mb-2.5">{note}</p>}
-      <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-4">
+      <div className="bg-slate-50/70 border border-slate-100 rounded-xl p-4 min-w-0">
         {children}
       </div>
     </div>
   );
 }
 
-// Opens the OC's character sheet on click — the character sheet modal handles
-// its own fetching, so this just needs the id.
-function OcLink({ ocId, name }) {
+// Opens the OC's character sheet on click. No id lookup needed — sheets are
+// matched by name (same as the roster does), and CharacterSheetModal already
+// falls back to fetch-by-name and renders a graceful "not created yet" state
+// when the character hasn't filled one in.
+function OcLink({ name }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <button type="button" onClick={() => setOpen(true)}
-              className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors">
-        {name} <span className="text-slate-400 font-medium normal-case">(OC)</span>
+              className="inline-flex items-center gap-1.5 text-sm font-bold text-indigo-600 hover:text-indigo-700 transition-colors break-words text-left">
+        {name} <span className="text-slate-400 font-medium normal-case shrink-0">(OC)</span>
       </button>
       {open && (
-        <CharacterSheetModal sheetId={ocId} characterName={name} onClose={() => setOpen(false)} />
+        <CharacterSheetModal characterName={name} onClose={() => setOpen(false)} />
       )}
     </>
   );
 }
 
 function DevelopedBy({ value, onChange, editing }) {
-  const v = value && typeof value === 'object' ? value : { type: 'unknown', oc_id: '', oc_name: '', npc_name: '' };
+  const v = value && typeof value === 'object' ? value : { type: 'unknown', oc_name: '', npc_name: '' };
   const [ocOptions, setOcOptions] = useState(null);
   const [ocLoading, setOcLoading] = useState(false);
   const fetchedRef = useRef(false);
 
+  // The roster (not character_sheets) is the source of names here — most OCs
+  // won't have filled in a character sheet yet, but they're still pickable;
+  // CharacterSheetModal handles "no sheet yet" gracefully on open.
   useEffect(() => {
     if (!editing || v.type !== 'oc' || fetchedRef.current) return;
     fetchedRef.current = true;
     let cancelled = false;
     setOcLoading(true);
-    fetchCharacterSheetIndex()
-      .then(index => {
-        if (cancelled) return;
-        setOcOptions(Object.values(index)
-          .map(r => ({ id: r.id, name: r.character_name }))
-          .sort((a, b) => a.name.localeCompare(b.name)));
-      })
+    fetchRosterCharacterNames()
+      .then(names => { if (!cancelled) setOcOptions(names); })
       .catch(() => { if (!cancelled) setOcOptions([]); })
       .finally(() => { if (!cancelled) setOcLoading(false); });
     return () => { cancelled = true; };
   }, [editing, v.type]);
 
   if (!editing) {
-    if (v.type === 'oc' && v.oc_name) return <OcLink ocId={v.oc_id} name={v.oc_name} />;
+    if (v.type === 'oc' && v.oc_name) return <OcLink name={v.oc_name} />;
     if (v.type === 'npc' && v.npc_name) {
-      return <p className="text-sm font-semibold text-slate-700">{v.npc_name} <span className="text-slate-400 font-medium">(NPC)</span></p>;
+      return <p className="text-sm font-semibold text-slate-700 break-words">{v.npc_name} <span className="text-slate-400 font-medium">(NPC)</span></p>;
     }
     return <p className="text-sm text-slate-300 italic">Unknown</p>;
   }
@@ -140,9 +143,9 @@ function DevelopedBy({ value, onChange, editing }) {
         {TYPES.map(t => (
           <button key={t.key} type="button"
                   onClick={() => onChange(
-                    t.key === 'oc'  ? { type: 'oc', oc_id: v.oc_id || '', oc_name: v.oc_name || '', npc_name: '' }
-                    : t.key === 'npc' ? { type: 'npc', npc_name: v.npc_name || '', oc_id: '', oc_name: '' }
-                    : { type: 'unknown', oc_id: '', oc_name: '', npc_name: '' }
+                    t.key === 'oc'  ? { type: 'oc', oc_name: v.oc_name || '', npc_name: '' }
+                    : t.key === 'npc' ? { type: 'npc', npc_name: v.npc_name || '', oc_name: '' }
+                    : { type: 'unknown', oc_name: '', npc_name: '' }
                   )}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors ${
                     v.type === t.key ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-slate-500 border-slate-200 hover:border-indigo-300'
@@ -154,21 +157,20 @@ function DevelopedBy({ value, onChange, editing }) {
       {v.type === 'oc' && (
         ocLoading ? (
           <p className="text-xs text-slate-400 font-medium">Loading roster…</p>
+        ) : (ocOptions || []).length === 0 ? (
+          <p className="text-xs text-slate-400 font-medium">No approved OCs on the roster yet.</p>
         ) : (
-          <select value={v.oc_id || ''}
-                  onChange={e => {
-                    const opt = (ocOptions || []).find(o => o.id === e.target.value);
-                    onChange({ type: 'oc', oc_id: e.target.value, oc_name: opt?.name || '' });
-                  }}
+          <select value={v.oc_name || ''}
+                  onChange={e => onChange({ type: 'oc', oc_name: e.target.value, npc_name: '' })}
                   className={inputCls}>
             <option value="">Select a character…</option>
-            {(ocOptions || []).map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+            {(ocOptions || []).map(name => <option key={name} value={name}>{name}</option>)}
           </select>
         )
       )}
       {v.type === 'npc' && (
         <input value={v.npc_name || ''} placeholder="NPC name"
-               onChange={e => onChange({ type: 'npc', npc_name: e.target.value })} className={inputCls} />
+               onChange={e => onChange({ type: 'npc', npc_name: e.target.value, oc_name: '' })} className={inputCls} />
       )}
     </div>
   );
@@ -194,7 +196,7 @@ export default function JutsuSheetModal({
   return (
     <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
       <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">
+        <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 min-w-0">
 
           {/* Header */}
           <div className="flex justify-between items-center mb-8 border-b pb-4">
@@ -211,19 +213,6 @@ export default function JutsuSheetModal({
               <X size={18} />
             </button>
           </div>
-
-          {/* Image */}
-          <Section icon={ImageIcon} title="Jutsu Image" note="Optional.">
-            {ed ? (
-              <input type="url" value={sheet.image || ''} placeholder="https://…"
-                     onChange={e => patch('image', e.target.value)} className={inputCls} />
-            ) : sheet.image ? (
-              <img src={sheet.image} alt={jutsuName} loading="lazy"
-                   className="w-full max-h-64 object-cover rounded-lg border border-slate-200" />
-            ) : (
-              <p className="text-sm text-slate-300 italic">No image</p>
-            )}
-          </Section>
 
           {/* Basics */}
           <Section icon={User} title="Basics">
@@ -246,7 +235,7 @@ export default function JutsuSheetModal({
               {filledSteps.map((s, i) => {
                 const realIndex = sheet.mechanics_steps.indexOf(s);
                 return (
-                  <div key={realIndex} className="flex items-center gap-3">
+                  <div key={realIndex} className="flex items-start gap-3">
                     <span className="w-6 h-6 rounded-full bg-indigo-600 text-white text-[11px] font-black flex items-center justify-center shrink-0">
                       {realIndex + 1}
                     </span>
@@ -255,7 +244,7 @@ export default function JutsuSheetModal({
                         <input value={s.text}
                                onChange={e => patchStep(realIndex, e.target.value)} className={inputCls} />
                       ) : (
-                        <p className="text-sm text-slate-700 leading-relaxed">{s.text}</p>
+                        <p className="text-sm text-slate-700 leading-relaxed break-words">{s.text}</p>
                       )}
                     </div>
                   </div>

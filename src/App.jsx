@@ -461,14 +461,14 @@ const MANAGE_TABLES = {
     label: 'Jutsus',
     fields: [
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
-      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
-      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
-      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', col: 1 },
-      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
+      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, req: true, col: 2 },
+      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, req: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, col: 1 },
+      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, req: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
-      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
-      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited', 'Pve'], multi: true, col: 1 },
-      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', col: 1 },
+      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, req: true, col: 1 },
+      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited'], multi: true, col: 1 },
+      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', req: true, col: 1 },
       { k: 'bloodline',   l: 'Bloodline',       t: 'bl-select', col: 1 },
       { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },
       { k: 'cost',        l: 'Cost', hidden: true },
@@ -1106,7 +1106,7 @@ function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJu
 // Multi-rank jutsus keep separate documentation per rank — this picks which
 // one to open before handing off to the read-only JutsuSheetModal.
 function JutsuDocRankPicker({ jutsu, onPick, onClose }) {
-  const ranks = toArray(jutsu.rank);
+  const ranks = toArray(jutsu.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   return (
     <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
       <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
@@ -1290,7 +1290,6 @@ function SessionListCart({ list, onClear, onRemove }) {
 const TOGGLE_PAIRS = [
   { showKey: 'lck', hideKey: 'hLck', label: 'Locked'     },
   { showKey: 'lim', hideKey: 'hLim', label: 'Limited'    },
-  { showKey: 'pve', hideKey: 'hPve', label: 'Pve'        },
   { showKey: 'mul', hideKey: 'hMul', label: 'Multi-Rank' },
 ];
 const HIDE_ONLY = [
@@ -2864,7 +2863,9 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
   // shared doc — computed live off the current rank selection, not the
   // hydrated eRow, so toggling ranks in the form updates the doc list too.
   const docIsMultiRank = tab === 'jutsus' && toArray(fd.rank).length > 1 && !toArray(fd.types).includes('Battlemode');
-  const docRanks = docIsMultiRank ? toArray(fd.rank) : ['__single__'];
+  const docRanks = docIsMultiRank
+    ? toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0))
+    : ['__single__'];
   const docFor = (rankKey) => (fd._sheet || {})[rankKey] || emptyJutsuSheet();
   const setDocFor = (rankKey, next) => setFd({ ...fd, _sheet: { ...(fd._sheet || {}), [rankKey]: next } });
 
@@ -3008,7 +3009,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
               <p className="text-xs text-slate-500 mb-3">
                 {docIsMultiRank
                   ? 'This jutsu is multi-rank — each rank gets its own documentation.'
-                  : 'Description, mechanics, and restrictions — no Google Doc needed.'}
+                  : 'Description, mechanics, and restrictions for this jutsu.'}
               </p>
               <div className="flex flex-wrap gap-2.5">
                 {docRanks.map(rankKey => {
@@ -3047,7 +3048,7 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
           <div className="flex justify-end gap-4 mt-10 pt-6 border-t">
             <button onClick={onClose} className="bg-white border-2 px-8 py-3 rounded-xl font-bold hover:bg-slate-50">Cancel</button>
             <button onClick={handleSave}
-                    disabled={submitting || schema.fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
+                    disabled={submitting || visibleFields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold flex gap-2 disabled:opacity-50 hover:bg-indigo-700 shadow-md">
               <Icon n="Save" size={18}/> {submitting ? 'Saving...' : ((willGoToPending || askSecondApproval) ? 'Submit for Approval' : 'Save')}
             </button>
@@ -4036,14 +4037,14 @@ function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete })
 const INITIAL_FILTER_STATE = {
   q: '',
   nat: [], rnk: [], typ: [], spc: [], org: [], bl: [], bm: [], jty: [],
-  lck: false, lim: false, pve: false, mul: false,
-  hLck: false, hLim: false, hPve: false, hMul: false, hMP: false, hAsk: false,
+  lck: false, lim: false, mul: false,
+  hLck: false, hLim: false, hMul: false, hMP: false, hAsk: false,
   showFilters: false,
   sort: 'az',
 };
 
 const ARRAY_FILTER_KEYS = ['nat', 'rnk', 'typ', 'spc', 'org', 'bl', 'bm', 'jty'];
-const BOOL_FILTER_KEYS  = ['lck', 'lim', 'pve', 'mul', 'hLck', 'hLim', 'hPve', 'hMul', 'hMP', 'hAsk'];
+const BOOL_FILTER_KEYS  = ['lck', 'lim', 'mul', 'hLck', 'hLim', 'hMul', 'hMP', 'hAsk'];
 
 const getPendingAssignedId = (p) => {
   if (!p?.assigned_to) return null;
@@ -5216,8 +5217,8 @@ export default function App() {
       (!f.rnk.length || f.rnk.some(r => toArray(j.rank).includes(r))) &&
       (!f.bm.length  || f.bm.includes(j.bm_tier)) &&
       (!f.bl.length  || f.bl.includes(j.bloodline)) &&
-      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.pve || j.pve)    && (!f.mul || j.multiRank) &&
-      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hPve || !j.pve)  && (!f.hMul || !j.multiRank) &&
+      (!f.lck || j.locked)    && (!f.lim || j.limited)    && (!f.mul || j.multiRank) &&
+      (!f.hLck || !j.locked)  && (!f.hLim || !j.limited)  && (!f.hMul || !j.multiRank) &&
       (!f.hMP  || !toArray(j.types).includes('Multi-Post')) &&
       (!f.hAsk || !getSlotStatus(j.slots).showAskStaff)
     ).sort(sortByJutsu);

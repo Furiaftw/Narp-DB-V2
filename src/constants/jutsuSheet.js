@@ -18,10 +18,9 @@
 
 const rows = (n, shape) => Array.from({ length: n }, () => ({ ...shape }));
 
-export const emptyDevelopedBy = () => ({ type: 'unknown', oc_id: '', oc_name: '', npc_name: '' });
+export const emptyDevelopedBy = () => ({ type: 'unknown', oc_name: '', npc_name: '' });
 
 export const emptyJutsuSheet = () => ({
-  image: '',
   developed_by: emptyDevelopedBy(),
   prerequisites: '',
   description: '',
@@ -55,7 +54,6 @@ export const normalizeJutsuSheet = (stored) => {
   }
 
   return {
-    image:          typeof stored.image === 'string' ? stored.image : '',
     developed_by:   developedBy,
     prerequisites:  typeof stored.prerequisites === 'string' ? stored.prerequisites : '',
     description:    typeof stored.description === 'string' ? stored.description : '',
