@@ -19,9 +19,10 @@ Built on React + Vite, styled with Tailwind, backed by Supabase (Postgres + Disc
 9. [Step 8 — Finish the redirect URL handshake](#step-8--finish-the-redirect-url-handshake)
 10. [Step 9 — First sign-in (you're auto-promoted to owner)](#step-9--first-sign-in)
 11. [Step 10 — Add admins, reviewers, and graders via the whitelist](#step-10--add-admins-reviewers-and-graders-via-the-whitelist)
-12. [The pending approval workflow](#the-pending-approval-workflow)
-13. [The env-var reference](#the-env-var-reference)
-14. [Troubleshooting](#troubleshooting)
+12. [Pages and links](#pages-and-links)
+13. [The pending approval workflow](#the-pending-approval-workflow)
+14. [The env-var reference](#the-env-var-reference)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -39,7 +40,7 @@ The site has five tiers. Anyone (signed in or not) can browse the jutsu catalog 
 
 **Key rules baked into the database (not just the UI):**
 
-- **Only one public tab: Jutsus.** Bloodlines are managed inside System Tools — they populate the bloodline-name dropdown in jutsu filters but don't have their own browse view.
+- **The catalog, bloodlines and roster are public.** Everything else needs a sign-in or a role — see [Pages and links](#pages-and-links).
 - **Slot tracking moved off-site.** Bloodline and limited-spec slot tracking lives on a separate website now. Jutsus still track their own Limited slots (with the view-slots eye icon for users to see who holds them).
 - **Reviewers can't directly edit jutsus.** Their inserts, edits, and deletes go to a `pending_jutsus` queue and need a second person to approve.
 - **Anyone who isn't the submitter can approve.** Another Reviewer is enough — it doesn't have to be an admin. Admins bypass approval for their own changes.
@@ -225,6 +226,27 @@ If they already signed in once as a `user` before being whitelisted, no problem 
 To revoke: remove their whitelist entry, then in the **People** tab change their role to `user`. They keep their Discord account but lose all privileges. (Their pending submissions auto-cancel on demotion.)
 
 > **Admins see a filtered view.** Admins can only see User, Grader, and Reviewer profiles, and grader/reviewer-level whitelist entries. Owner sees everything. Owner is the only one who can demote an Admin or remove an admin whitelist entry.
+
+---
+
+## Pages and links
+
+Every section has its own address, so you can link someone straight to it:
+
+| Link | What it is | Who can open it |
+| :--- | :--- | :--- |
+| `/` | The jutsu catalog | anyone |
+| `/bloodlines` | Bloodline list | anyone |
+| `/roster` | Village roster | anyone |
+| `/grading` | Grading & Upgrade Requests — submit RPs, spend credits, review the queues | signed in |
+| `/history/work-log` | Review throughput per person | reviewers+ |
+| `/history/audit-log` | Role-change history | admins+ |
+| `/inbox` | Your submissions and review chats | signed in |
+| `/members` | Member board | admins+ |
+
+The dark strip under the site title switches between these; the Jutsus/Bloodlines tabs and the
+jutsu filter bar only appear on the catalog itself. Opening a page you don't have access to
+tells you so rather than bouncing you back to the catalog.
 
 ---
 

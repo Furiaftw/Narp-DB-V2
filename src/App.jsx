@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
+import { Routes, Route, Navigate, NavLink, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 import {
   supabase,
@@ -36,7 +37,6 @@ import {
   cancelPendingJutsu,
   buildJutsuPayload,
   fromRowJutsu,
-  fetchRoleChangeLog,
   logWorkAction,
   fetchWorkLogMonthly,
   fetchReviewChats,
@@ -57,10 +57,10 @@ import {
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
 const RosterPage = lazy(() => import('./pages/RosterPage'));
-const WorkStatsPage = lazy(() => import('./pages/WorkStatsPage'));
 const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
-const RpHubPage = lazy(() => import('./pages/RpHubPage'));
+const GradingPage = lazy(() => import('./pages/GradingPage'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
@@ -3088,79 +3088,6 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
 }
 
 /* ============================================================================
-   MODAL: AuditLogModal
-   ============================================================================ */
-function AuditLogModal({ onClose }) {
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await fetchRoleChangeLog(200);
-        if (!cancelled) setEntries(list);
-      } catch (e) {
-        if (!cancelled) setError(e.message || 'Failed to load audit log.');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const arrow = (from, to) => {
-    // 'staff'/'oc_staff' appear in historical audit-log rows — keep rendering them.
-    const colors = { user: 'text-slate-500', reviewer: 'text-emerald-600', staff: 'text-emerald-600', grader: 'text-teal-600', oc_staff: 'text-teal-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
-    const label = (r) => r === 'staff' || r === 'reviewer' ? 'Reviewer' : r === 'oc_staff' || r === 'grader' ? 'Grader' : (r || '∅');
-    return (
-      <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{label(from)}</span>
-        <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{label(to)}</span>
-      </span>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon n="Clock" size={20} className="text-amber-400" />
-            <h3 className="font-bold text-lg">Audit Log — Role Changes</h3>
-          </div>
-          <button onClick={onClose}><Icon n="X" size={18} /></button>
-        </div>
-
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {error && <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold">{error}</div>}
-          {loading ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
-          ) : entries.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">No role changes recorded yet.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {entries.map(e => (
-                <div key={e.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                  <div className="text-slate-400 font-mono shrink-0 w-32 truncate">{new Date(e.changed_at).toLocaleString()}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-800 truncate">{maskEmail(e.target_email) || '(unknown)'}</div>
-                    <div className="text-slate-500 truncate">by {maskEmail(e.changed_by_email) || 'system'}</div>
-                  </div>
-                  <div className="shrink-0">{arrow(e.old_role, e.new_role)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
 const SUBMISSION_GATE_TYPES = [
@@ -3171,7 +3098,7 @@ const SUBMISSION_GATE_TYPES = [
 ];
 const SUBMISSION_GATE_LABELS = Object.fromEntries(SUBMISSION_GATE_TYPES.map(({ key, label }) => [key, label]));
 
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isReviewer, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onManageBL, isOwner, isAdmin, isReviewer, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
@@ -3339,10 +3266,10 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
                 <Icon n="Clock" size={20} className="text-amber-500" /> Audit Log
               </h3>
               <p className="text-xs text-slate-500 mb-6">View the history of role changes — who promoted or demoted whom, and when.</p>
-              <button onClick={onOpenAuditLog}
-                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
+              <NavLink to="/history/audit-log" onClick={onClose}
+                       className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
                 <Icon n="Eye" size={16}/> View log
-              </button>
+              </NavLink>
             </div>
 
             {/* Manage Bloodlines */}
@@ -4086,6 +4013,40 @@ const getChatTurn = (lastMsg, myId, iAmSubmitter) => {
   return ['reviewer', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
 };
 
+/* ---------------------------------------------------------------------------
+   ROUTE HELPERS
+   --------------------------------------------------------------------------- */
+
+// HistoryPage takes the sub-view as a prop; useParams keeps that out of App.
+function HistoryRoute({ profile, role }) {
+  const { view } = useParams();
+  if (view !== 'work-log' && view !== 'audit-log') {
+    return <Navigate to="/history/work-log" replace />;
+  }
+  return <HistoryPage view={view} profile={profile} role={role} />;
+}
+
+// Gate panels: a shared link should explain itself rather than silently
+// bouncing someone to the catalog.
+function NoAccess({ what }) {
+  return (
+    <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-8 text-center">
+      <Icon n="Lock" size={28} className="text-slate-300 mx-auto mb-3" />
+      <p className="text-sm font-semibold text-slate-600">{what}</p>
+      <p className="text-xs text-slate-400 mt-1">Ask an admin if you think you should have access.</p>
+    </div>
+  );
+}
+
+function SignedOutNotice({ what }) {
+  return (
+    <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-8 text-center">
+      <Icon n="User" size={28} className="text-slate-300 mx-auto mb-3" />
+      <p className="text-sm font-semibold text-slate-600">Sign in with Discord to see {what}.</p>
+    </div>
+  );
+}
+
 export default function App() {
   const headerRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(72);
@@ -4165,7 +4126,20 @@ export default function App() {
 
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
-  const [tab, setTab]           = useState('jutsus');
+  // Navigation is the URL. `tab` is derived, kept as a short name because the
+  // catalog's filter/expand logic reads it in a dozen places: 'jutsus' and
+  // 'bloodlines' are the two catalog views, everything else is its own page.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathname = location.pathname;
+  const tab = pathname === '/bloodlines' ? 'bloodlines'
+            : pathname === '/'           ? 'jutsus'
+            : pathname.split('/')[1] || 'jutsus';
+  const isCatalog = tab === 'jutsus' || tab === 'bloodlines';
+  // Roster and History (work log) paint their own full-bleed layouts, so the
+  // shell must not add its page padding on top of them.
+  const selfLaidOut = pathname === '/roster'
+    || (pathname.startsWith('/history') && pathname !== '/history/audit-log');
 
   const loadProfiles = useCallback(async () => {
     if (!supabaseReady || !isAdmin) return;
@@ -4270,7 +4244,7 @@ export default function App() {
     return () => observer.disconnect();
   }, [loading]);
 
-  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false, iosInstall: false, stats: false });
+  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, manageBL: false, iosInstall: false, stats: false });
   const [installPrompt, setInstallPrompt] = useState(null);
   const [appInstalled, setAppInstalled]   = useState(() => window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone);
 
@@ -4497,6 +4471,20 @@ export default function App() {
   }, [refreshPending]);
 
   useEffect(() => { tabRef.current = tab; }, [tab]);
+  // react-router does not restore scroll on navigation.
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+
+  // Entering the catalog starts from a clean slate, the way switching tabs
+  // used to. Leaving it collapses any expanded row.
+  useEffect(() => {
+    setExpRow(null);
+    if (isCatalog) {
+      clearF();
+      setF(p => ({ ...p, sort: 'az', showFilters: false }));
+    }
+    if (pathname === '/inbox') setInboxHasNew(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   useEffect(() => {
     if (!supabaseReady || !profile) return;
@@ -5364,23 +5352,21 @@ export default function App() {
     );
   }
 
-  const TABS = [
-    { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
-    { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
-    ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
-    ...(profile || !supabaseReady ? [{ id: 'rp', label: 'RP Hub' }] : []),
-    ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
-    { id: 'roster', label: 'Roster' },
-    ...(isReviewer ? [{ id: 'worklog', label: 'Work Log' }] : []),
+  // The catalog's own two views — the only thing left in the tab bar.
+  const CATALOG_TABS = [
+    { to: '/',           label: 'Jutsus',     count: (db.jutsus || []).length },
+    { to: '/bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
   ];
 
-  const switchTab = (tabId) => {
-    setTab(tabId);
-    if (tabId === 'inbox') setInboxHasNew(false);
-    setExpRow(null);
-    clearF();
-    setF(p => ({ ...p, sort: 'az', showFilters: false }));
-  };
+  // Everything else is its own page, reachable from the header switcher.
+  const SECTIONS = [
+    { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' },
+    { to: '/roster', label: 'Roster' },
+    ...(profile || !supabaseReady ? [{ to: '/grading', label: 'Grading/Upgrade Requests' }] : []),
+    ...(profile ? [{ to: '/inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
+    ...(isReviewer ? [{ to: '/history/work-log', label: 'History', match: (p) => p.startsWith('/history') }] : []),
+    ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
+  ];
 
   // Pending's four review-queue groups (drawn only from OTHER people's
   // submissions), plus a fifth bucket for the viewer's own — folding My
@@ -5569,8 +5555,39 @@ export default function App() {
           </div>
         </div>
 
-        {/* FILTER BAR — jutsu tab only */}
-        {tab === 'jutsus' && (
+        {/* SECTION SWITCHER — the one nav that spans every page */}
+        <div className="bg-slate-900 border-t border-slate-800">
+          <div className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto scrollbar-hide">
+            {SECTIONS.map(sec => {
+              const active = sec.match ? sec.match(pathname) : pathname.startsWith(sec.to);
+              return (
+                <NavLink key={sec.to} to={sec.to}
+                  className={`relative px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap border-b-2 -mb-px flex items-center gap-1.5 transition-colors ${
+                    active ? 'border-blue-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'
+                  }`}>
+                  <span className="relative">
+                    {sec.label}
+                    {sec.hasNew && !active && (
+                      <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
+                    )}
+                  </span>
+                  {sec.count !== undefined && (
+                    <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded-full ${active ? 'bg-slate-700 text-slate-100' : 'bg-slate-800 text-slate-400'}`}>{sec.count}</span>
+                  )}
+                  {sec.unread > 0 && (
+                    <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm"
+                          title={`${sec.unread} conversation${sec.unread === 1 ? '' : 's'} with unread messages`}>
+                      {sec.unread}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* FILTER BAR — jutsu catalog only */}
+        {pathname === '/' && (
           <FilterBar
             tab={tab} f={f} setF={setF}
             activeFilterCount={fCount}
@@ -5580,7 +5597,7 @@ export default function App() {
       </div>
 
       {/* FILTER PANEL — outside sticky header, in normal document flow */}
-      {tab === 'jutsus' && (
+      {pathname === '/' && (
         <FilterBarPanel
           tab={tab} f={f} setF={setF}
           bloodlinesDb={sortedBloodlines}
@@ -5588,36 +5605,31 @@ export default function App() {
           jutsuTypeTagOptions={sortedJutsuTypeTags} />
       )}
 
-      {/* TAB BAR */}
-      {TABS.length > 1 && (
+      {/* CATALOG TAB BAR — Database section only */}
+      {isCatalog && (
         <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky z-20" style={{ top: `${headerHeight}px` }}>
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => switchTab(t.id)}
-                      className={`px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${tab === t.id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-                <span className="relative">
-                  {t.label}
-                  {t.hasNew && tab !== t.id && (
-                    <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
-                  )}
-                </span>
-                {t.count !== undefined && (
-                  <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${tab === t.id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+            {CATALOG_TABS.map(t => (
+              <NavLink key={t.to} to={t.to} end
+                className={({ isActive }) => `px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${isActive ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                {({ isActive }) => (
+                  <>
+                    <span>{t.label}</span>
+                    <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${isActive ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+                  </>
                 )}
-                {t.unread > 0 && (
-                  <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm" title={`${t.unread} conversation${t.unread === 1 ? '' : 's'} with unread messages`}>
-                    {t.unread}
-                  </span>
-                )}
-              </button>
+              </NavLink>
             ))}
           </div>
         </div>
       )}
 
-      {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
-        {tab === 'jutsus' && (
+      {/* MAIN CONTENT — one route per page. Pages that paint their own
+          full-bleed layout (Roster, History) opt out of the shell padding. */}
+      <div className={`flex-1 overflow-y-auto ${selfLaidOut ? '' : 'p-4 md:p-6 pb-20'}`}>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/" element={
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
               <div className="text-center py-16">
@@ -5659,9 +5671,9 @@ export default function App() {
               </>
             )}
           </div>
-        )}
+            } />
 
-        {tab === 'bloodlines' && (
+            <Route path="/bloodlines" element={
           <BloodlinesRosterTab
             bloodlines={db.bloodlines || []}
             isAdmin={isAdmin}
@@ -5669,9 +5681,9 @@ export default function App() {
             bF={bF}
             setBF={setBF}
           />
-        )}
+            } />
 
-        {tab === 'inbox' && profile && (
+            <Route path="/inbox" element={profile ? (
           <Suspense fallback={null}>
           <InboxPage
             inboxItems={inboxItems}
@@ -5702,9 +5714,9 @@ export default function App() {
             pendingLoaded={pendingLoaded}
           />
           </Suspense>
-        )}
+            ) : <SignedOutNotice what="your inbox" />} />
 
-        {tab === 'members' && isAdmin && (
+            <Route path="/members" element={isAdmin ? (
           <div className="max-w-6xl mx-auto">
             <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
@@ -5823,25 +5835,17 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+            ) : <NoAccess what="The member board is admin-only." />} />
 
-        {tab === 'rp' && (
-          <Suspense fallback={null}>
-            <RpHubPage profile={profile} role={role} jutsus={db.jutsus || []} />
-          </Suspense>
-        )}
+            <Route path="/grading" element={<GradingPage profile={profile} role={role} jutsus={db.jutsus || []} />} />
+            <Route path="/roster"  element={<RosterPage userRole={role} userId={profile?.id} />} />
 
-        {tab === 'roster' && (
-          <Suspense fallback={null}>
-            <RosterPage userRole={role} userId={profile?.id} />
-          </Suspense>
-        )}
+            <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
+            <Route path="/history/:view" element={<HistoryRoute profile={profile} role={role} />} />
 
-        {tab === 'worklog' && (
-          <Suspense fallback={null}>
-            <WorkStatsPage userId={profile?.id} userRole={role} />
-          </Suspense>
-        )}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
 
       {/* FOOTER */}
@@ -5909,16 +5913,12 @@ export default function App() {
               setWebhookConfig(prev => ({ ...prev, [key]: value }));
             }).catch(e => console.warn('[NARP] webhook config save failed:', e));
           }}
-          onOpenAuditLog={() => setModals(m => ({ ...m, audit: true }))}
           onManageBL={() => setModals(m => ({ ...m, manageBL: true }))}
           submissionControls={submissionControls}
           onToggleSubmission={(key, value) => setSubmissionControls(prev => ({ ...prev, [key]: value }))}
           currentUserId={profile?.id}
           profile={profile}
           onProfileUpdate={setProfile} />
-      )}
-      {modals.audit && isAdmin && (
-        <AuditLogModal onClose={() => setModals(m => ({ ...m, audit: false }))} />
       )}
       {modals.manageBL && isAdmin && (
         <CatalogManagementModal

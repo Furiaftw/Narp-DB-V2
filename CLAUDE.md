@@ -26,14 +26,15 @@ There is no test suite and no linter configured. Verification is manual: run the
 
 ### The App.jsx monolith — and the trap next to it
 
-`src/App.jsx` (~5,500 lines) contains most of the UI and business logic: the root `App` component, tab routing, data loading, dev-mode fallback, and many components defined inline (JutsuCard, FilterBar, SessionListCart, PendingJutsuCard, AdminFormModal, SystemToolsModal, UserMenu, AuditLogModal, and more).
+`src/App.jsx` (~5,900 lines) is the layout shell plus most of the UI and business logic: the root `App` component, the route table, data loading, dev-mode fallback, and many components defined inline (JutsuCard, FilterBar, SessionListCart, PendingJutsuCard, AdminFormModal, SystemToolsModal, UserMenu, and more). The jutsu catalog, bloodlines view and member board are still inline here — they are the routes that stayed put; everything else lives in `src/pages/`.
 
 **Important:** `src/components/` contains extracted copies of several of those same components (`features/JutsuCard.jsx`, `features/FilterBar.jsx`, `modals/AdminForm.jsx`, `modals/SystemTools.jsx`, `layout/UserMenu.jsx`) that are **not imported by anything** — App.jsx uses its own inline versions. Editing those files has no effect on the running app. Before touching a component, check what actually imports it. (The equivalent dead copies of SessionCart, PendingCard, and NotificationBell, plus the dead `modals/StatelessForm.jsx`, have been deleted outright rather than left to bit-rot.)
 
 What App.jsx *does* import from elsewhere:
-- `src/pages/RosterPage.jsx` — bloodline roster tab
-- `src/pages/InboxPage.jsx` — messages inbox tab
-- `src/pages/RpHubPage.jsx` — RP grading & upgrade credits tab (see "RP grading & upgrade credits" below)
+- `src/pages/RosterPage.jsx` — roster page
+- `src/pages/InboxPage.jsx` — messages inbox page
+- `src/pages/GradingPage.jsx` — Grading/Upgrade Requests page (see "RP grading & upgrade credits" below)
+- `src/pages/HistoryPage.jsx` — History page: Work Log + Audit Log panels
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
 - `src/components/ErrorBoundary.jsx` (via `main.jsx`)
 - `src/hooks/useIsDesktop.js`, `src/utils/helpers.jsx`
@@ -41,7 +42,40 @@ What App.jsx *does* import from elsewhere:
 
 Catalog constants (natures, ranks, specializations, etc.) are duplicated between App.jsx and `src/constants/catalog.js`; the inline copies in App.jsx are what the main app uses.
 
-Main tabs (state variable `tab` in App): `jutsus`, `pending`, `roster`, `messages`, plus `bloodlines`/`members` views reachable through admin surfaces.
+### Routing and the navigation shell
+
+Navigation is the URL — there is no `tab` state any more. `main.jsx` wraps the app in
+`<BrowserRouter>`; `App.jsx` is the layout shell (banner, header, section switcher, catalog
+tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` already rewrites
+`/*` → `/index.html`, so deep links resolve on the deployed site.
+
+| Path | Renders | Gate |
+| :--- | :--- | :--- |
+| `/` | jutsu catalog (inline in App.jsx) | public |
+| `/bloodlines` | bloodlines view (inline) | public |
+| `/roster` | `RosterPage` | public |
+| `/grading` | `GradingPage` | signed in |
+| `/history` | → redirects to `/history/work-log` | — |
+| `/history/work-log` | `WorkStatsPage`, via `HistoryPage` | reviewer+ |
+| `/history/audit-log` | `AuditLogPanel`, via `HistoryPage` | admin+ |
+| `/inbox` | `InboxPage` | signed in |
+| `/members` | member board (inline) | admin+ |
+| anything else | → redirects to `/` | — |
+
+Two navs, deliberately: the **section switcher** (dark strip in the header) spans every page,
+while the **catalog tab bar** (Jutsus / Bloodlines) and the jutsu `FilterBar`/`FilterBarPanel`
+render only on the catalog routes — that scoping is what keeps the satellite pages from
+inheriting the database's chrome. `tab` still exists as a *derived* value (`pathname` →
+`'jutsus'`/`'bloodlines'`/…) because the catalog's filter and row-expand logic reads it in
+many places.
+
+Gated routes render a `NoAccess` / `SignedOutNotice` panel rather than redirecting, so a link
+shared between staff explains itself instead of silently bouncing.
+
+**Gotcha:** every hook must stay above App's `if (loading) return …` early return. The
+route-change effect (filter reset, scroll-to-top) sits with the other effects near the top;
+putting it down beside the nav model crashes React with "rendered more hooks than during the
+previous render".
 
 ### Character sheets (the in-database OC sheet)
 
@@ -77,7 +111,7 @@ The two Discord-manual workflows — RP grading (`#rp-grading-submission`) and c
 - `supabase/add-rp-grading-upgrades.sql` — tables (`rp_submissions`, `rp_participants`, `rp_credits`, `upgrade_requests`, plus `character_sheets.credit_multiplier` for the v2 Elite Jōnin passive), RLS, and the atomic SECURITY DEFINER functions: `grade_rp_submission()` (blocks self-grading by site account or Discord ID), `approve_upgrade_request()` (blocks self-OC approval and malformed targets; requires a logged `override_reason` for insufficient credits / weekly cap), `reject_upgrade_request()`, `revert_upgrade()` (restores `before_value`, refunds credits), and `current_upgrade_cycle_key()` / `approved_upgrades_this_cycle()`.
 - **Weekly cap:** 2 approved upgrades per character per cycle, counted at approval time, keyed by ISO week evaluated in `America/New_York` (`'2026-W34'`). `currentCycleKey()` in `src/constants/upgradeRules.js` must produce the same string as the SQL function — both are tested against each other; change them together.
 - `src/constants/upgradeRules.js` — cost tables (jutsu by rank 1/2/3; stat by level reached 1/1/2/3/4; skill by band 1/2/3/4; dojutsu on its own band table), machine-readable `RANK_CAPS` (the prose `RANK_LIMITS` in characterSheet.js, structured), the target builders (`{ label, tag, path, new_value }` — `path` is the jsonb path `approve_upgrade_request()` writes), and `computeUpgradeWarnings()`. **Warnings never block** — the reviewer approves past them with a logged override reason; only self-grading/self-approval/spent-credit/malformed-target checks are hard server-side blocks.
-- `src/pages/RpHubPage.jsx` — the "RP Hub" tab (lazy-loaded): wallet (per-OC ledger + cycle usage), submit-RP form, grading queue (grader+), upgrade queue (reviewer+, with the warning panel and revert). Discord pings reuse `reviewer-ping.mjs` (trigger types `rp_submission` / `upgrade_request`) and verdict DMs reuse `discord-dm.mjs`.
+- `src/pages/GradingPage.jsx` — the "Grading/Upgrade Requests" page at `/grading` (lazy-loaded): wallet (per-OC ledger + cycle usage), submit-RP form, grading queue (grader+), upgrade queue (reviewer+, with the warning panel and revert). Discord pings reuse `reviewer-ping.mjs` (trigger types `rp_submission` / `upgrade_request`) and verdict DMs reuse `discord-dm.mjs`.
 - Upgrade targets write into the sheet's existing structured fields (`stats.*` ranks, `skills.*` percentages, `limited.dojutsu_skill`, the whole `techniques.jutsu` array for learning/dropping a jutsu) — no new sheet schema was needed.
 - **Explicitly deferred to v2:** OOC promotions, stat-ceiling increases, character-slot expansion, private multi-specialty jutsu, and the Elite Jōnin path that grants `credit_multiplier = 2`.
 

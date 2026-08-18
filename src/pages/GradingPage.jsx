@@ -1,7 +1,7 @@
 /*
- * RP Hub — the Phase-1 grading & upgrade pipeline, on-site.
+ * Grading & Upgrade Requests — the Phase-1 grading & upgrade pipeline, on-site.
  *
- * Four views behind one tab:
+ * Four views behind one page:
  *   Wallet   (everyone)   — per-OC credit ledger, cycle usage, upgrade requests
  *   Submit   (everyone)   — the RP grading submission form (replaces
  *                           #rp-grading-submission)
@@ -164,7 +164,7 @@ function CreditPill({ credit }) {
 
 /* ── The page ────────────────────────────────────────────────────────────── */
 
-export default function RpHubPage({ profile, role, jutsus = [] }) {
+export default function GradingPage({ profile, role, jutsus = [] }) {
   const supabaseReady = isSupabaseConfigured();
   const isGrader = ['grader', 'reviewer', 'admin', 'owner'].includes(role);
   const isReviewer = ['reviewer', 'admin', 'owner'].includes(role);
@@ -217,7 +217,7 @@ export default function RpHubPage({ profile, role, jutsus = [] }) {
       await Promise.all([...cycleIds].map(async id => { usage[id] = await fetchApprovedThisCycle(id); }));
       setCycleUsed(usage);
     } catch (err) {
-      console.warn('[NARP] RP hub load failed:', err);
+      console.warn('[NARP] Grading page load failed:', err);
       setError(err.message || 'Failed to load');
     } finally {
       setLoading(false);
