@@ -239,7 +239,6 @@ Every section has its own address, so you can link someone straight to it:
 | `/bloodlines` | Bloodline list | anyone |
 | `/roster` | Village roster | anyone |
 | `/grading` | Grading & Upgrade Requests — submit RPs, spend credits, review the queues | signed in |
-| `/combat` | Combat Tracker — create/join a turn-by-turn battle, declare techniques, watch the turn log | signed in |
 | `/history/work-log` | Review throughput per person | reviewers+ |
 | `/history/audit-log` | Role-change history | admins+ |
 | `/submissions` | Your submissions and review chats — and the green **Submit** button for filing a new entry | signed in |

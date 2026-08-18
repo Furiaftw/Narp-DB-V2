@@ -34,7 +34,6 @@ What App.jsx *does* import from elsewhere:
 - `src/pages/RosterPage.jsx` — roster page
 - `src/pages/InboxPage.jsx` — Submissions page (file name kept; `inbox*` identifiers throughout are historical)
 - `src/pages/GradingPage.jsx` — Grading/Upgrade Requests page (see "RP grading & upgrade credits" below)
-- `src/pages/CombatPage.jsx` — Combat Tracker page (see "Combat tracker" below)
 - `src/pages/HistoryPage.jsx` — History page: Work Log + Audit Log panels
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
 - `src/components/ErrorBoundary.jsx` (via `main.jsx`)
@@ -56,7 +55,6 @@ tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` al
 | `/bloodlines` | bloodlines view (inline) | public |
 | `/roster` | `RosterPage` | public |
 | `/grading` | `GradingPage` | signed in |
-| `/combat` | `CombatPage` | signed in |
 | `/history` | → redirects to `/history/work-log` | — |
 | `/history/work-log` | `WorkStatsPage`, via `HistoryPage` | reviewer+ |
 | `/history/audit-log` | `AuditLogPanel`, via `HistoryPage` | admin+ |
@@ -116,13 +114,6 @@ The two Discord-manual workflows — RP grading (`#rp-grading-submission`) and c
 - `src/constants/upgradeRules.js` — cost tables (jutsu by rank 1/2/3; stat by level reached 1/1/2/3/4; skill by band 1/2/3/4; dojutsu on its own band table), machine-readable `RANK_CAPS` (the prose `RANK_LIMITS` in characterSheet.js, structured), the target builders (`{ label, tag, path, new_value }` — `path` is the jsonb path `approve_upgrade_request()` writes), and `computeUpgradeWarnings()`. **Warnings never block** — the reviewer approves past them with a logged override reason; only self-grading/self-approval/spent-credit/malformed-target checks are hard server-side blocks.
 - `src/pages/GradingPage.jsx` — the "Grading/Upgrade Requests" page at `/grading` (lazy-loaded): wallet (per-OC ledger + cycle usage), submit-RP form, grading queue (grader+), upgrade queue (reviewer+, with the warning panel and revert). Discord pings reuse `reviewer-ping.mjs` (trigger types `rp_submission` / `upgrade_request`) and verdict DMs reuse `discord-dm.mjs`.
 
-### Combat tracker (Phase 1: lifecycle + basic 1-post turns)
-
-Manual, turn-by-turn combat for text RP — players declare each action explicitly, nothing parses RP text. A "battle" (`battles` table) is bound to one Discord thread; CU pool and jutsu list are read live from `character_sheets`, never re-entered. Phase 1 only: create/join/lock a fixed turn order, strict "only the character up may act" enforcement, and 1-post technique turns (base rank cost E1/D2/C4/B6/A8/S10, straight CU deduction). **Explicitly deferred**, in this order: multi-post Battery techniques, continuous per-turn cost, the defensive resolution engine (hit-thresholds/piercing/elemental advantage — so Defend/Assault aren't declarable actions yet, since shipping the buttons without the engine behind them would be a stub), genjutsu's cost-flip-to-target rule, zero/negative-CU unconsciousness, and the Discord slash-command shortcut layer.
-
-- `supabase/add-combat-tracker.sql` — `battles`, `battle_participants` (`invite_status`: `invited` awaiting accept vs `joined`; `max_cu`/`current_cu` snapshotted from the sheet at lock time, never written back), `battle_turn_log` (a snapshot per turn, since a jutsu's rank/name can change after the fact), RLS, and the atomic SECURITY DEFINER functions: `create_battle()`, `join_battle()` / `invite_to_battle()` / `accept_battle_invite()` / `remove_participant()`, `lock_battle()` (validates the turn order is exactly the joined roster, snapshots CU), `declare_turn()` (only the currently-up character's player may call it; looks up the jutsu on the *actor's own sheet*, not the global catalog, and requires `approved: 'Yes'`), `end_battle()`, and `force_advance_turn()` (reviewer+ only — the stall-rule staff intervention, mirrors the existing 72-hour rule).
-- `src/constants/combatRules.js` — `TECHNIQUE_BASE_COST`; keep in sync with `technique_base_cost()` in the SQL file if the chakra rules change.
-- `src/pages/CombatPage.jsx` — the "Combat Tracker" page at `/combat` (lazy-loaded): Battles (open lobbies + your own), Create Battle, and the active-battle view (turn-order strip with live CU, the action form that only appears when it's your turn, and the turn log).
 - Upgrade targets write into the sheet's existing structured fields (`stats.*` ranks, `skills.*` percentages, `limited.dojutsu_skill`, the whole `techniques.jutsu` array for learning/dropping a jutsu) — no new sheet schema was needed.
 - **Explicitly deferred to v2:** OOC promotions, stat-ceiling increases, character-slot expansion, private multi-specialty jutsu, and the Elite Jōnin path that grants `credit_multiplier = 2`.
 

@@ -68,7 +68,6 @@ const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal')
 const InboxPage = lazy(() => import('./pages/InboxPage'));
 const GradingPage = lazy(() => import('./pages/GradingPage'));
 const HistoryPage = lazy(() => import('./pages/HistoryPage'));
-const CombatPage = lazy(() => import('./pages/CombatPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
@@ -5478,7 +5477,6 @@ export default function App() {
     { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' },
     { to: '/roster', label: 'Roster' },
     ...(profile || !supabaseReady ? [{ to: '/grading', label: 'Grading/Upgrade Requests' }] : []),
-    ...(profile || !supabaseReady ? [{ to: '/combat', label: 'Combat Tracker' }] : []),
     ...(profile ? [{ to: '/submissions', label: 'Submissions', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isReviewer ? [{ to: '/history/work-log', label: 'History', match: (p) => p.startsWith('/history') }] : []),
     ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
@@ -5996,7 +5994,6 @@ export default function App() {
             ) : <NoAccess what="The member board is admin-only." />} />
 
             <Route path="/grading" element={<GradingPage profile={profile} role={role} jutsus={db.jutsus || []} />} />
-            <Route path="/combat" element={<CombatPage profile={profile} role={role} />} />
             <Route path="/roster"  element={<RosterPage userRole={role} userId={profile?.id} />} />
 
             <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
