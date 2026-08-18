@@ -84,6 +84,29 @@ create index if not exists battle_participants_user_idx   on public.battle_parti
 create index if not exists battle_turn_log_battle_idx     on public.battle_turn_log(battle_id, created_at);
 create index if not exists battles_status_idx             on public.battles(status);
 
+-- ─── RLS HELPERS ─────────────────────────────────────────────────────────────
+-- battles_select and battle_participants_select each need to consult the
+-- other table (and battle_participants_select even needs to consult
+-- itself, for "am I in this battle"). Inlining those as subqueries makes
+-- the policies recursive ("infinite recursion detected in policy for
+-- relation battle_participants"), so both go through SECURITY DEFINER
+-- helpers, which read without re-invoking RLS.
+
+create or replace function public.my_battle_ids_as_participant()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$ select battle_id from battle_participants where user_id = auth.uid(); $$;
+
+create or replace function public.my_hosted_or_open_battle_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select id from battles
+   where host_id = auth.uid() or (status = 'draft' and visibility_mode = 'open');
+$$;
+
 -- ─── ROW-LEVEL SECURITY ──────────────────────────────────────────────────────
 -- Open-lobby drafts are visible to everyone (that's the point of a lobby);
 -- invite-only drafts, and any locked/active/completed/voided battle, are
@@ -102,7 +125,7 @@ create policy "battles_select"
     (status = 'draft' and visibility_mode = 'open')
     or host_id = auth.uid()
     or public.is_reviewer_or_above()
-    or id in (select battle_id from battle_participants where user_id = auth.uid())
+    or id in (select public.my_battle_ids_as_participant())
   );
 
 drop policy if exists "battle_participants_select" on public.battle_participants;
@@ -111,12 +134,8 @@ create policy "battle_participants_select"
   using (
     user_id = auth.uid()
     or public.is_reviewer_or_above()
-    or battle_id in (
-      select id from battles
-      where host_id = auth.uid()
-         or (status = 'draft' and visibility_mode = 'open')
-    )
-    or battle_id in (select battle_id from battle_participants bp2 where bp2.user_id = auth.uid())
+    or battle_id in (select public.my_hosted_or_open_battle_ids())
+    or battle_id in (select public.my_battle_ids_as_participant())
   );
 
 drop policy if exists "battle_turn_log_select" on public.battle_turn_log;
@@ -125,7 +144,7 @@ create policy "battle_turn_log_select"
   using (
     public.is_reviewer_or_above()
     or battle_id in (select id from battles where host_id = auth.uid())
-    or battle_id in (select battle_id from battle_participants where user_id = auth.uid())
+    or battle_id in (select public.my_battle_ids_as_participant())
   );
 
 -- ─── HELPERS ─────────────────────────────────────────────────────────────────
