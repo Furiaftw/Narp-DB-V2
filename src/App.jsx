@@ -2,6 +2,10 @@ import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } fro
 import { Routes, Route, Navigate, NavLink, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
 import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  PieChart, Pie, Legend,
+} from 'recharts';
+import {
   supabase,
   isSupabaseConfigured,
   fetchAllFromSupabase,
@@ -23,6 +27,9 @@ import {
   fetchAllProfiles,
   setUserRole,
   grantWandererTicket,
+  removeMember,
+  banMember,
+  unbanMember,
   consumeWandererTicket,
   fetchWhitelist,
   addToWhitelist,
@@ -2532,6 +2539,61 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
   );
 }
 
+/* ---- Bloodline stat charts (same visual language as JutsuStatsModal) ------ */
+const BL_ORIGIN_COLORS = { Canon: '#10b981', Custom: '#f59e0b' };
+const BL_SUBCAT_COLORS = { Dojutsu: '#a855f7', 'Kekkei Genkai': '#6366f1', Hiden: '#f43f5e', Specialization: '#06b6d4', Other: '#94a3b8' };
+const BL_GENERIC_PALETTE = ['#6366f1', '#06b6d4', '#8b5cf6', '#34d399', '#f59e0b', '#ec4899', '#38bdf8', '#a855f7', '#f87171', '#22c55e'];
+
+const BL_TT = {
+  contentStyle: { background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: '#334155', fontWeight: 700 },
+  itemStyle: { color: '#475569' },
+};
+
+function BLChartCard({ title, subtitle, children }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">{title}</p>
+      {subtitle && <p className="text-[10px] text-slate-400 mb-3">{subtitle}</p>}
+      {!subtitle && <div className="mb-3" />}
+      {children}
+    </div>
+  );
+}
+
+function BLBarSection({ title, subtitle, data, colorFor }) {
+  return (
+    <BLChartCard title={title} subtitle={subtitle}>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} barCategoryGap="25%">
+          <XAxis dataKey="name" tick={{ fill: '#475569', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={50} />
+          <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+          <Tooltip {...BL_TT} />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+            {data.map((d, i) => <Cell key={i} fill={colorFor(d.name, i)} fillOpacity={0.85} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </BLChartCard>
+  );
+}
+
+function BLPieSection({ title, subtitle, data, colorFor }) {
+  return (
+    <BLChartCard title={title} subtitle={subtitle}>
+      <ResponsiveContainer width="100%" height={200}>
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={36} paddingAngle={3} strokeWidth={0}>
+            {data.map((d, i) => <Cell key={i} fill={colorFor(d.name, i)} fillOpacity={0.85} />)}
+          </Pie>
+          <Tooltip {...BL_TT} />
+          <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: '#475569', fontSize: 10, fontWeight: 700 }}>{v}</span>} />
+        </PieChart>
+      </ResponsiveContainer>
+    </BLChartCard>
+  );
+}
+
 /* ============================================================================
    COMPONENT: BloodlinesRosterTab
    ============================================================================ */
@@ -2551,11 +2613,15 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
     const all = bloodlines || [];
     const bySub = ORDER.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
     all.forEach(b => { bySub[ORDER.includes(b.subcategory) ? b.subcategory : 'Other'] += 1; });
+    const canon = all.filter(b => b.category === 'Canon').length;
+    const custom = all.filter(b => b.category === 'Custom').length;
     return {
       total:  all.length,
-      canon:  all.filter(b => b.category === 'Canon').length,
-      custom: all.filter(b => b.category === 'Custom').length,
+      canon,
+      custom,
       bySub,
+      originData: [{ name: 'Canon', value: canon }, { name: 'Custom', value: custom }],
+      subcatData: ORDER.map(s => ({ name: SUBCAT_LABELS[s], value: bySub[s] })),
     };
   }, [bloodlines]);
 
@@ -2608,13 +2674,29 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
           <Icon n={statsOpen ? 'Up' : 'Down'} size={16} className="text-slate-400" />
         </button>
         {statsOpen && (
-          <div className="px-4 pb-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            {STAT_TILES.map(tile => (
-              <div key={tile.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
-                <p className={`text-xl font-black leading-tight ${tile.accent}`}>{tile.value}</p>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{tile.label}</p>
-              </div>
-            ))}
+          <div className="px-4 pb-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              {STAT_TILES.map(tile => (
+                <div key={tile.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
+                  <p className={`text-xl font-black leading-tight ${tile.accent}`}>{tile.value}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{tile.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <BLPieSection
+                title="Canon vs. Custom"
+                subtitle="Share of the bloodline database"
+                data={blStats.originData}
+                colorFor={(name) => BL_ORIGIN_COLORS[name] || BL_GENERIC_PALETTE[0]}
+              />
+              <BLBarSection
+                title="By Subcategory"
+                subtitle="Bloodlines per classification"
+                data={blStats.subcatData}
+                colorFor={(name, i) => BL_SUBCAT_COLORS[name] || BL_GENERIC_PALETTE[i % BL_GENERIC_PALETTE.length]}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -4180,6 +4262,38 @@ export default function App() {
     }
   };
 
+  const handleRemoveMember = async (userId, username) => {
+    if (!window.confirm(`Permanently remove ${username || 'this member'}? This deletes their login account and profile. This cannot be undone.`)) return;
+    try {
+      await removeMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to remove member:', err);
+      alert('Failed to remove member: ' + (err.message || err));
+    }
+  };
+
+  const handleBanMember = async (userId, username) => {
+    if (!window.confirm(`Ban ${username || 'this member'}? They will be unable to sign in until unbanned.`)) return;
+    try {
+      await banMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to ban member:', err);
+      alert('Failed to ban member: ' + (err.message || err));
+    }
+  };
+
+  const handleUnbanMember = async (userId, username) => {
+    try {
+      await unbanMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to unban member:', err);
+      alert('Failed to unban member: ' + (err.message || err));
+    }
+  };
+
   const handleWorkThreadChange = async (userId, threadId) => {
     try {
       await setUserWorkThreadId(userId, threadId);
@@ -5370,6 +5484,9 @@ export default function App() {
     ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
   ];
 
+  const activeSection = SECTIONS.find(sec => sec.match ? sec.match(pathname) : pathname.startsWith(sec.to));
+  const headerTitle = `SARP ${activeSection ? activeSection.label : 'Database'}`;
+
   // Pending's four review-queue groups (drawn only from OTHER people's
   // submissions), plus a fifth bucket for the viewer's own — folding My
   // Submissions in. For non-staff players, pendingJutsus is always empty
@@ -5431,7 +5548,7 @@ export default function App() {
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
             <Icon n="Book" size={18} className="text-blue-600" />
-            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">SARP Database</button>
+            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">{headerTitle}</button>
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
@@ -5757,11 +5874,13 @@ export default function App() {
                           <th className="py-3 px-4">Work Thread ID</th>
                           <th className="py-3 px-4">Wanderer Ticket</th>
                           <th className="py-3 px-4 text-right">Role</th>
+                          <th className="py-3 px-4 text-right">Moderation</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {profilesList.map((m) => {
                           const isCurrentUser = m.id === profile?.id;
+                          const canModerate = isAdmin && !isCurrentUser && m.role !== 'owner' && (isOwner || m.role !== 'admin');
                           return (
                             <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="py-3 px-4 flex items-center gap-3">
@@ -5828,6 +5947,41 @@ export default function App() {
                                   <option value="reviewer">Reviewer</option>
                                   <option value="admin">Admin</option>
                                 </select>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                {m.banned_at && (
+                                  <span className="inline-block mb-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded border bg-red-100 text-red-700 border-red-200">
+                                    Banned
+                                  </span>
+                                )}
+                                {canModerate ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {m.banned_at ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUnbanMember(m.id, m.username)}
+                                        className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs transition-all"
+                                      >
+                                        Unban
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBanMember(m.id, m.username)}
+                                        className="border border-amber-200 hover:border-amber-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 shadow-xs transition-all"
+                                      >
+                                        Ban
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveMember(m.id, m.username)}
+                                      className="border border-red-200 hover:border-red-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 shadow-xs transition-all"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (!m.banned_at && <span className="text-slate-300 text-xs">—</span>)}
                               </td>
                             </tr>
                           );

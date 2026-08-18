@@ -220,11 +220,11 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket, banned_at')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
-    // Fallback: work_thread_id column does not exist in profiles table
+    // Fallback: work_thread_id / banned_at column does not exist in profiles table
     const fallback = await supabase
       .from('profiles')
       .select('id, email, username, avatar_url, role, discord_id, created_at')
@@ -243,6 +243,34 @@ export const setUserRole = async (userId, role) => {
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
   if (error) throw error;
 };
+
+/* --- Member moderation (Member Board: remove / ban / unban) ---------------
+   Both actions touch auth.users via the Supabase Admin API, which client-side
+   RLS cannot reach, so they run through the moderate-member Netlify function
+   using the service role key. That function re-derives and re-checks the
+   caller's role server-side -- it does not trust anything from the client
+   beyond the bearer token. */
+
+const callModerateMember = async (action, targetUserId) => {
+  if (!supabase) return;
+  const session = await getCurrentSession();
+  if (!session?.access_token) throw new Error('Must be signed in');
+  const res = await fetch('/.netlify/functions/moderate-member', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ action, targetUserId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+};
+
+export const removeMember = (targetUserId) => callModerateMember('remove', targetUserId);
+export const banMember = (targetUserId) => callModerateMember('ban', targetUserId);
+export const unbanMember = (targetUserId) => callModerateMember('unban', targetUserId);
 
 /* --- Wanderer tickets -------------------------------------------------------
    One-time, admin-granted permission to submit a Wanderer-faction OC. Both

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NATURES } from '../constants/catalog';
 
 /* ---------------------------------------------------------------------------
@@ -86,6 +87,131 @@ export function renderMessageWithLinks(text) {
       );
     }
     return part;
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   DISCORD-FLAVORED CHAT MARKDOWN
+   --------------------------------------------------------------------------- */
+// Click-to-reveal spoiler, matching Discord's ||text|| behavior.
+function Spoiler({ children }) {
+  const [revealed, setRevealed] = useState(false);
+  if (revealed) {
+    return <span className="bg-slate-500/10 rounded px-0.5">{children}</span>;
+  }
+  return (
+    <span
+      onClick={(e) => { e.stopPropagation(); setRevealed(true); }}
+      title="Click to reveal"
+      className="bg-slate-600 text-transparent rounded px-0.5 cursor-pointer select-none hover:bg-slate-500"
+    >
+      {children}
+    </span>
+  );
+}
+
+const MARKDOWN_TOKEN_SOURCE =
+  '```([\\s\\S]+?)```' +               // 1: code block
+  '|`([^`\\n]+)`' +                    // 2: inline code
+  '|\\|\\|([\\s\\S]+?)\\|\\|' +        // 3: spoiler
+  '|\\*\\*([\\s\\S]+?)\\*\\*' +        // 4: bold
+  '|__([\\s\\S]+?)__' +                // 5: underline
+  '|~~([\\s\\S]+?)~~' +                // 6: strikethrough
+  '|\\*([^*\\n]+?)\\*' +               // 7: italic (*)
+  '|(?<!\\w)_([^_\\n]+?)_(?!\\w)' +    // 8: italic (_)
+  '|(https?:\\/\\/[^\\s]+)';           // 9: bare URL
+
+// Splits plain (non-token) text on @mentions of chat participants, if a mentionRegex is given.
+function applyMentions(str, mentionRegex, isMe, keyBase) {
+  if (!mentionRegex || !str) return str;
+  const segs = str.split(mentionRegex);
+  if (segs.length === 1) return str;
+  return segs.map((seg, j) => j % 2 === 1
+    ? (
+      <span key={`${keyBase}-m${j}`} className={`font-bold rounded px-1 ${isMe ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+        @{seg}
+      </span>
+    )
+    : seg
+  );
+}
+
+function renderInlineMarkdown(str, opts, keyBase, depth) {
+  if (!str) return str;
+  if (depth > 6) return applyMentions(str, opts.mentionRegex, opts.isMe, keyBase);
+  const re = new RegExp(MARKDOWN_TOKEN_SOURCE, 'g');
+  const out = [];
+  let lastIndex = 0;
+  let m;
+  let i = 0;
+  while ((m = re.exec(str))) {
+    if (m.index > lastIndex) {
+      out.push(applyMentions(str.slice(lastIndex, m.index), opts.mentionRegex, opts.isMe, `${keyBase}-t${i}`));
+    }
+    const key = `${keyBase}-k${i}`;
+    if (m[1] !== undefined) {
+      out.push(
+        <pre key={key} className={`my-1 rounded-md px-2 py-1.5 text-xs font-mono whitespace-pre-wrap break-words ${opts.isMe ? 'bg-black/20' : 'bg-slate-800 text-slate-100'}`}>
+          {m[1]}
+        </pre>
+      );
+    } else if (m[2] !== undefined) {
+      out.push(
+        <code key={key} className={`rounded px-1 py-0.5 text-[0.85em] font-mono ${opts.isMe ? 'bg-black/20' : 'bg-slate-200 text-slate-800'}`}>
+          {m[2]}
+        </code>
+      );
+    } else if (m[3] !== undefined) {
+      out.push(<Spoiler key={key}>{renderInlineMarkdown(m[3], opts, key, depth + 1)}</Spoiler>);
+    } else if (m[4] !== undefined) {
+      out.push(<strong key={key}>{renderInlineMarkdown(m[4], opts, key, depth + 1)}</strong>);
+    } else if (m[5] !== undefined) {
+      out.push(<span key={key} className="underline">{renderInlineMarkdown(m[5], opts, key, depth + 1)}</span>);
+    } else if (m[6] !== undefined) {
+      out.push(<span key={key} className="line-through opacity-80">{renderInlineMarkdown(m[6], opts, key, depth + 1)}</span>);
+    } else if (m[7] !== undefined) {
+      out.push(<em key={key}>{renderInlineMarkdown(m[7], opts, key, depth + 1)}</em>);
+    } else if (m[8] !== undefined) {
+      out.push(<em key={key}>{renderInlineMarkdown(m[8], opts, key, depth + 1)}</em>);
+    } else if (m[9] !== undefined) {
+      out.push(
+        <a key={key} href={m[9]} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 hover:underline">
+          {m[9]}
+        </a>
+      );
+    }
+    lastIndex = re.lastIndex;
+    i++;
+  }
+  if (lastIndex < str.length) {
+    out.push(applyMentions(str.slice(lastIndex), opts.mentionRegex, opts.isMe, `${keyBase}-tail`));
+  }
+  return out;
+}
+
+// Renders chat text with Discord-flavored markdown (bold/italic/underline/
+// strikethrough/inline code/code block/spoiler/blockquote), bare URLs, and
+// @mentions of chat participants (mentionRegex is a `/@(name1|name2)/gi`
+// built by the caller from the participant list).
+export function renderDiscordMarkdown(text, { mentionRegex = null, isMe = false } = {}) {
+  if (!text) return '';
+  const lines = String(text).split('\n');
+  const opts = { mentionRegex, isMe };
+  return lines.map((line, li) => {
+    const quoteMatch = /^>\s?(.*)$/.exec(line);
+    const body = quoteMatch
+      ? (
+        <span className={`block border-l-4 pl-2 italic ${isMe ? 'border-white/40 text-white/80' : 'border-slate-300 text-slate-500'}`}>
+          {renderInlineMarkdown(quoteMatch[1], opts, `l${li}`, 0)}
+        </span>
+      )
+      : renderInlineMarkdown(line, opts, `l${li}`, 0);
+    return (
+      <span key={li}>
+        {body}
+        {li < lines.length - 1 ? '\n' : null}
+      </span>
+    );
   });
 }
 

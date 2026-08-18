@@ -378,7 +378,7 @@ export default function InboxPage({
       )}
 
       <div className="flex items-center justify-between gap-3 mb-3">
-        <h2 className="text-lg font-bold font-serif text-slate-800">Submissions</h2>
+        <h2 className="text-lg font-bold font-serif text-slate-800">Inbox</h2>
         {submitMenu}
       </div>
 

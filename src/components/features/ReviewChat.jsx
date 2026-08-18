@@ -8,7 +8,7 @@ import {
   updatePendingJutsuData,
   getCurrentSession,
 } from '../../lib/supabase';
-import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText, renderDiscordMarkdown } from '../../utils/helpers';
 import Icon from '../ui/Icon';
 import ConfirmButton from '../ui/ConfirmButton';
 import useIsDesktop from '../../hooks/useIsDesktop';
@@ -364,30 +364,7 @@ export default function ReviewChat({
     return names.length ? new RegExp(`@(${names.join('|')})`, 'gi') : null;
   }, [participants]);
 
-  const renderMessageBody = (text, isMe) => {
-    if (!text) return '';
-    const urlParts = String(text).split(/(https?:\/\/[^\s]+)/g);
-    return urlParts.map((part, i) => {
-      if (/^https?:\/\//.test(part)) {
-        return (
-          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 hover:underline">
-            {part}
-          </a>
-        );
-      }
-      if (!mentionRegex) return part;
-      const segs = part.split(mentionRegex);
-      if (segs.length === 1) return part;
-      return segs.map((seg, j) => j % 2 === 1
-        ? (
-          <span key={`${i}-${j}`} className={`font-bold rounded px-1 ${isMe ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
-            @{seg}
-          </span>
-        )
-        : seg
-      );
-    });
-  };
+  const renderMessageBody = (text, isMe) => renderDiscordMarkdown(text, { mentionRegex, isMe });
 
   // Load messages on open / parent refresh
   useEffect(() => {
