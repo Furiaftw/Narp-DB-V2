@@ -1416,10 +1416,10 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 }
 
 /* ============================================================================
-   COMPONENT: AddSubmissionMenu — lives in the persistent header (not the
-   Jutsus-tab-only FilterBar) so "Submit OC"/Jutsu/Summon/Custom Item is
-   reachable from every tab, not just discoverable if you happen to be
-   looking at the jutsu database.
+   COMPONENT: AddSubmissionMenu — the green Submit dropdown (Jutsu / OC /
+   Summon / Custom Item). It lives on the Submissions page, which is where
+   you both file entries and track them; App passes it down as an element so
+   the form state it drives stays here rather than in InboxPage.
    ============================================================================ */
 const ADD_MENU_WIDTH = 256;
 
@@ -4081,7 +4081,7 @@ export default function App() {
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [approvingIds, setApprovingIds] = useState(new Set());
-  // Inbox tab (merged Messages + Pending + My Submissions): one "new item"
+  // Submissions page (merged Messages + Pending + My Submissions): one "new item"
   // dot and one "selected item" state shared across every audience/view.
   const [inboxHasNew, setInboxHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
@@ -4482,7 +4482,7 @@ export default function App() {
       clearF();
       setF(p => ({ ...p, sort: 'az', showFilters: false }));
     }
-    if (pathname === '/inbox') setInboxHasNew(false);
+    if (pathname === '/submissions') setInboxHasNew(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
@@ -5271,7 +5271,7 @@ export default function App() {
   );
 
   /*
-   * Inbox tab data (merged Messages + Pending + My Submissions). Every
+   * Submissions page data (merged Messages + Pending + My Submissions). Every
    * pending item relevant to the viewer gets an entry here, including ones
    * with zero chat messages yet — a freshly-submitted, unclaimed item is
    * exactly what the old Pending tab existed to surface, so it must not
@@ -5283,7 +5283,7 @@ export default function App() {
    * Post-merge, staff see every pending item here — unclaimed and
    * claimed-by-others included — not just ones they've personally claimed
    * or messaged in. That's intentional: folding the old Pending tab's
-   * full-queue discovery function into Inbox requires the same visibility
+   * full-queue discovery function into Submissions requires the same visibility
    * here; restricting it back down would silently kill that function.
    */
   const inboxItems = useMemo(() => {
@@ -5363,7 +5363,7 @@ export default function App() {
     { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' },
     { to: '/roster', label: 'Roster' },
     ...(profile || !supabaseReady ? [{ to: '/grading', label: 'Grading/Upgrade Requests' }] : []),
-    ...(profile ? [{ to: '/inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
+    ...(profile ? [{ to: '/submissions', label: 'Submissions', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isReviewer ? [{ to: '/history/work-log', label: 'History', match: (p) => p.startsWith('/history') }] : []),
     ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
   ];
@@ -5534,12 +5534,6 @@ export default function App() {
                 Previewing as {viewAsRole === 'owner' ? 'Operator' : viewAsRole}
               </span>
             )}
-            <AddSubmissionMenu
-              canSubmit={role !== 'guest'}
-              onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-              onOpenStatelessSubmission={setStatelessType}
-              submissionControls={submissionControls}
-            />
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
@@ -5683,7 +5677,7 @@ export default function App() {
           />
             } />
 
-            <Route path="/inbox" element={profile ? (
+            <Route path="/submissions" element={profile ? (
           <Suspense fallback={null}>
           <InboxPage
             inboxItems={inboxItems}
@@ -5712,6 +5706,14 @@ export default function App() {
             setCollapsedGroups={setCollapsedGroups}
             visibleRecentChats={visibleRecentChats}
             pendingLoaded={pendingLoaded}
+            submitMenu={
+              <AddSubmissionMenu
+                canSubmit={role !== 'guest'}
+                onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+                onOpenStatelessSubmission={setStatelessType}
+                submissionControls={submissionControls}
+              />
+            }
           />
           </Suspense>
             ) : <SignedOutNotice what="your inbox" />} />
@@ -5843,6 +5845,7 @@ export default function App() {
             <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
             <Route path="/history/:view" element={<HistoryRoute profile={profile} role={role} />} />
 
+            <Route path="/inbox" element={<Navigate to="/submissions" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

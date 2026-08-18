@@ -32,7 +32,7 @@ There is no test suite and no linter configured. Verification is manual: run the
 
 What App.jsx *does* import from elsewhere:
 - `src/pages/RosterPage.jsx` — roster page
-- `src/pages/InboxPage.jsx` — messages inbox page
+- `src/pages/InboxPage.jsx` — Submissions page (file name kept; `inbox*` identifiers throughout are historical)
 - `src/pages/GradingPage.jsx` — Grading/Upgrade Requests page (see "RP grading & upgrade credits" below)
 - `src/pages/HistoryPage.jsx` — History page: Work Log + Audit Log panels
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
@@ -58,7 +58,8 @@ tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` al
 | `/history` | → redirects to `/history/work-log` | — |
 | `/history/work-log` | `WorkStatsPage`, via `HistoryPage` | reviewer+ |
 | `/history/audit-log` | `AuditLogPanel`, via `HistoryPage` | admin+ |
-| `/inbox` | `InboxPage` | signed in |
+| `/submissions` | `InboxPage` — queue + review chats + the green Submit menu | signed in |
+| `/inbox` | → redirects to `/submissions` | — |
 | `/members` | member board (inline) | admin+ |
 | anything else | → redirects to `/` | — |
 

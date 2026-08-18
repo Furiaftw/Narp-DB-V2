@@ -91,7 +91,8 @@ function noChatCopy({ isStaff, iAmSubmitter, claimed }) {
 }
 
 /* ============================================================================
-   PAGE: InboxPage — merged Messages + Pending + My Submissions.
+   PAGE: InboxPage — the Submissions page: merged Messages + Pending +
+   My Submissions, plus the Submit menu for filing a new entry.
    Staff: Pending's collapsible review-queue groups (Claimed by Me / Pending
    Approval / Needs Reviewer / Claimed by Others / My Submissions), narrowed
    by Messages' filter chips + sort. Players: same shell, but only their own
@@ -127,6 +128,7 @@ export default function InboxPage({
   setCollapsedGroups,
   visibleRecentChats = [],
   pendingLoaded = true,
+  submitMenu = null,
 }) {
   const [filter, setFilter] = useState(() => loadPrefs().filter || 'all');
   const [sort, setSort] = useState(() => loadPrefs().sort || 'newest');
@@ -375,11 +377,16 @@ export default function InboxPage({
         />
       )}
 
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h2 className="text-lg font-bold font-serif text-slate-800">Submissions</h2>
+        {submitMenu}
+      </div>
+
       {FilterSortBar}
 
       {!pendingLoaded ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm text-center py-14 px-6">
-          <p className="text-slate-500 font-semibold text-sm">Loading your inbox...</p>
+          <p className="text-slate-500 font-semibold text-sm">Loading your submissions...</p>
         </div>
       ) : visibleGroups.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm text-center py-14 px-6">
@@ -448,7 +455,7 @@ export default function InboxPage({
               type="button"
               onClick={() => onSelect(null)}
               className="p-1.5 -ml-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
-              aria-label="Back to Inbox"
+              aria-label="Back to Submissions"
             >
               <Icon n="X" size={18} />
             </button>

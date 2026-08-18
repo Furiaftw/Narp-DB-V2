@@ -241,7 +241,7 @@ Every section has its own address, so you can link someone straight to it:
 | `/grading` | Grading & Upgrade Requests — submit RPs, spend credits, review the queues | signed in |
 | `/history/work-log` | Review throughput per person | reviewers+ |
 | `/history/audit-log` | Role-change history | admins+ |
-| `/inbox` | Your submissions and review chats | signed in |
+| `/submissions` | Your submissions and review chats — and the green **Submit** button for filing a new entry | signed in |
 | `/members` | Member board | admins+ |
 
 The dark strip under the site title switches between these; the Jutsus/Bloodlines tabs and the
