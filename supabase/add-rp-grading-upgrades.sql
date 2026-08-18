@@ -220,6 +220,7 @@ create policy "upgrade_requests_delete"
 create or replace function public.current_upgrade_cycle_key()
 returns text
 language sql stable
+set search_path = public
 as $$ select to_char(now() at time zone 'America/New_York', 'IYYY-"W"IW'); $$;
 
 -- Approved (and not reverted) upgrades this cycle for one character —
@@ -545,3 +546,27 @@ begin
    where id = r.id;
 end;
 $$;
+
+-- ─── FUNCTION GRANTS ─────────────────────────────────────────────────────────
+-- The mutation RPCs are only ever called by signed-in users; drop the default
+-- PUBLIC/anon EXECUTE grant. The role-predicate helpers (is_grader_or_above
+-- etc.) keep their defaults — RLS policies evaluated for anonymous reads
+-- reference them, so revoking anon there would break public browsing.
+
+revoke execute on function public.grade_rp_submission(uuid, boolean, boolean, jsonb, text) from public, anon;
+grant  execute on function public.grade_rp_submission(uuid, boolean, boolean, jsonb, text) to authenticated, service_role;
+
+revoke execute on function public.approve_upgrade_request(uuid, text) from public, anon;
+grant  execute on function public.approve_upgrade_request(uuid, text) to authenticated, service_role;
+
+revoke execute on function public.reject_upgrade_request(uuid, text) from public, anon;
+grant  execute on function public.reject_upgrade_request(uuid, text) to authenticated, service_role;
+
+revoke execute on function public.revert_upgrade(uuid) from public, anon;
+grant  execute on function public.revert_upgrade(uuid) to authenticated, service_role;
+
+revoke execute on function public.approved_upgrades_this_cycle(uuid) from public, anon;
+grant  execute on function public.approved_upgrades_this_cycle(uuid) to authenticated, service_role;
+
+-- Trigger function — never invoked directly by API callers.
+revoke execute on function public.cleanup_pending_on_demotion() from public, anon, authenticated;
