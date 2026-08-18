@@ -95,6 +95,30 @@ create index if not exists rp_credits_character_idx       on public.rp_credits(c
 create index if not exists rp_submissions_status_idx      on public.rp_submissions(status);
 create index if not exists upgrade_requests_character_idx on public.upgrade_requests(character_id, status, cycle_key);
 
+-- ─── RLS HELPERS ─────────────────────────────────────────────────────────────
+-- rp_submissions and rp_participants policies each need to consult the other
+-- table. Inlining those as subqueries makes the two policies mutually
+-- recursive ("infinite recursion detected in policy for relation
+-- rp_participants"), so both go through SECURITY DEFINER helpers, which read
+-- without re-invoking RLS. Left with default EXECUTE grants, matching the
+-- is_*_or_above() predicates: they return an empty set when auth.uid() is null.
+
+create or replace function public.my_participating_rp_ids()
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$ select submission_id from rp_participants where user_id = auth.uid(); $$;
+
+create or replace function public.my_rp_submission_ids(p_only_pending boolean default false)
+returns setof uuid
+language sql stable security definer
+set search_path = public
+as $$
+  select id from rp_submissions
+   where submitter_id = auth.uid()
+     and (not p_only_pending or status = 'pending');
+$$;
+
 -- ─── ROW-LEVEL SECURITY ──────────────────────────────────────────────────────
 -- Submitters see their own submissions/credits/requests; graders see the
 -- grading queue; reviewers see the upgrade queue; admin/owner see all
@@ -114,7 +138,7 @@ create policy "rp_submissions_select"
   using (
     submitter_id = auth.uid()
     or public.is_grader_or_above()
-    or id in (select submission_id from rp_participants where user_id = auth.uid())
+    or id in (select public.my_participating_rp_ids())
   );
 
 drop policy if exists "rp_submissions_insert" on public.rp_submissions;
@@ -142,37 +166,24 @@ create policy "rp_participants_select"
   using (
     user_id = auth.uid()
     or public.is_grader_or_above()
-    or submission_id in (select id from rp_submissions where submitter_id = auth.uid())
+    or submission_id in (select public.my_rp_submission_ids())
   );
 
 drop policy if exists "rp_participants_insert" on public.rp_participants;
 create policy "rp_participants_insert"
   on public.rp_participants for insert
-  with check (
-    submission_id in (
-      select id from rp_submissions
-      where submitter_id = auth.uid() and status = 'pending'
-    )
-  );
+  with check (submission_id in (select public.my_rp_submission_ids(true)));
 
 drop policy if exists "rp_participants_update" on public.rp_participants;
 create policy "rp_participants_update"
   on public.rp_participants for update
-  using (
-    submission_id in (
-      select id from rp_submissions
-      where submitter_id = auth.uid() and status = 'pending'
-    )
-  );
+  using (submission_id in (select public.my_rp_submission_ids(true)));
 
 drop policy if exists "rp_participants_delete" on public.rp_participants;
 create policy "rp_participants_delete"
   on public.rp_participants for delete
   using (
-    submission_id in (
-      select id from rp_submissions
-      where submitter_id = auth.uid() and status = 'pending'
-    )
+    submission_id in (select public.my_rp_submission_ids(true))
     or public.is_admin_or_above()
   );
 
