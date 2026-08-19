@@ -193,26 +193,38 @@ export default function JutsuSheetModal({
 
   const filledSteps = ed ? sheet.mechanics_steps : sheet.mechanics_steps.filter(s => s.text);
 
-  return (
-    <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
-      <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1 min-w-0">
+  // Full-screen, so there's no backdrop left to click — Escape is the
+  // keyboard way back out. Only while read-only: this component is fully
+  // controlled, so in edit mode the caller owns the unsaved draft and
+  // deciding when it's safe to leave.
+  useEffect(() => {
+    if (ed) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [ed, onClose]);
 
-          {/* Header */}
-          <div className="flex justify-between items-center mb-8 border-b pb-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
-                <BookOpen size={18} className="text-indigo-600" />
-              </div>
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jutsu Documentation</p>
-                <h2 className="text-xl font-extrabold text-slate-900 truncate tracking-tight">{jutsuName || 'Unnamed technique'}</h2>
-              </div>
+  return (
+    <div className="fixed inset-0 z-[80] bg-white flex flex-col">
+      {/* Header — sticky across the full width, body scrolls under it */}
+      <div className="shrink-0 border-b border-slate-200 bg-white">
+        <div className="max-w-5xl mx-auto px-5 py-4 flex justify-between items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-indigo-50 border border-indigo-100 flex items-center justify-center shrink-0">
+              <BookOpen size={18} className="text-indigo-600" />
             </div>
-            <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full shrink-0 transition-colors">
-              <X size={18} />
-            </button>
+            <div className="min-w-0">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Jutsu Documentation</p>
+              <h2 className="text-xl font-extrabold text-slate-900 truncate tracking-tight">{jutsuName || 'Unnamed technique'}</h2>
+            </div>
           </div>
+          <button onClick={onClose} title="Close" className="text-slate-400 hover:bg-slate-100 p-2 rounded-full shrink-0 transition-colors">
+            <X size={18} />
+          </button>
+        </div>
+      </div>
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="max-w-5xl mx-auto px-5 py-6 pb-20 min-w-0">
 
           {/* Basics */}
           <Section icon={User} title="Basics">

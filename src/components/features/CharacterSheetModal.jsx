@@ -15,7 +15,7 @@ import {
 import {
   STAT_RANKS, SKILL_LEVELS, SHINOBI_RANKS, SHEET_VILLAGES,
   ECONOMIC_STATUS, GENDERS, BLOOD_TYPES, MONTHS,
-  FAMILY_STATUS, SHEET_NATURES, JUTSU_RANKS, APPROVED_STATES,
+  FAMILY_STATUS, SHEET_NATURES, JUTSU_RANKS,
   ACADEMY_JUTSUS, LIMITS, RANK_LIMITS,
   normalizeSheet, computeCU, sheetHasContent, computeThreatLevel, ocSlotLabel,
 } from '../../constants/characterSheet';
@@ -112,11 +112,13 @@ function JutsuRankChart({ data, accent }) {
   );
 }
 
-// Search-to-select jutsu picker, replacing free-text entry in the
-// Techniques/Battle mode tables. Once a jutsu is picked it renders as a
-// locked name + "change" button; `onSelect` gets the full jutsu row so the
-// caller can auto-fill rank/nature/bm_tier alongside the name.
-function JutsuPicker({ editing, name, onSelect, onClear, pool, placeholder = 'Search jutsu…' }) {
+/*
+ * Search-to-select box for an empty jutsu slot. Only ever renders the
+ * *unfilled* state — once a jutsu is picked the caller draws the filled row
+ * itself (name plus catalog-derived info), so this component's whole job is
+ * turning a search into an `onSelect(jutsuRow)`.
+ */
+function JutsuPicker({ editing, onSelect, pool, placeholder = 'Search the jutsu database…' }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
@@ -128,23 +130,10 @@ function JutsuPicker({ editing, name, onSelect, onClear, pool, placeholder = 'Se
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  if (!editing) {
-    return name ? <span className="break-words" style={{ color: INK }}>{name}</span> : <Dash />;
-  }
-
-  if (name) {
-    return (
-      <div className="flex items-center gap-1.5 min-w-0">
-        <span className="break-words truncate" style={{ color: INK }}>{name}</span>
-        <button type="button" onClick={onClear} title="Change jutsu" className="shrink-0 opacity-60 hover:opacity-100 transition-opacity">
-          <X size={12} style={{ color: INK_MUTED }} />
-        </button>
-      </div>
-    );
-  }
+  if (!editing) return <Dash />;
 
   const q = query.trim().toLowerCase();
-  const matches = (q ? pool.filter(j => j.name.toLowerCase().includes(q)) : pool).slice(0, 30);
+  const matches = (q ? pool.filter(j => j.name.toLowerCase().includes(q)) : pool).slice(0, 40);
 
   return (
     <div className="relative" ref={wrapRef}>
@@ -158,20 +147,26 @@ function JutsuPicker({ editing, name, onSelect, onClear, pool, placeholder = 'Se
         style={inputStyle}
       />
       {open && (
-        <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-sm shadow-lg" style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+        <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto rounded-sm shadow-xl"
+             style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
           {matches.length === 0 ? (
-            <p className="px-2.5 py-2 text-[12px] italic" style={{ color: INK_MUTED }}>No matching jutsu in the database</p>
-          ) : matches.map(j => (
-            <button
-              key={j._id}
-              type="button"
-              onClick={() => { onSelect(j); setQuery(''); setOpen(false); }}
-              className="w-full text-left px-2.5 py-1.5 text-[12px] hover:opacity-70 transition-opacity"
-              style={{ color: INK, borderBottom: `1px solid ${HAIRLINE}` }}
-            >
-              {j.name} <span style={{ color: INK_MUTED }}>· {toArray(j.rank).join('/') || j.bm_tier || '—'}</span>
-            </button>
-          ))}
+            <p className="px-3 py-2.5 text-[12px] italic" style={{ color: INK_MUTED }}>No matching jutsu in the database</p>
+          ) : matches.map(j => {
+            const meta = [toArray(j.rank).join(' / '), toArray(j.nature).join(' / '), toArray(j.spec).join(' / '), j.bloodline]
+              .filter(Boolean).join(' · ');
+            return (
+              <button
+                key={j._id}
+                type="button"
+                onClick={() => { onSelect(j); setQuery(''); setOpen(false); }}
+                className="w-full text-left px-3 py-2 hover:brightness-95 transition-all"
+                style={{ borderBottom: `1px solid ${HAIRLINE}` }}
+              >
+                <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: INK }}>{j.name}</span>
+                {meta && <span className="block text-[10.5px] mt-0.5" style={{ color: INK_MUTED }}>{meta}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
@@ -248,6 +243,12 @@ export default function CharacterSheetModal({
           };
         });
         setName(found?.character_name || characterName);
+        // Opened from a creation flow (OC submission / pending entry) with
+        // nothing saved yet: go straight into edit mode. Otherwise the
+        // prefilled values sit behind a "No character sheet yet / Create
+        // sheet" empty state that renders none of them, which reads as
+        // "the prefill didn't work" even though it did.
+        if (!found && prefill && currentUserId) setEditing(true);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || String(err));
       } finally {
@@ -467,57 +468,96 @@ export default function CharacterSheetModal({
 
   const ed = editing;
 
-  // Small labeled control used inside the slot cards below — a compact
-  // version of Field, since the row-of-columns table layout didn't leave
-  // the jutsu name (or its search box) enough room to actually be read.
-  const SlotField = ({ label, children }) => (
-    <div className="min-w-0">
-      <span className="text-[9px] font-bold uppercase tracking-wide block mb-1" style={{ color: INK_MUTED }}>{label}</span>
-      {children}
-    </div>
-  );
+  // The sheet is full-screen, so there's no backdrop left to click — Escape
+  // is the keyboard way back out. Ignored while editing, so a stray keypress
+  // can't discard a half-filled sheet; use Cancel or Save for that.
+  useEffect(() => {
+    if (editing) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editing, onClose]);
 
-  // One slot of the Techniques table, as a card instead of a table row —
-  // the jutsu name (and its search box, while picking) gets the full row
-  // width, with Rank/Nature/Approved/Doc link stacked in a grid underneath.
-  // Once linked to a catalog jutsu (jutsu_id set), Rank/Nature narrow to
-  // just that jutsu's own options instead of the full rank/nature lists.
+  /*
+   * One slot of the Techniques list. Picking the jutsu IS the whole
+   * interaction: everything shown next to the name (nature, specialization,
+   * origin) is read back from the catalog row rather than re-typed, so
+   * there's nothing to fill in and nothing to get out of sync.
+   *
+   * Rank is the one exception. It stays a control, but only for jutsus that
+   * actually exist at more than one rank — which rank the character learned
+   * is a real per-character fact the catalog can't answer, and the rank
+   * limits quoted at the top of this section ("1 B, 4 C or below") are
+   * counted against it. Single-rank jutsus just display their rank.
+   */
   const renderTechniqueRow = (path, j, i, labelNode) => {
     const linked = j.jutsu_id ? jutsuById[j.jutsu_id] : null;
-    const rankOptions = linked ? toArray(linked.rank) : JUTSU_RANKS;
-    const natureOptions = linked ? toArray(linked.nature) : SHEET_NATURES;
+    const ranks = linked ? toArray(linked.rank) : [];
+    const multiRank = ranks.length > 1;
+    // Legacy rows (saved as free text before the picker existed) have no
+    // jutsu_id, so fall back to whatever was stored on the row itself.
+    const meta = linked
+      ? [toArray(linked.nature).join(' / '), toArray(linked.spec).join(' / '), linked.bloodline, linked.origin]
+      : [j.nature, j.rank];
+
     return (
-      <div key={i} className="rounded-sm p-3" style={{ background: i % 2 === 0 ? '#f9f2e1' : '#efe1c3', border: `1px solid ${HAIRLINE}` }}>
-        <div className="flex items-center gap-2.5 mb-2.5">
-          {labelNode}
-          <div className="flex-1 min-w-0">
-            <JutsuPicker editing={ed} name={j.name} pool={techniquePool}
+      <div key={i} className="rounded-sm px-3.5 py-3 flex items-center gap-3"
+           style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+        {labelNode}
+        <div className="flex-1 min-w-0">
+          {j.name ? (
+            <>
+              <p className="font-semibold text-[13px] leading-tight break-words" style={{ color: INK }}>{j.name}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                {multiRank && ed ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: INK_MUTED }}>Rank</span>
+                    <select value={j.rank || ''} onChange={e => patchRow(path, i, 'rank', e.target.value)}
+                            className="rounded-sm px-1.5 py-0.5 text-[11px] font-bold outline-none cursor-pointer"
+                            style={{ background: PAPER, border: `1px solid ${HAIRLINE}`, color: INK }}>
+                      <option value="">—</option>
+                      {ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </span>
+                ) : (
+                  (j.rank || ranks[0]) && (
+                    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-sm"
+                          style={{ background: `${accent}1f`, color: accent }}>
+                      {j.rank || ranks[0]}-Rank
+                    </span>
+                  )
+                )}
+                {meta.filter(Boolean).map((m, k) => (
+                  <span key={k} className="text-[11px]" style={{ color: INK_MUTED }}>{m}</span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <JutsuPicker editing={ed} name="" pool={techniquePool}
                          onSelect={(jutsu) => pickTechniqueInto(path, i, jutsu)}
                          onClear={() => clearTechniqueAt(path, i)} />
-          </div>
+          )}
         </div>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-          <SlotField label="Rank"><Choice editing={ed} value={j.rank} onChange={v => patchRow(path, i, 'rank', v)} options={rankOptions} placeholder="—" /></SlotField>
-          <SlotField label="Nature"><Choice editing={ed} value={j.nature} onChange={v => patchRow(path, i, 'nature', v)} options={natureOptions} placeholder="—" /></SlotField>
-          <SlotField label="Approved?"><Choice editing={ed} value={j.approved} onChange={v => patchRow(path, i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></SlotField>
-          <SlotField label="Doc link"><Link editing={ed} value={j.link} onChange={v => patchRow(path, i, 'link', v)} /></SlotField>
-        </div>
+        {ed && j.name && (
+          <button type="button" onClick={() => clearTechniqueAt(path, i)} title="Remove this jutsu"
+                  className="shrink-0 p-1 rounded-sm opacity-50 hover:opacity-100 transition-opacity">
+            <X size={13} style={{ color: INK_MUTED }} />
+          </button>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto p-3 md:p-6"
-         style={{ background: 'rgba(10,8,5,0.82)', backdropFilter: 'blur(4px)' }}
-         onClick={onClose}>
-      <div className="w-full max-w-3xl mx-auto rounded-md shadow-2xl my-2"
-           style={{ background: PAPER_BG, border: '1px solid rgba(37,30,21,0.25)' }}
-           onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[90] overflow-y-auto"
+         style={{ background: PAPER_BG }}>
+      <div className="w-full min-h-full"
+           style={{ background: PAPER_BG }}>
 
         {/* Header */}
-        <div className="sticky top-0 z-10 px-5 py-4 rounded-t-md"
+        <div className="sticky top-0 z-10 px-5 py-4"
              style={{ background: PAPER_BG, borderBottom: `1px solid ${HAIRLINE}` }}>
-          <div className="flex items-start justify-between gap-3">
+          <div className="max-w-6xl mx-auto flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-1 font-serif" style={{ color: INK_MUTED }}>
                 籍 SARP Character Sheet
@@ -561,7 +601,14 @@ export default function CharacterSheetModal({
                           style={{ background: 'rgba(63,109,63,0.14)', color: '#3f6d3f', border: '1px solid rgba(63,109,63,0.35)' }}>
                     {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save
                   </button>
-                  <button onClick={() => { setEditing(false); setSheet(normalizeSheet(row?.data)); setName(row?.character_name || characterName); setSaveError(''); }}
+                  <button onClick={() => {
+                            // Nothing saved yet: there is no previous state to
+                            // revert to, so cancelling means leaving the sheet
+                            // (dropping to the empty state would just discard
+                            // the prefill and look broken).
+                            if (!row) { onClose(); return; }
+                            setEditing(false); setSheet(normalizeSheet(row.data)); setName(row.character_name || characterName); setSaveError('');
+                          }}
                           className="px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider transition-colors hover:opacity-70"
                           style={{ color: INK_MUTED, border: `1px solid ${HAIRLINE}` }}>
                     Cancel
@@ -574,12 +621,12 @@ export default function CharacterSheetModal({
             </div>
           </div>
           {saveError && (
-            <p className="mt-2 text-[11px] font-semibold" style={{ color: HANKO }}>{saveError}</p>
+            <p className="max-w-6xl mx-auto mt-2 text-[11px] font-semibold" style={{ color: HANKO }}>{saveError}</p>
           )}
         </div>
 
         {/* Body */}
-        <div className="px-5 py-5">
+        <div className="max-w-6xl mx-auto px-5 py-6 pb-20">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs" style={{ color: INK_MUTED }}>
               <Loader2 size={14} className="animate-spin" /> Loading sheet…
@@ -870,18 +917,36 @@ export default function CharacterSheetModal({
                 <div className="space-y-2">
                   {sheet.battle_modes.slots.map((b, i) => {
                     const tier = b.slot.replace(' Battle Mode', '');
+                    const linked = b.jutsu_id ? jutsuById[b.jutsu_id] : null;
                     return (
-                      <div key={i} className="rounded-sm p-3" style={{ background: i % 2 === 0 ? '#f9f2e1' : '#efe1c3', border: `1px solid ${HAIRLINE}` }}>
-                        <div className="flex items-center gap-2.5 mb-2.5">
-                          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span>
-                          <div className="flex-1 min-w-0">
-                            <JutsuPicker editing={ed} name={b.name} pool={battleModePoolByTier[tier] || []}
+                      <div key={i} className="rounded-sm px-3.5 py-3 flex items-center gap-3"
+                           style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+                        <span className="shrink-0 w-24 text-[10px] font-bold uppercase tracking-wide font-serif" style={{ color: INK_MUTED }}>{tier}</span>
+                        <div className="flex-1 min-w-0">
+                          {b.name ? (
+                            <>
+                              <p className="font-semibold text-[13px] leading-tight break-words" style={{ color: INK }}>{b.name}</p>
+                              {linked && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                                  {[toArray(linked.nature).join(' / '), toArray(linked.spec).join(' / '), linked.bloodline, linked.origin]
+                                    .filter(Boolean)
+                                    .map((m, k) => <span key={k} className="text-[11px]" style={{ color: INK_MUTED }}>{m}</span>)}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <JutsuPicker editing={ed} name="" pool={battleModePoolByTier[tier] || []}
                                          placeholder={`Search ${tier.toLowerCase()} battle modes…`}
                                          onSelect={(jutsu) => pickBattleModeInto(i, jutsu)}
                                          onClear={() => clearBattleModeAt(i)} />
-                          </div>
+                          )}
                         </div>
-                        <SlotField label="Doc link"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></SlotField>
+                        {ed && b.name && (
+                          <button type="button" onClick={() => clearBattleModeAt(i)} title="Remove this battle mode"
+                                  className="shrink-0 p-1 rounded-sm opacity-50 hover:opacity-100 transition-opacity">
+                            <X size={13} style={{ color: INK_MUTED }} />
+                          </button>
+                        )}
                       </div>
                     );
                   })}
