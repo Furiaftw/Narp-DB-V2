@@ -1872,10 +1872,11 @@ const ordinalLabel = (n) => {
 
 function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterSubmit, editPending = null, onSavedEdit = null, isAdmin = false, onSubmitAndApprove = null }) {
   const initial = editPending?.data || {};
-  // Set once the submission succeeds — swaps this whole modal over to the
-  // character sheet editor instead of just closing, since the sheet is now
-  // part of "creating" a character, not an optional follow-up step.
-  const [sheetPrompt, setSheetPrompt] = useState(null);
+  // Character Sheet button (mirrors the jutsu form's "Add Documentation"
+  // button): opens CharacterSheetModal as its own overlay so it can be
+  // filled in while still composing the submission, not just afterward.
+  const [sheetEditorOpen, setSheetEditorOpen] = useState(false);
+  const [sheetFilled, setSheetFilled] = useState(false);
   const [name, setName] = useState(initial.name || '');
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
   const [village, setVillage] = useState(initial.village || '');
@@ -1910,6 +1911,18 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
       .finally(() => { if (!cancelled) setOcCountLoading(false); });
     return () => { cancelled = true; };
   }, [isEdit, profile?.id, editPending?.id]);
+
+  // Tracks whether the character sheet (opened via the button below) has
+  // been filled in yet, so the button can say "Add" vs "Edit" like the
+  // jutsu form's documentation button does.
+  useEffect(() => {
+    if (isEdit || !name.trim()) { setSheetFilled(false); return; }
+    let cancelled = false;
+    fetchCharacterSheetByName(name.trim())
+      .then(row => { if (!cancelled) setSheetFilled(!!row && characterSheetHasContent(normalizeCharacterSheet(row.data))); })
+      .catch(() => { if (!cancelled) setSheetFilled(false); });
+    return () => { cancelled = true; };
+  }, [isEdit, name, sheetEditorOpen]);
 
   // Population per village per rank, straight from the public roster tables.
   useEffect(() => {
@@ -2091,8 +2104,9 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
       // this went into the reservation flow (that's inherently a waiting
       // period while the bloodline slot is held). If the approval-time sheet
       // check (see handleApprovePending) rejects it because the sheet isn't
-      // filled in yet, this falls through to the sheet-prompt step below same
-      // as everyone else, instead of silently leaving it stuck in the Inbox.
+      // filled in yet (the "Character Sheet" button above is optional, not
+      // required, before submitting), it just stays in the Inbox for a
+      // normal approval later once the sheet is done.
       if (isAdmin && !needsReservation && onSubmitAndApprove && inserted?.id) {
         try {
           await onSubmitAndApprove(inserted.id, {
@@ -2105,42 +2119,40 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
             submitter: profile,
             first_reviewer: profile,
           });
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
         } catch (approveErr) {
           console.warn('[NARP] Admin auto-approve failed, left in the review queue:', approveErr);
+          alert(
+            'Submitted, but could not auto-approve: ' + (approveErr.message || approveErr) +
+            '\n\nIt is waiting in the Inbox — approve it from there once ready.'
+          );
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
         }
-      } else {
-        const _pingSess = await getCurrentSession();
-        fetch('/.netlify/functions/reviewer-ping', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-          },
-          body: JSON.stringify({
-            triggerType: 'creation',
-            itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
-            itemType: 'Character',
-            submitterName: profile?.username || 'Unknown',
-          }),
-        }).catch((pingErr) => {
-          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-        });
       }
 
-      if (onAfterSubmit) onAfterSubmit();
-      // The sheet is required before approval, so the creation flow doesn't
-      // end at "submitted" — it hands straight off to filling in the sheet,
-      // prefilled from what was just entered here (see CharacterSheetModal's
-      // `prefill`/`ownerIdHint`).
-      setSheetPrompt({
-        characterName: data.name,
-        prefill: {
-          village: data.village,
-          shinobi_rank: data.ninja_rank,
-          clan_kkg: data.bloodline && data.bloodline !== CLANLESS ? data.bloodline : '',
-          oc_number: data.oc_number,
+      const _pingSess = await getCurrentSession();
+      fetch('/.netlify/functions/reviewer-ping', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
         },
+        body: JSON.stringify({
+          triggerType: 'creation',
+          itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
+          itemType: 'Character',
+          submitterName: profile?.username || 'Unknown',
+        }),
+      }).catch((pingErr) => {
+        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
       });
+
+      if (onAfterSubmit) onAfterSubmit();
+      onClose();
     } catch (err) {
       console.error('[NARP] Failed to submit OC:', err);
       alert('Submission failed: ' + (err.message || err));
@@ -2149,21 +2161,8 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
     }
   };
 
-  if (sheetPrompt) {
-    return (
-      <CharacterSheetModal
-        characterName={sheetPrompt.characterName}
-        currentUserId={profile?.id}
-        ownerIdHint={profile?.id}
-        jutsus={jutsus}
-        prefill={sheetPrompt.prefill}
-        onClose={onClose}
-        onSaved={() => {}}
-      />
-    );
-  }
-
   return (
+    <>
     <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
       <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
@@ -2180,7 +2179,7 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
           {!isEdit && (
             <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 text-xs text-emerald-800">
               <Icon n="Info" size={14} className="shrink-0 mt-0.5" />
-              <span>No Google Doc needed — right after you submit, you'll fill in their full character sheet here on the site. It has to be filled in before a reviewer can approve this character.</span>
+              <span>No Google Doc needed — use the Character Sheet button below to fill in their full sheet right here on the site. It has to be filled in before a reviewer can approve this character.</span>
             </div>
           )}
           <div>
@@ -2429,6 +2428,25 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
             )}
           </div>
 
+          {/* Character Sheet — mirrors the jutsu form's "Add Documentation" button */}
+          {!isEdit && (
+            <div className="p-4 bg-slate-50 border rounded-2xl">
+              <p className="text-sm font-bold text-slate-800">Character Sheet</p>
+              <p className="text-xs text-slate-500 mb-3">
+                Required before a reviewer can approve this character. Fill it in now, or later from the Inbox.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSheetEditorOpen(true)}
+                disabled={!name.trim()}
+                title={!name.trim() ? 'Enter a character name first' : undefined}
+                className="bg-white border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Icon n="Edit" size={14}/> {sheetFilled ? 'Edit Character Sheet' : 'Add Character Sheet'}
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
             <button
               type="button"
@@ -2452,6 +2470,23 @@ function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterS
         </form>
       </div>
     </div>
+    {sheetEditorOpen && (
+      <CharacterSheetModal
+        characterName={name.trim()}
+        currentUserId={profile?.id}
+        ownerIdHint={profile?.id}
+        jutsus={jutsus}
+        prefill={{
+          village,
+          shinobi_rank: ninjaRank,
+          clan_kkg: bloodline && bloodline !== CLANLESS ? bloodline : '',
+          oc_number: ocNumber || null,
+        }}
+        onClose={() => setSheetEditorOpen(false)}
+        onSaved={() => setSheetFilled(true)}
+      />
+    )}
+    </>
   );
 }
 
