@@ -1429,9 +1429,9 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 
 /* ============================================================================
    COMPONENT: AddSubmissionMenu — lives in the persistent header (not the
-   Jutsus-tab-only FilterBar) so "Submit OC"/Jutsu/Summon/Custom Item is
-   reachable from every tab, not just discoverable if you happen to be
-   looking at the jutsu database.
+   Jutsus-tab-only FilterBar), but only rendered while a Database-section tab
+   (Jutsus/Bloodlines/Inbox, i.e. `isCatalog`) is active — filing a new
+   Jutsu/OC/Summon/Custom Item entry only makes sense from there.
    ============================================================================ */
 const ADD_MENU_WIDTH = 256;
 
@@ -5832,12 +5832,14 @@ export default function App() {
                 Previewing as {viewAsRole === 'owner' ? 'Operator' : viewAsRole}
               </span>
             )}
-            <AddSubmissionMenu
-              canSubmit={role !== 'guest'}
-              onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-              onOpenStatelessSubmission={setStatelessType}
-              submissionControls={submissionControls}
-            />
+            {isCatalog && (
+              <AddSubmissionMenu
+                canSubmit={role !== 'guest'}
+                onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+                onOpenStatelessSubmission={setStatelessType}
+                submissionControls={submissionControls}
+              />
+            )}
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}

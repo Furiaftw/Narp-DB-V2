@@ -113,7 +113,7 @@ function JutsuRankChart({ data, accent }) {
 }
 
 // Search-to-select jutsu picker, replacing free-text entry in the
-// Techniques/PvE/Battle mode tables. Once a jutsu is picked it renders as a
+// Techniques/Battle mode tables. Once a jutsu is picked it renders as a
 // locked name + "change" button; `onSelect` gets the full jutsu row so the
 // caller can auto-fill rank/nature/bm_tier alongside the name.
 function JutsuPicker({ editing, name, onSelect, onClear, pool, placeholder = 'Search jutsu…' }) {
@@ -213,6 +213,12 @@ export default function CharacterSheetModal({
 
   // Load by id when the roster already knows it, otherwise by name — a roster
   // row whose character has no sheet yet lands on the "not created" state.
+  // When nothing is found, village/shinobi_rank/clan_kkg are seeded from
+  // `prefill` right here, as part of the same state update that resolves
+  // the load -- doing it in a separate effect keyed off async-derived values
+  // (submitted_by/character_slot, below) raced this one: this effect's own
+  // `setSheet(normalizeSheet(...))` would land after that one and wipe out
+  // whatever it had just written.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -224,7 +230,23 @@ export default function CharacterSheetModal({
           : await fetchCharacterSheetByName(characterName);
         if (cancelled) return;
         setRow(found || null);
-        setSheet(normalizeSheet(found?.data));
+        // Functional update: merges onto whatever `sheet` currently holds
+        // rather than replacing it outright, so this can't race the other
+        // effect below (which merges submitted_by/character_slot) no matter
+        // which of the two resolves first.
+        setSheet(prev => {
+          if (found) return normalizeSheet(found.data);
+          if (!prefill) return prev;
+          return {
+            ...prev,
+            personal: {
+              ...prev.personal,
+              village: prefill.village || prev.personal.village,
+              shinobi_rank: prefill.shinobi_rank || prev.personal.shinobi_rank,
+              clan_kkg: prefill.clan_kkg || prev.personal.clan_kkg,
+            },
+          };
+        });
         setName(found?.character_name || characterName);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || String(err));
@@ -233,6 +255,9 @@ export default function CharacterSheetModal({
       }
     })();
     return () => { cancelled = true; };
+    // prefill is only ever meant to apply to this one initial load, not to
+    // re-run every time the caller's prefill object reference changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheetId, characterName]);
 
   const isOwner = !!(row?.owner_id && currentUserId && row.owner_id === currentUserId);
@@ -298,7 +323,7 @@ export default function CharacterSheetModal({
   const hasContent = sheetHasContent(sheet);
   const threatLevel = useMemo(() => computeThreatLevel(sheet.stats), [sheet.stats]);
 
-  // Jutsu picker pools: the Techniques/PvE tables only offer non-Battlemode
+  // Jutsu picker pools: the Techniques table only offers non-Battlemode
   // jutsus, the Battle mode slots only offer Battlemode jutsus of that exact
   // tier — a jutsu "must already exist in this database" is now enforced by
   // only ever letting you pick one, instead of trusting free text.
@@ -350,12 +375,15 @@ export default function CharacterSheetModal({
   }, [row, ownerId, prefill?.oc_number]);
   const computedSlotNumber = prefill?.oc_number || liveOcCount || null;
 
-  // Apply the auto-filled values once, the first time they're all known, and
-  // only to a sheet that doesn't exist in the database yet.
+  // Apply submitted_by/character_slot once they're known, to a sheet that
+  // doesn't exist in the database yet. village/shinobi_rank/clan_kkg are
+  // seeded by the load effect above instead -- keeping one effect per field
+  // group, each merging via a functional update, is what makes the order
+  // these two effects resolve in not matter.
   const appliedAutoFillRef = useRef(false);
   useEffect(() => {
     if (row || appliedAutoFillRef.current) return;
-    if (!submittedByName && !computedSlotNumber && !prefill) return;
+    if (!submittedByName && !computedSlotNumber) return;
     appliedAutoFillRef.current = true;
     setSheet(prev => ({
       ...prev,
@@ -363,12 +391,9 @@ export default function CharacterSheetModal({
         ...prev.personal,
         submitted_by: submittedByName || prev.personal.submitted_by,
         character_slot: computedSlotNumber ? ocSlotLabel(computedSlotNumber) : prev.personal.character_slot,
-        village: prefill?.village || prev.personal.village,
-        shinobi_rank: prefill?.shinobi_rank || prev.personal.shinobi_rank,
-        clan_kkg: prefill?.clan_kkg || prev.personal.clan_kkg,
       },
     }));
-  }, [row, submittedByName, computedSlotNumber, prefill]);
+  }, [row, submittedByName, computedSlotNumber]);
 
   // The sheet reserves 30 jutsu slots, but showing 30 empty inputs is a wall.
   // Editing exposes the filled ones plus a few spares, growing as they fill.
@@ -442,26 +467,42 @@ export default function CharacterSheetModal({
 
   const ed = editing;
 
-  // One row of the Techniques/PvE tables. Once linked to a catalog jutsu
-  // (jutsu_id set), Rank/Nature narrow to just that jutsu's own options
-  // instead of the full rank/nature lists.
+  // Small labeled control used inside the slot cards below — a compact
+  // version of Field, since the row-of-columns table layout didn't leave
+  // the jutsu name (or its search box) enough room to actually be read.
+  const SlotField = ({ label, children }) => (
+    <div className="min-w-0">
+      <span className="text-[9px] font-bold uppercase tracking-wide block mb-1" style={{ color: INK_MUTED }}>{label}</span>
+      {children}
+    </div>
+  );
+
+  // One slot of the Techniques table, as a card instead of a table row —
+  // the jutsu name (and its search box, while picking) gets the full row
+  // width, with Rank/Nature/Approved/Doc link stacked in a grid underneath.
+  // Once linked to a catalog jutsu (jutsu_id set), Rank/Nature narrow to
+  // just that jutsu's own options instead of the full rank/nature lists.
   const renderTechniqueRow = (path, j, i, labelNode) => {
     const linked = j.jutsu_id ? jutsuById[j.jutsu_id] : null;
     const rankOptions = linked ? toArray(linked.rank) : JUTSU_RANKS;
     const natureOptions = linked ? toArray(linked.nature) : SHEET_NATURES;
     return (
-      <tr key={i} className={zebraRow}>
-        <Cell className="w-10">{labelNode}</Cell>
-        <Cell>
-          <JutsuPicker editing={ed} name={j.name} pool={techniquePool}
-                       onSelect={(jutsu) => pickTechniqueInto(path, i, jutsu)}
-                       onClear={() => clearTechniqueAt(path, i)} />
-        </Cell>
-        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(path, i, 'rank', v)} options={rankOptions} placeholder="—" /></Cell>
-        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(path, i, 'nature', v)} options={natureOptions} placeholder="—" /></Cell>
-        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(path, i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
-        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(path, i, 'link', v)} /></Cell>
-      </tr>
+      <div key={i} className="rounded-sm p-3" style={{ background: i % 2 === 0 ? '#f9f2e1' : '#efe1c3', border: `1px solid ${HAIRLINE}` }}>
+        <div className="flex items-center gap-2.5 mb-2.5">
+          {labelNode}
+          <div className="flex-1 min-w-0">
+            <JutsuPicker editing={ed} name={j.name} pool={techniquePool}
+                         onSelect={(jutsu) => pickTechniqueInto(path, i, jutsu)}
+                         onClear={() => clearTechniqueAt(path, i)} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          <SlotField label="Rank"><Choice editing={ed} value={j.rank} onChange={v => patchRow(path, i, 'rank', v)} options={rankOptions} placeholder="—" /></SlotField>
+          <SlotField label="Nature"><Choice editing={ed} value={j.nature} onChange={v => patchRow(path, i, 'nature', v)} options={natureOptions} placeholder="—" /></SlotField>
+          <SlotField label="Approved?"><Choice editing={ed} value={j.approved} onChange={v => patchRow(path, i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></SlotField>
+          <SlotField label="Doc link"><Link editing={ed} value={j.link} onChange={v => patchRow(path, i, 'link', v)} /></SlotField>
+        </div>
+      </div>
     );
   };
 
@@ -797,14 +838,14 @@ export default function CharacterSheetModal({
               <Section kanji="術" title="Techniques"
                        note={`Every jutsu listed here must already exist in this database. ${rankLimits ? `${sheet.personal.shinobi_rank} — ${rankLimits.techniques}` : 'Check the SARP documentation for your allowed jutsu number and rank.'}`}>
                 {anyJutsuRanked && <JutsuRankChart data={jutsuRankData} accent={accent} />}
-                <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
+                <div className="space-y-2">
                   {sheet.techniques.jutsu.map((j, i) => (
                     (ed ? i < jutsuRowsShown : !!j.name)
                       ? renderTechniqueRow(['techniques', 'jutsu'], j, i,
-                          <span className="text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span>)
+                          <span className="shrink-0 w-7 text-right text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span>)
                       : null
                   ))}
-                </Table>
+                </div>
                 {!ed && !sheet.techniques.jutsu.some(j => j.name) && (
                   <p className="text-xs italic py-2" style={{ color: INK_MUTED }}>No techniques listed yet</p>
                 )}
@@ -812,19 +853,6 @@ export default function CharacterSheetModal({
                   <p className="text-[10px] italic mt-1.5" style={{ color: INK_MUTED }}>
                     Showing {jutsuRowsShown} of {LIMITS.jutsuSlots} slots — more appear as you fill these in.
                   </p>
-                )}
-
-                <SubHead>PvE slots</SubHead>
-                <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
-                  {sheet.techniques.pve.map((j, i) => (
-                    (ed || j.name)
-                      ? renderTechniqueRow(['techniques', 'pve'], j, i,
-                          <span className="text-[10px] font-bold" style={{ color: INK_MUTED }}>PvE {i + 1}</span>)
-                      : null
-                  ))}
-                </Table>
-                {!ed && !sheet.techniques.pve.some(j => j.name) && (
-                  <p className="text-xs italic py-2" style={{ color: INK_MUTED }}>No PvE techniques listed yet</p>
                 )}
               </Section>
 
@@ -839,23 +867,25 @@ export default function CharacterSheetModal({
                 </div>
 
                 <SubHead>Battle mode list</SubHead>
-                <Table headers={['Slot type', 'Name of battle mode / technique', 'Link']}>
+                <div className="space-y-2">
                   {sheet.battle_modes.slots.map((b, i) => {
                     const tier = b.slot.replace(' Battle Mode', '');
                     return (
-                      <tr key={i} className={zebraRow}>
-                        <Cell className="w-40"><span className="text-[11px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span></Cell>
-                        <Cell>
-                          <JutsuPicker editing={ed} name={b.name} pool={battleModePoolByTier[tier] || []}
-                                       placeholder={`Search ${tier.toLowerCase()} battle modes…`}
-                                       onSelect={(jutsu) => pickBattleModeInto(i, jutsu)}
-                                       onClear={() => clearBattleModeAt(i)} />
-                        </Cell>
-                        <Cell className="w-24"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></Cell>
-                      </tr>
+                      <div key={i} className="rounded-sm p-3" style={{ background: i % 2 === 0 ? '#f9f2e1' : '#efe1c3', border: `1px solid ${HAIRLINE}` }}>
+                        <div className="flex items-center gap-2.5 mb-2.5">
+                          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span>
+                          <div className="flex-1 min-w-0">
+                            <JutsuPicker editing={ed} name={b.name} pool={battleModePoolByTier[tier] || []}
+                                         placeholder={`Search ${tier.toLowerCase()} battle modes…`}
+                                         onSelect={(jutsu) => pickBattleModeInto(i, jutsu)}
+                                         onClear={() => clearBattleModeAt(i)} />
+                          </div>
+                        </div>
+                        <SlotField label="Doc link"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></SlotField>
+                      </div>
                     );
                   })}
-                </Table>
+                </div>
 
                 <div className="mt-4">
                   <Field label="Awakening skill">

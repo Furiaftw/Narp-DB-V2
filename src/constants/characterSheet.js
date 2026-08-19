@@ -83,7 +83,6 @@ export const LIMITS = {
   specialTools: 2,
   family: 5,           // 2 parents + 3 other
   jutsuSlots: 30,
-  pveSlots: 5,
   puppets: 12,
   images: 6,
 };
@@ -169,7 +168,6 @@ export const emptySheet = () => ({
   },
   techniques: {
     jutsu: rows(LIMITS.jutsuSlots, { name: '', rank: '', nature: '', approved: '', link: '' }),
-    pve: rows(LIMITS.pveSlots, { name: '', rank: '', nature: '', approved: '', link: '' }),
   },
   battle_modes: {
     slots: BATTLE_MODE_SLOTS.map(slot => ({ slot, name: '', link: '' })),
@@ -231,7 +229,6 @@ export const normalizeSheet = (stored) => {
     },
     techniques: {
       jutsu: mergeRows(base.techniques.jutsu, stored.techniques?.jutsu),
-      pve:   mergeRows(base.techniques.pve, stored.techniques?.pve),
     },
     battle_modes: {
       ...base.battle_modes,
