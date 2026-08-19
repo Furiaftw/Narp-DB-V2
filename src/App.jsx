@@ -60,11 +60,12 @@ import {
   deletePushSubscription,
   saveJutsuReviewHistory,
   fetchJutsuReviewHistory,
+  fetchStorageStats,
   fetchMyOcCount,
   fetchCharacterSheetByName,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
-import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, formatBytes } from './utils/helpers';
 import { normalizeSheet as normalizeCharacterSheet, sheetHasContent as characterSheetHasContent } from './constants/characterSheet';
 const RosterPage = lazy(() => import('./pages/RosterPage'));
 const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
@@ -3234,6 +3235,21 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onManageB
   const [newTtag, setNewTtag] = useState('');
   const [pendingDelTtag, setPendingDelTtag] = useState(null);
   const [togglePending, setTogglePending] = useState({});
+  const [storageStats, setStorageStats] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError, setStorageError] = useState('');
+
+  const loadStorageStats = async () => {
+    setStorageLoading(true);
+    setStorageError('');
+    try {
+      setStorageStats(await fetchStorageStats());
+    } catch (e) {
+      setStorageError(e.message || 'Failed to calculate storage.');
+    } finally {
+      setStorageLoading(false);
+    }
+  };
 
   const handleToggle = async (key) => {
     if (!isOwner || !isSupabaseConfigured()) return;
@@ -3389,6 +3405,48 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onManageB
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Storage Calculator */}
+            {isAdmin && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+                  <Icon n="Database" size={20} className="text-indigo-500" /> Storage Calculator
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">How much data the Jutsu/Battlemode catalog, Bloodlines, and Roster are actually using.</p>
+                <button onClick={loadStorageStats} disabled={storageLoading}
+                        className="bg-indigo-600 text-white py-2.5 px-4 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50">
+                  <Icon n="Refresh" size={14} className={storageLoading ? 'animate-spin' : ''} /> {storageStats ? 'Refresh' : 'Calculate'}
+                </button>
+                {storageError && <p className="text-xs text-rose-600 mt-3 font-semibold">{storageError}</p>}
+                {storageStats && (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200">
+                          <th className="py-2 pr-4">Category</th>
+                          <th className="py-2 pr-4 text-right">Rows</th>
+                          <th className="py-2 pr-4 text-right">Data size</th>
+                          <th className="py-2 text-right">On disk (table + indexes)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {storageStats.map(row => (
+                          <tr key={row.category} className="border-b border-slate-200 last:border-0">
+                            <td className="py-2 pr-4 font-semibold text-slate-700">{row.category}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-500">{row.row_count}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-700">{row.data_bytes != null ? formatBytes(row.data_bytes) : '—'}</td>
+                            <td className="py-2 text-right tabular-nums text-slate-700">{row.table_bytes != null ? formatBytes(row.table_bytes) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                      "Data size" sums each row's own content (name, description, stats, etc.) — Jutsu and Battlemode are split out of the same table. "On disk" is the full Postgres table size, indexes included, which is why it doesn't match the data size exactly.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Audit Log */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
@@ -6069,7 +6127,7 @@ export default function App() {
             ) : <NoAccess what="The member board is admin-only." />} />
 
             <Route path="/grading" element={<GradingPage profile={profile} role={role} jutsus={db.jutsus || []} />} />
-            <Route path="/roster"  element={<RosterPage userRole={role} userId={profile?.id} />} />
+            <Route path="/roster"  element={<RosterPage userRole={role} userId={profile?.id} jutsus={db.jutsus || []} />} />
 
             <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
             <Route path="/history/:view" element={<HistoryRoute profile={profile} role={role} />} />

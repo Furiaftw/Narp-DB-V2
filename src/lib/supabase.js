@@ -300,6 +300,18 @@ export const consumeWandererTicket = async () => {
   return !!data;
 };
 
+/* --- Storage calculator (System Tools) -------------------------------------
+   Admin+ only -- get_storage_stats() (supabase/add-storage-stats.sql) checks
+   the caller's role itself and raises if they aren't admin/owner, so this is
+   safe to call from the client with just the authenticated session. */
+
+export const fetchStorageStats = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc('get_storage_stats');
+  if (error) throw error;
+  return data || [];
+};
+
 /* --- Webhook config -------------------------------------------------------- */
 
 export const fetchWebhookConfig = async () => {

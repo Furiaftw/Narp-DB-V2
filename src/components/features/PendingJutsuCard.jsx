@@ -204,6 +204,7 @@ export const OP_BADGE_LABELS = { insert: 'New', update: 'Edit', delete: 'Delete'
 export default function PendingJutsuCard({
   pending,
   originalJutsu,
+  allJutsus = [],
   currentUserId,
   isAdmin,
   onApprove,
@@ -682,6 +683,7 @@ export default function PendingJutsuCard({
         <CharacterSheetModal
           characterName={name}
           currentUserId={currentUserId}
+          jutsus={allJutsus}
           ownerIdHint={pending.submitted_by}
           canEditAny={hasStaffPrivileges}
           prefill={{

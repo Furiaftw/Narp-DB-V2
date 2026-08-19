@@ -211,6 +211,7 @@ export default function InboxPage({
     <PendingJutsuCard
       pending={p}
       originalJutsu={p.target_id ? dbJutsus.find(j => j._id === p.target_id) : null}
+      allJutsus={dbJutsus}
       currentUserId={profile?.id}
       isAdmin={isAdmin}
       onApprove={onApprove}

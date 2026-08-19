@@ -16,6 +16,16 @@ export const toArray = (v) => Array.isArray(v)
   ? v
   : (typeof v === 'string' && v.trim() ? v.split(',').map(s => s.trim()).filter(Boolean) : []);
 
+export const formatBytes = (bytes) => {
+  if (bytes == null || Number.isNaN(bytes)) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let val = bytes / 1024;
+  let i = 0;
+  while (val >= 1024 && i < units.length - 1) { val /= 1024; i++; }
+  return `${val.toFixed(val >= 10 ? 0 : 1)} ${units[i]}`;
+};
+
 export const copyText = (text, cb) => {
   const ta = document.createElement('textarea');
   ta.value = text;

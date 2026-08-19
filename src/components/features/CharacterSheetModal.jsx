@@ -25,6 +25,7 @@ import {
   Dash, Text, Choice, Area, Link, Field, Section, Table, Cell, SubHead,
   SheetShell, HankoStamp,
 } from './SheetKit';
+import { toArray } from '../../utils/helpers';
 
 /*
  * The NARP OC sheet, rendered from the database instead of a Google Doc.
@@ -111,6 +112,72 @@ function JutsuRankChart({ data, accent }) {
   );
 }
 
+// Search-to-select jutsu picker, replacing free-text entry in the
+// Techniques/PvE/Battle mode tables. Once a jutsu is picked it renders as a
+// locked name + "change" button; `onSelect` gets the full jutsu row so the
+// caller can auto-fill rank/nature/bm_tier alongside the name.
+function JutsuPicker({ editing, name, onSelect, onClear, pool, placeholder = 'Search jutsu…' }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  if (!editing) {
+    return name ? <span className="break-words" style={{ color: INK }}>{name}</span> : <Dash />;
+  }
+
+  if (name) {
+    return (
+      <div className="flex items-center gap-1.5 min-w-0">
+        <span className="break-words truncate" style={{ color: INK }}>{name}</span>
+        <button type="button" onClick={onClear} title="Change jutsu" className="shrink-0 opacity-60 hover:opacity-100 transition-opacity">
+          <X size={12} style={{ color: INK_MUTED }} />
+        </button>
+      </div>
+    );
+  }
+
+  const q = query.trim().toLowerCase();
+  const matches = (q ? pool.filter(j => j.name.toLowerCase().includes(q)) : pool).slice(0, 30);
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <input
+        type="text"
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className={inputCls}
+        style={inputStyle}
+      />
+      {open && (
+        <div className="absolute z-10 mt-1 w-full max-h-56 overflow-y-auto rounded-sm shadow-lg" style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+          {matches.length === 0 ? (
+            <p className="px-2.5 py-2 text-[12px] italic" style={{ color: INK_MUTED }}>No matching jutsu in the database</p>
+          ) : matches.map(j => (
+            <button
+              key={j._id}
+              type="button"
+              onClick={() => { onSelect(j); setQuery(''); setOpen(false); }}
+              className="w-full text-left px-2.5 py-1.5 text-[12px] hover:opacity-70 transition-opacity"
+              style={{ color: INK, borderBottom: `1px solid ${HAIRLINE}` }}
+            >
+              {j.name} <span style={{ color: INK_MUTED }}>· {toArray(j.rank).join('/') || j.bm_tier || '—'}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MODAL ───────────────────────────────────────────────────────────────────
 
 export default function CharacterSheetModal({
@@ -119,6 +186,7 @@ export default function CharacterSheetModal({
   characterLink = '',
   canEditAny = false,      // staff+ may edit anyone's sheet
   currentUserId = null,
+  jutsus = [],             // the live jutsu catalog, for the Techniques/Battle mode pickers
   // The OC's actual owner, when the caller knows it and it might not be
   // currentUserId (e.g. staff filling in a sheet on a player's behalf from
   // their pending submission). Falls back to currentUserId when omitted.
@@ -189,10 +257,63 @@ export default function CharacterSheetModal({
     setSheet(prev => setIn(prev, path));
   }, []);
 
+  // Merges several keys into one row at once (name+rank+nature together),
+  // so picking a jutsu doesn't fire three separate patchRow re-renders.
+  const patchRowMerge = useCallback((path, index, patchObj) => {
+    const setIn = (node, keys) => {
+      const [head, ...rest] = keys;
+      if (!rest.length) {
+        const list = node[head] || [];
+        return { ...node, [head]: list.map((r, i) => (i === index ? { ...r, ...patchObj } : r)) };
+      }
+      return { ...node, [head]: setIn(node[head] || {}, rest) };
+    };
+    setSheet(prev => setIn(prev, path));
+  }, []);
+
+  // Picking a jutsu with only one rank/nature auto-fills it; with several,
+  // it's left for the player to narrow down from just that jutsu's options.
+  const pickTechniqueInto = useCallback((path, index, jutsu) => {
+    const ranks = toArray(jutsu.rank);
+    const natures = toArray(jutsu.nature);
+    patchRowMerge(path, index, {
+      name: jutsu.name,
+      jutsu_id: jutsu._id,
+      rank: ranks.length === 1 ? ranks[0] : '',
+      nature: natures.length === 1 ? natures[0] : '',
+    });
+  }, [patchRowMerge]);
+  const clearTechniqueAt = useCallback((path, index) => {
+    patchRowMerge(path, index, { name: '', jutsu_id: '', rank: '', nature: '' });
+  }, [patchRowMerge]);
+  const pickBattleModeInto = useCallback((index, jutsu) => {
+    patchRowMerge(['battle_modes', 'slots'], index, { name: jutsu.name, jutsu_id: jutsu._id });
+  }, [patchRowMerge]);
+  const clearBattleModeAt = useCallback((index) => {
+    patchRowMerge(['battle_modes', 'slots'], index, { name: '', jutsu_id: '' });
+  }, [patchRowMerge]);
+
   const cu = useMemo(() => computeCU(sheet.stats), [sheet.stats]);
   const rankLimits = RANK_LIMITS[sheet.personal.shinobi_rank] || null;
   const hasContent = sheetHasContent(sheet);
   const threatLevel = useMemo(() => computeThreatLevel(sheet.stats), [sheet.stats]);
+
+  // Jutsu picker pools: the Techniques/PvE tables only offer non-Battlemode
+  // jutsus, the Battle mode slots only offer Battlemode jutsus of that exact
+  // tier — a jutsu "must already exist in this database" is now enforced by
+  // only ever letting you pick one, instead of trusting free text.
+  const techniquePool = useMemo(
+    () => jutsus.filter(j => !toArray(j.types).includes('Battlemode')),
+    [jutsus]
+  );
+  const jutsuById = useMemo(() => Object.fromEntries(jutsus.map(j => [j._id, j])), [jutsus]);
+  const battleModePoolByTier = useMemo(() => {
+    const byTier = { Primary: [], Secondary: [], Tertiary: [] };
+    jutsus.forEach(j => {
+      if (toArray(j.types).includes('Battlemode') && byTier[j.bm_tier]) byTier[j.bm_tier].push(j);
+    });
+    return byTier;
+  }, [jutsus]);
   // Keep the stored value in sync so it's correct for anything reading
   // data.personal.threat_level directly (exports, a future Discord bot, etc.)
   // rather than only ever existing as a display-time computation.
@@ -320,6 +441,29 @@ export default function CharacterSheetModal({
   };
 
   const ed = editing;
+
+  // One row of the Techniques/PvE tables. Once linked to a catalog jutsu
+  // (jutsu_id set), Rank/Nature narrow to just that jutsu's own options
+  // instead of the full rank/nature lists.
+  const renderTechniqueRow = (path, j, i, labelNode) => {
+    const linked = j.jutsu_id ? jutsuById[j.jutsu_id] : null;
+    const rankOptions = linked ? toArray(linked.rank) : JUTSU_RANKS;
+    const natureOptions = linked ? toArray(linked.nature) : SHEET_NATURES;
+    return (
+      <tr key={i} className={zebraRow}>
+        <Cell className="w-10">{labelNode}</Cell>
+        <Cell>
+          <JutsuPicker editing={ed} name={j.name} pool={techniquePool}
+                       onSelect={(jutsu) => pickTechniqueInto(path, i, jutsu)}
+                       onClear={() => clearTechniqueAt(path, i)} />
+        </Cell>
+        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(path, i, 'rank', v)} options={rankOptions} placeholder="—" /></Cell>
+        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(path, i, 'nature', v)} options={natureOptions} placeholder="—" /></Cell>
+        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(path, i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
+        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(path, i, 'link', v)} /></Cell>
+      </tr>
+    );
+  };
 
   return (
     <div className="fixed inset-0 z-[90] overflow-y-auto p-3 md:p-6"
@@ -655,16 +799,10 @@ export default function CharacterSheetModal({
                 {anyJutsuRanked && <JutsuRankChart data={jutsuRankData} accent={accent} />}
                 <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
                   {sheet.techniques.jutsu.map((j, i) => (
-                    (ed ? i < jutsuRowsShown : !!j.name) ? (
-                      <tr key={i} className={zebraRow}>
-                        <Cell className="w-10"><span className="text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span></Cell>
-                        <Cell><Text editing={ed} value={j.name} onChange={v => patchRow(['techniques', 'jutsu'], i, 'name', v)} /></Cell>
-                        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(['techniques', 'jutsu'], i, 'rank', v)} options={JUTSU_RANKS} placeholder="—" /></Cell>
-                        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(['techniques', 'jutsu'], i, 'nature', v)} options={SHEET_NATURES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(['techniques', 'jutsu'], i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(['techniques', 'jutsu'], i, 'link', v)} /></Cell>
-                      </tr>
-                    ) : null
+                    (ed ? i < jutsuRowsShown : !!j.name)
+                      ? renderTechniqueRow(['techniques', 'jutsu'], j, i,
+                          <span className="text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span>)
+                      : null
                   ))}
                 </Table>
                 {!ed && !sheet.techniques.jutsu.some(j => j.name) && (
@@ -679,16 +817,10 @@ export default function CharacterSheetModal({
                 <SubHead>PvE slots</SubHead>
                 <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
                   {sheet.techniques.pve.map((j, i) => (
-                    (ed || j.name) ? (
-                      <tr key={i} className={zebraRow}>
-                        <Cell className="w-14"><span className="text-[10px] font-bold" style={{ color: INK_MUTED }}>PvE {i + 1}</span></Cell>
-                        <Cell><Text editing={ed} value={j.name} onChange={v => patchRow(['techniques', 'pve'], i, 'name', v)} /></Cell>
-                        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(['techniques', 'pve'], i, 'rank', v)} options={JUTSU_RANKS} placeholder="—" /></Cell>
-                        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(['techniques', 'pve'], i, 'nature', v)} options={SHEET_NATURES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(['techniques', 'pve'], i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(['techniques', 'pve'], i, 'link', v)} /></Cell>
-                      </tr>
-                    ) : null
+                    (ed || j.name)
+                      ? renderTechniqueRow(['techniques', 'pve'], j, i,
+                          <span className="text-[10px] font-bold" style={{ color: INK_MUTED }}>PvE {i + 1}</span>)
+                      : null
                   ))}
                 </Table>
                 {!ed && !sheet.techniques.pve.some(j => j.name) && (
@@ -708,13 +840,21 @@ export default function CharacterSheetModal({
 
                 <SubHead>Battle mode list</SubHead>
                 <Table headers={['Slot type', 'Name of battle mode / technique', 'Link']}>
-                  {sheet.battle_modes.slots.map((b, i) => (
-                    <tr key={i} className={zebraRow}>
-                      <Cell className="w-40"><span className="text-[11px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span></Cell>
-                      <Cell><Text editing={ed} value={b.name} onChange={v => patchRow(['battle_modes', 'slots'], i, 'name', v)} /></Cell>
-                      <Cell className="w-24"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></Cell>
-                    </tr>
-                  ))}
+                  {sheet.battle_modes.slots.map((b, i) => {
+                    const tier = b.slot.replace(' Battle Mode', '');
+                    return (
+                      <tr key={i} className={zebraRow}>
+                        <Cell className="w-40"><span className="text-[11px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span></Cell>
+                        <Cell>
+                          <JutsuPicker editing={ed} name={b.name} pool={battleModePoolByTier[tier] || []}
+                                       placeholder={`Search ${tier.toLowerCase()} battle modes…`}
+                                       onSelect={(jutsu) => pickBattleModeInto(i, jutsu)}
+                                       onClear={() => clearBattleModeAt(i)} />
+                        </Cell>
+                        <Cell className="w-24"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></Cell>
+                      </tr>
+                    );
+                  })}
                 </Table>
 
                 <div className="mt-4">

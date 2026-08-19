@@ -1465,7 +1465,7 @@ function DataTab({ entries, squads }) {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
-export default function RosterPage({ userRole, userId }) {
+export default function RosterPage({ userRole, userId, jutsus = [] }) {
   const [entries, setEntries]         = useState([]);
   const [squads, setSquads]           = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -1902,6 +1902,7 @@ export default function RosterPage({ userRole, userId }) {
           accent={sheetModal.color || '#38bdf8'}
           canEditAny={canEditAnySheet}
           currentUserId={userId}
+          jutsus={jutsus}
           onClose={() => setSheetModal(null)}
           onSaved={() => refreshSheetIndex()}
         />
