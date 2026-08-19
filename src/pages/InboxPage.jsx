@@ -91,8 +91,9 @@ function noChatCopy({ isStaff, iAmSubmitter, claimed }) {
 }
 
 /* ============================================================================
-   PAGE: InboxPage — the Submissions page: merged Messages + Pending +
-   My Submissions, plus the Submit menu for filing a new entry.
+   PAGE: InboxPage — the Database section's Inbox tab: merged Messages +
+   Pending + My Submissions. The Submit menu that files a new entry lives in
+   the persistent header, not here.
    Staff: Pending's collapsible review-queue groups (Claimed by Me / Pending
    Approval / Needs Reviewer / Claimed by Others / My Submissions), narrowed
    by Messages' filter chips + sort. Players: same shell, but only their own
@@ -128,7 +129,6 @@ export default function InboxPage({
   setCollapsedGroups,
   visibleRecentChats = [],
   pendingLoaded = true,
-  submitMenu = null,
 }) {
   const [filter, setFilter] = useState(() => loadPrefs().filter || 'all');
   const [sort, setSort] = useState(() => loadPrefs().sort || 'newest');
@@ -379,7 +379,6 @@ export default function InboxPage({
 
       <div className="flex items-center justify-between gap-3 mb-3">
         <h2 className="text-lg font-bold font-serif text-slate-800">Inbox</h2>
-        {submitMenu}
       </div>
 
       {FilterSortBar}
@@ -455,7 +454,7 @@ export default function InboxPage({
               type="button"
               onClick={() => onSelect(null)}
               className="p-1.5 -ml-1.5 rounded-lg hover:bg-slate-100 text-slate-500"
-              aria-label="Back to Submissions"
+              aria-label="Back to Inbox"
             >
               <Icon n="X" size={18} />
             </button>

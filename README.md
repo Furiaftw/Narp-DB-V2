@@ -241,12 +241,14 @@ Every section has its own address, so you can link someone straight to it:
 | `/grading` | Grading & Upgrade Requests — submit RPs, spend credits, review the queues | signed in |
 | `/history/work-log` | Review throughput per person | reviewers+ |
 | `/history/audit-log` | Role-change history | admins+ |
-| `/submissions` | Your submissions and review chats — and the green **Submit** button for filing a new entry | signed in |
+| `/inbox` | Your submissions and review chats (a tab of the jutsu catalog) | signed in |
 | `/members` | Member board | admins+ |
 
-The dark strip under the site title switches between these; the Jutsus/Bloodlines tabs and the
-jutsu filter bar only appear on the catalog itself. Opening a page you don't have access to
-tells you so rather than bouncing you back to the catalog.
+The dark strip under the site title switches between these top-level sections; the
+Jutsus/Bloodlines/Inbox tabs and the jutsu filter bar only appear on the catalog itself.
+The green **Submit** button for filing a new entry lives in the persistent header, reachable
+from any tab. Opening a page you don't have access to tells you so rather than bouncing you
+back to the catalog.
 
 ---
 

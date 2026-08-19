@@ -482,7 +482,7 @@ const MANAGE_TABLES = {
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
       { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, req: true, col: 2 },
       { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, req: true, col: 1 },
-      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, hideIfInc: { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, req: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, req: true, col: 1 },
@@ -1423,10 +1423,10 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 }
 
 /* ============================================================================
-   COMPONENT: AddSubmissionMenu — the green Submit dropdown (Jutsu / OC /
-   Summon / Custom Item). It lives on the Submissions page, which is where
-   you both file entries and track them; App passes it down as an element so
-   the form state it drives stays here rather than in InboxPage.
+   COMPONENT: AddSubmissionMenu — lives in the persistent header (not the
+   Jutsus-tab-only FilterBar) so "Submit OC"/Jutsu/Summon/Custom Item is
+   reachable from every tab, not just discoverable if you happen to be
+   looking at the jutsu database.
    ============================================================================ */
 const ADD_MENU_WIDTH = 256;
 
@@ -4163,7 +4163,7 @@ export default function App() {
   const [pendingLoaded, setPendingLoaded] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [approvingIds, setApprovingIds] = useState(new Set());
-  // Submissions page (merged Messages + Pending + My Submissions): one "new item"
+  // Inbox tab (merged Messages + Pending + My Submissions): one "new item"
   // dot and one "selected item" state shared across every audience/view.
   const [inboxHasNew, setInboxHasNew] = useState(false);
   const prevPendingCountRef = useRef(0);
@@ -4217,7 +4217,7 @@ export default function App() {
   const tab = pathname === '/bloodlines' ? 'bloodlines'
             : pathname === '/'           ? 'jutsus'
             : pathname.split('/')[1] || 'jutsus';
-  const isCatalog = tab === 'jutsus' || tab === 'bloodlines';
+  const isCatalog = tab === 'jutsus' || tab === 'bloodlines' || tab === 'inbox';
   // Roster and History (work log) paint their own full-bleed layouts, so the
   // shell must not add its page padding on top of them.
   const selfLaidOut = pathname === '/roster'
@@ -4596,7 +4596,7 @@ export default function App() {
       clearF();
       setF(p => ({ ...p, sort: 'az', showFilters: false }));
     }
-    if (pathname === '/submissions') setInboxHasNew(false);
+    if (pathname === '/inbox') setInboxHasNew(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pathname]);
 
@@ -5385,7 +5385,7 @@ export default function App() {
   );
 
   /*
-   * Submissions page data (merged Messages + Pending + My Submissions). Every
+   * Inbox tab data (merged Messages + Pending + My Submissions). Every
    * pending item relevant to the viewer gets an entry here, including ones
    * with zero chat messages yet — a freshly-submitted, unclaimed item is
    * exactly what the old Pending tab existed to surface, so it must not
@@ -5397,7 +5397,7 @@ export default function App() {
    * Post-merge, staff see every pending item here — unclaimed and
    * claimed-by-others included — not just ones they've personally claimed
    * or messaged in. That's intentional: folding the old Pending tab's
-   * full-queue discovery function into Submissions requires the same visibility
+   * full-queue discovery function into Inbox requires the same visibility
    * here; restricting it back down would silently kill that function.
    */
   const inboxItems = useMemo(() => {
@@ -5470,14 +5470,14 @@ export default function App() {
   const CATALOG_TABS = [
     { to: '/',           label: 'Jutsus',     count: (db.jutsus || []).length },
     { to: '/bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
+    ...(profile ? [{ to: '/inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
   ];
 
   // Everything else is its own page, reachable from the header switcher.
   const SECTIONS = [
-    { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' },
+    { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' || p === '/inbox' },
     { to: '/roster', label: 'Roster' },
     ...(profile || !supabaseReady ? [{ to: '/grading', label: 'Grading/Upgrade Requests' }] : []),
-    ...(profile ? [{ to: '/submissions', label: 'Submissions', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
     ...(isReviewer ? [{ to: '/history/work-log', label: 'History', match: (p) => p.startsWith('/history') }] : []),
     ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
   ];
@@ -5651,6 +5651,12 @@ export default function App() {
                 Previewing as {viewAsRole === 'owner' ? 'Operator' : viewAsRole}
               </span>
             )}
+            <AddSubmissionMenu
+              canSubmit={role !== 'guest'}
+              onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+              onOpenStatelessSubmission={setStatelessType}
+              submissionControls={submissionControls}
+            />
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
@@ -5725,8 +5731,19 @@ export default function App() {
                 className={({ isActive }) => `px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${isActive ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
                 {({ isActive }) => (
                   <>
-                    <span>{t.label}</span>
+                    <span className="relative">
+                      {t.label}
+                      {t.hasNew && !isActive && (
+                        <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
+                      )}
+                    </span>
                     <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${isActive ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+                    {t.unread > 0 && (
+                      <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm"
+                            title={`${t.unread} conversation${t.unread === 1 ? '' : 's'} with unread messages`}>
+                        {t.unread}
+                      </span>
+                    )}
                   </>
                 )}
               </NavLink>
@@ -5794,7 +5811,7 @@ export default function App() {
           />
             } />
 
-            <Route path="/submissions" element={profile ? (
+            <Route path="/inbox" element={profile ? (
           <Suspense fallback={null}>
           <InboxPage
             inboxItems={inboxItems}
@@ -5823,14 +5840,6 @@ export default function App() {
             setCollapsedGroups={setCollapsedGroups}
             visibleRecentChats={visibleRecentChats}
             pendingLoaded={pendingLoaded}
-            submitMenu={
-              <AddSubmissionMenu
-                canSubmit={role !== 'guest'}
-                onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-                onOpenStatelessSubmission={setStatelessType}
-                submissionControls={submissionControls}
-              />
-            }
           />
           </Suspense>
             ) : <SignedOutNotice what="your inbox" />} />
@@ -5999,7 +6008,7 @@ export default function App() {
             <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
             <Route path="/history/:view" element={<HistoryRoute profile={profile} role={role} />} />
 
-            <Route path="/inbox" element={<Navigate to="/submissions" replace />} />
+            <Route path="/submissions" element={<Navigate to="/inbox" replace />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>

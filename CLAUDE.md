@@ -32,7 +32,7 @@ There is no test suite and no linter configured. Verification is manual: run the
 
 What App.jsx *does* import from elsewhere:
 - `src/pages/RosterPage.jsx` — roster page
-- `src/pages/InboxPage.jsx` — Submissions page (file name kept; `inbox*` identifiers throughout are historical)
+- `src/pages/InboxPage.jsx` — Inbox tab of the Database section (`inbox*` identifiers throughout match the file name)
 - `src/pages/GradingPage.jsx` — Grading/Upgrade Requests page (see "RP grading & upgrade credits" below)
 - `src/pages/HistoryPage.jsx` — History page: Work Log + Audit Log panels
 - `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
@@ -58,17 +58,19 @@ tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` al
 | `/history` | → redirects to `/history/work-log` | — |
 | `/history/work-log` | `WorkStatsPage`, via `HistoryPage` | reviewer+ |
 | `/history/audit-log` | `AuditLogPanel`, via `HistoryPage` | admin+ |
-| `/submissions` | `InboxPage` — queue + review chats + the green Submit menu | signed in |
-| `/inbox` | → redirects to `/submissions` | — |
+| `/inbox` | `InboxPage` — queue + review chats | signed in |
+| `/submissions` | → redirects to `/inbox` | — |
 | `/members` | member board (inline) | admin+ |
 | anything else | → redirects to `/` | — |
 
 Two navs, deliberately: the **section switcher** (dark strip in the header) spans every page,
-while the **catalog tab bar** (Jutsus / Bloodlines) and the jutsu `FilterBar`/`FilterBarPanel`
+while the **catalog tab bar** (Jutsus / Bloodlines / Inbox) and the jutsu `FilterBar`/`FilterBarPanel`
 render only on the catalog routes — that scoping is what keeps the satellite pages from
-inheriting the database's chrome. `tab` still exists as a *derived* value (`pathname` →
-`'jutsus'`/`'bloodlines'`/…) because the catalog's filter and row-expand logic reads it in
-many places.
+inheriting the database's chrome. Inbox rides along in the tab bar (not the FilterBar) because
+it needs no jutsu filter chrome, just the tab strip. The green Submit menu (Jutsu/Battlemode,
+OC, Summon, Custom Item) lives in the persistent header, reachable from every tab. `tab` still
+exists as a *derived* value (`pathname` → `'jutsus'`/`'bloodlines'`/`'inbox'`/…) because the
+catalog's filter and row-expand logic reads it in many places.
 
 Gated routes render a `NoAccess` / `SignedOutNotice` panel rather than redirecting, so a link
 shared between staff explains itself instead of silently bouncing.
