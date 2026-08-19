@@ -237,6 +237,16 @@ export const fetchAllProfiles = async () => {
   return data || [];
 };
 
+// Single-profile lookup by id — used to display a character sheet's owner
+// ("Submitted by") without pulling every profile down first.
+export const fetchProfileById = async (id) => {
+  if (!supabase || !id) return null;
+  const { data, error } = await supabase
+    .from('profiles').select('id, username, site_nickname, discord_id').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
 export const setUserRole = async (userId, role) => {
   if (!supabase) return;
   if (!['user', 'grader', 'reviewer', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');

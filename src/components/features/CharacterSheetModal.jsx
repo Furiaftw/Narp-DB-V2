@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { X, Pencil, Save, Loader2, Trash2, Plus, ExternalLink, FileText, ChevronDown } from 'lucide-react';
 import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -9,13 +9,15 @@ import {
   fetchCharacterSheetByName,
   saveCharacterSheet,
   deleteCharacterSheet,
+  fetchProfileById,
+  fetchMyOcCount,
 } from '../../lib/supabase';
 import {
-  STAT_RANKS, SKILL_LEVELS, SHINOBI_RANKS, SHEET_VILLAGES, THREAT_LEVELS,
-  CHARACTER_SLOTS, ECONOMIC_STATUS, GENDERS, BLOOD_TYPES, MONTHS,
+  STAT_RANKS, SKILL_LEVELS, SHINOBI_RANKS, SHEET_VILLAGES,
+  ECONOMIC_STATUS, GENDERS, BLOOD_TYPES, MONTHS,
   FAMILY_STATUS, SHEET_NATURES, JUTSU_RANKS, APPROVED_STATES,
   ACADEMY_JUTSUS, LIMITS, RANK_LIMITS,
-  normalizeSheet, computeCU, sheetHasContent,
+  normalizeSheet, computeCU, sheetHasContent, computeThreatLevel, ocSlotLabel,
 } from '../../constants/characterSheet';
 import {
   PAPER, PAPER_BG, CARD, INK, INK_MUTED, HAIRLINE, RULE, HANKO, LINK_COLOR,
@@ -117,7 +119,17 @@ export default function CharacterSheetModal({
   characterLink = '',
   canEditAny = false,      // staff+ may edit anyone's sheet
   currentUserId = null,
+  // The OC's actual owner, when the caller knows it and it might not be
+  // currentUserId (e.g. staff filling in a sheet on a player's behalf from
+  // their pending submission). Falls back to currentUserId when omitted.
+  ownerIdHint = null,
   accent = '#a23a2c',
+  // { village, shinobi_rank, clan_kkg, oc_number } from the OC's original
+  // creation submission, if the caller has it (PendingJutsuCard does — the
+  // submission that's still pending IS "the prior character creation entry").
+  // Only ever applied once, to a brand-new sheet, and never overwrites a
+  // value the player already typed in.
+  prefill = null,
   onClose,
   onSaved,
 }) {
@@ -180,6 +192,62 @@ export default function CharacterSheetModal({
   const cu = useMemo(() => computeCU(sheet.stats), [sheet.stats]);
   const rankLimits = RANK_LIMITS[sheet.personal.shinobi_rank] || null;
   const hasContent = sheetHasContent(sheet);
+  const threatLevel = useMemo(() => computeThreatLevel(sheet.stats), [sheet.stats]);
+  // Keep the stored value in sync so it's correct for anything reading
+  // data.personal.threat_level directly (exports, a future Discord bot, etc.)
+  // rather than only ever existing as a display-time computation.
+  useEffect(() => {
+    setSheet(prev => prev.personal.threat_level === threatLevel ? prev : { ...prev, personal: { ...prev.personal, threat_level: threatLevel } });
+  }, [threatLevel]);
+
+  // "Submitted by" — the owner's Discord username, fetched live so it stays
+  // correct even if they change it later. Owner is row.owner_id once saved,
+  // or whoever's about to become the owner (the current user) beforehand.
+  const ownerId = row?.owner_id || (!row ? (ownerIdHint || currentUserId) : null);
+  const [ownerProfile, setOwnerProfile] = useState(null);
+  useEffect(() => {
+    if (!ownerId) { setOwnerProfile(null); return; }
+    let cancelled = false;
+    fetchProfileById(ownerId)
+      .then(p => { if (!cancelled) setOwnerProfile(p); })
+      .catch(() => { if (!cancelled) setOwnerProfile(null); });
+    return () => { cancelled = true; };
+  }, [ownerId]);
+  const submittedByName = ownerProfile?.site_nickname || ownerProfile?.username || '';
+
+  // "Character slot" — computed once at creation and then frozen into the
+  // sheet (a live recount later would misreport an old OC as "4th" once the
+  // player has more). prefill.oc_number is exact (the submission already
+  // counted it); otherwise fall back to a live count for a sheet started
+  // straight from the roster, where no submission record survives.
+  const [liveOcCount, setLiveOcCount] = useState(null);
+  useEffect(() => {
+    if (row || prefill?.oc_number || !ownerId) return;
+    let cancelled = false;
+    fetchMyOcCount(ownerId).then(c => { if (!cancelled) setLiveOcCount(c + 1); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [row, ownerId, prefill?.oc_number]);
+  const computedSlotNumber = prefill?.oc_number || liveOcCount || null;
+
+  // Apply the auto-filled values once, the first time they're all known, and
+  // only to a sheet that doesn't exist in the database yet.
+  const appliedAutoFillRef = useRef(false);
+  useEffect(() => {
+    if (row || appliedAutoFillRef.current) return;
+    if (!submittedByName && !computedSlotNumber && !prefill) return;
+    appliedAutoFillRef.current = true;
+    setSheet(prev => ({
+      ...prev,
+      personal: {
+        ...prev.personal,
+        submitted_by: submittedByName || prev.personal.submitted_by,
+        character_slot: computedSlotNumber ? ocSlotLabel(computedSlotNumber) : prev.personal.character_slot,
+        village: prefill?.village || prev.personal.village,
+        shinobi_rank: prefill?.shinobi_rank || prev.personal.shinobi_rank,
+        clan_kkg: prefill?.clan_kkg || prev.personal.clan_kkg,
+      },
+    }));
+  }, [row, submittedByName, computedSlotNumber, prefill]);
 
   // The sheet reserves 30 jutsu slots, but showing 30 empty inputs is a wall.
   // Editing exposes the filled ones plus a few spares, growing as they fill.
@@ -224,6 +292,7 @@ export default function CharacterSheetModal({
         ninjaRank: sheet.personal.shinobi_rank,
         bloodline: sheet.personal.clan_kkg,
         data: sheet,
+        ...(!row && ownerIdHint ? { ownerId: ownerIdHint } : {}),
       });
       setRow(saved);
       setEditing(false);
@@ -358,11 +427,13 @@ export default function CharacterSheetModal({
 
               {/* 人 PERSONAL INFORMATION */}
               <Section kanji="人" title="Personal Information">
-                <Field label="Submitted by"><Text editing={ed} value={sheet.personal.submitted_by} onChange={v => patch('personal', 'submitted_by', v)} placeholder="Discord username" /></Field>
-                <Field label="Character slot"><Choice editing={ed} value={sheet.personal.character_slot} onChange={v => patch('personal', 'character_slot', v)} options={CHARACTER_SLOTS} /></Field>
+                <Field label="Submitted by" note="auto-filled"><Text editing={false} value={submittedByName || sheet.personal.submitted_by} /></Field>
+                <Field label="Character slot" note="auto-filled"><Text editing={false} value={sheet.personal.character_slot} /></Field>
                 <Field label="Alias(es)"><Text editing={ed} value={sheet.personal.aliases} onChange={v => patch('personal', 'aliases', v)} /></Field>
                 <Field label="Village affiliation"><Choice editing={ed} value={sheet.personal.village} onChange={v => patch('personal', 'village', v)} options={SHEET_VILLAGES} /></Field>
-                <Field label="Threat level"><Choice editing={ed} value={sheet.personal.threat_level} onChange={v => patch('personal', 'threat_level', v)} options={THREAT_LEVELS} /></Field>
+                <Field label="Threat level" note="auto-calculated from the four D-S stats below">
+                  <Text editing={false} value={threatLevel} placeholder="Fill in all four stats to calculate" />
+                </Field>
                 <Field label="Shinobi rank"><Choice editing={ed} value={sheet.personal.shinobi_rank} onChange={v => patch('personal', 'shinobi_rank', v)} options={SHINOBI_RANKS} /></Field>
                 <Field label="Clan / KKG"><Text editing={ed} value={sheet.personal.clan_kkg} onChange={v => patch('personal', 'clan_kkg', v)} /></Field>
                 <Field label="Economic status"><Choice editing={ed} value={sheet.personal.economic_status} onChange={v => patch('personal', 'economic_status', v)} options={ECONOMIC_STATUS} /></Field>

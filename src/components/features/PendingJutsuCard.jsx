@@ -682,7 +682,14 @@ export default function PendingJutsuCard({
         <CharacterSheetModal
           characterName={name}
           currentUserId={currentUserId}
+          ownerIdHint={pending.submitted_by}
           canEditAny={hasStaffPrivileges}
+          prefill={{
+            village: pending.data?.village || '',
+            shinobi_rank: pending.data?.ninja_rank || '',
+            clan_kkg: pending.data?.bloodline && pending.data.bloodline !== 'Clanless' ? pending.data.bloodline : '',
+            oc_number: pending.data?.oc_number || null,
+          }}
           onClose={() => setSheetModalOpen(false)}
           onSaved={() => {}}
         />
