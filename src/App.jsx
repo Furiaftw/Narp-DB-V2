@@ -75,6 +75,7 @@ const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
+import CharacterSheetModal from './components/features/CharacterSheetModal';
 import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent, jutsuDocsHaveContent } from './constants/jutsuSheet';
 
 
@@ -1869,8 +1870,12 @@ const ordinalLabel = (n) => {
   return `${v}${suffix}`;
 };
 
-function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null, isAdmin = false, onSubmitAndApprove = null }) {
+function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterSubmit, editPending = null, onSavedEdit = null, isAdmin = false, onSubmitAndApprove = null }) {
   const initial = editPending?.data || {};
+  // Set once the submission succeeds — swaps this whole modal over to the
+  // character sheet editor instead of just closing, since the sheet is now
+  // part of "creating" a character, not an optional follow-up step.
+  const [sheetPrompt, setSheetPrompt] = useState(null);
   const [name, setName] = useState(initial.name || '');
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
   const [village, setVillage] = useState(initial.village || '');
@@ -2086,7 +2091,8 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
       // this went into the reservation flow (that's inherently a waiting
       // period while the bloodline slot is held). If the approval-time sheet
       // check (see handleApprovePending) rejects it because the sheet isn't
-      // filled in yet, it just stays in the Inbox for a normal approval later.
+      // filled in yet, this falls through to the sheet-prompt step below same
+      // as everyone else, instead of silently leaving it stuck in the Inbox.
       if (isAdmin && !needsReservation && onSubmitAndApprove && inserted?.id) {
         try {
           await onSubmitAndApprove(inserted.id, {
@@ -2099,40 +2105,42 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             submitter: profile,
             first_reviewer: profile,
           });
-          if (onAfterSubmit) onAfterSubmit();
-          onClose();
-          return;
         } catch (approveErr) {
           console.warn('[NARP] Admin auto-approve failed, left in the review queue:', approveErr);
-          alert(
-            'Submitted, but could not auto-approve: ' + (approveErr.message || approveErr) +
-            '\n\nIt is waiting in the Inbox — approve it from there once ready.'
-          );
-          if (onAfterSubmit) onAfterSubmit();
-          onClose();
-          return;
         }
+      } else {
+        const _pingSess = await getCurrentSession();
+        fetch('/.netlify/functions/reviewer-ping', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+          },
+          body: JSON.stringify({
+            triggerType: 'creation',
+            itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
+            itemType: 'Character',
+            submitterName: profile?.username || 'Unknown',
+          }),
+        }).catch((pingErr) => {
+          console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
+        });
       }
 
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({
-          triggerType: 'creation',
-          itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
-          itemType: 'Character',
-          submitterName: profile?.username || 'Unknown',
-        }),
-      }).catch((pingErr) => {
-        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-      });
-
       if (onAfterSubmit) onAfterSubmit();
-      onClose();
+      // The sheet is required before approval, so the creation flow doesn't
+      // end at "submitted" — it hands straight off to filling in the sheet,
+      // prefilled from what was just entered here (see CharacterSheetModal's
+      // `prefill`/`ownerIdHint`).
+      setSheetPrompt({
+        characterName: data.name,
+        prefill: {
+          village: data.village,
+          shinobi_rank: data.ninja_rank,
+          clan_kkg: data.bloodline && data.bloodline !== CLANLESS ? data.bloodline : '',
+          oc_number: data.oc_number,
+        },
+      });
     } catch (err) {
       console.error('[NARP] Failed to submit OC:', err);
       alert('Submission failed: ' + (err.message || err));
@@ -2140,6 +2148,20 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
       setSubmitting(false);
     }
   };
+
+  if (sheetPrompt) {
+    return (
+      <CharacterSheetModal
+        characterName={sheetPrompt.characterName}
+        currentUserId={profile?.id}
+        ownerIdHint={profile?.id}
+        jutsus={jutsus}
+        prefill={sheetPrompt.prefill}
+        onClose={onClose}
+        onSaved={() => {}}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
@@ -2158,7 +2180,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
           {!isEdit && (
             <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 text-xs text-emerald-800">
               <Icon n="Info" size={14} className="shrink-0 mt-0.5" />
-              <span>No Google Doc needed — once your character is approved, click their name in the Roster tab to fill in their full character sheet right here on the site.</span>
+              <span>No Google Doc needed — right after you submit, you'll fill in their full character sheet here on the site. It has to be filled in before a reviewer can approve this character.</span>
             </div>
           )}
           <div>
@@ -6367,6 +6389,7 @@ export default function App() {
         <OCSubmissionModal
           profile={profile}
           bloodlines={db.bloodlines || []}
+          jutsus={db.jutsus || []}
           onClose={() => setStatelessType(null)}
           onAfterSubmit={refreshPending}
           isAdmin={isAdmin}
