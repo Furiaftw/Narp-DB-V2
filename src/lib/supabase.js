@@ -374,19 +374,44 @@ export const fetchPendingJutsus = async () => {
 };
 
 export const submitPendingJutsu = async (operation, targetId, data, status = 'pending_approval') => {
-  if (!supabase) return;
+  if (!supabase) return null;
   if (!['insert', 'update', 'delete'].includes(operation)) throw new Error('Invalid operation');
   const session = await getCurrentSession();
   if (!session?.user?.id) throw new Error('Must be signed in to submit');
 
-  const { error } = await supabase.from('pending_jutsus').insert({
+  const { data: row, error } = await supabase.from('pending_jutsus').insert({
     operation,
     target_id: targetId || null,
     data: operation === 'delete' ? null : data,
     submitted_by: session.user.id,
     status,
-  });
+  }).select('id').single();
   if (error) throw error;
+  return row;
+};
+
+// How many OCs a player currently has: approved roster rows they own, plus
+// any other Character submissions of theirs still awaiting review (so a
+// second in-flight OC doesn't collide with the first on the same number).
+// Backs the auto-calculated "which OC is this for you?" in OCSubmissionModal.
+// owner_id is only populated on rows approved after
+// add-roster-owner-tracking.sql, so this undercounts OCs approved earlier.
+export const fetchMyOcCount = async (userId, excludePendingId = null) => {
+  if (!supabase || !userId) return 0;
+  const [entries, squads, pending] = await Promise.all([
+    supabase.from('roster_entries').select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId).eq('status', 'approved'),
+    supabase.from('roster_squads').select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId).eq('status', 'approved').neq('role', 'sentinel'),
+    supabase.from('pending_jutsus').select('id, data').eq('submitted_by', userId),
+  ]);
+  if (entries.error) throw entries.error;
+  if (squads.error) throw squads.error;
+  if (pending.error) throw pending.error;
+  const pendingCharacterCount = (pending.data || []).filter(p =>
+    p.data?.type === 'Character' && p.id !== excludePendingId
+  ).length;
+  return (entries.count || 0) + (squads.count || 0) + pendingCharacterCount;
 };
 
 export const reviewPendingJutsu = async (id, reviewerId) => {

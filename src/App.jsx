@@ -60,9 +60,12 @@ import {
   deletePushSubscription,
   saveJutsuReviewHistory,
   fetchJutsuReviewHistory,
+  fetchMyOcCount,
+  fetchCharacterSheetByName,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
+import { normalizeSheet as normalizeCharacterSheet, sheetHasContent as characterSheetHasContent } from './constants/characterSheet';
 const RosterPage = lazy(() => import('./pages/RosterPage'));
 const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
 const InboxPage = lazy(() => import('./pages/InboxPage'));
@@ -1857,7 +1860,15 @@ const ocNeedLevel = (val, max) => {
   return 'surplus';
 };
 
-function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null }) {
+const ordinalLabel = (n) => {
+  const v = Number(n) || 0;
+  const mod100 = v % 100;
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th'
+    : v % 10 === 1 ? 'st' : v % 10 === 2 ? 'nd' : v % 10 === 3 ? 'rd' : 'th';
+  return `${v}${suffix}`;
+};
+
+function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null, isAdmin = false, onSubmitAndApprove = null }) {
   const initial = editPending?.data || {};
   const [name, setName] = useState(initial.name || '');
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
@@ -1868,7 +1879,10 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   );
   const [mentorSquad, setMentorSquad] = useState(initial.mentor_squad_number ? String(initial.mentor_squad_number) : '');
   const [councilor, setCouncilor] = useState(!!initial.councilor);
+  // Auto-calculated from the player's existing OCs (approved roster + other
+  // in-flight submissions) instead of self-reported — see fetchMyOcCount.
   const [ocNumber, setOcNumber] = useState(initial.oc_number ? Number(initial.oc_number) : 0);
+  const [ocCountLoading, setOcCountLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rosterCounts, setRosterCounts] = useState(null);
   const [rosterSquads, setRosterSquads] = useState([]);
@@ -1879,6 +1893,17 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   // Discord). Editing an existing Wanderer submission stays allowed even
   // without a ticket, since the ticket was already spent to create it.
   const hasWandererTicket = isEdit ? initial.village === 'Wanderer' : !!profile?.wanderer_ticket;
+
+  useEffect(() => {
+    if (isEdit || !profile?.id) return;
+    let cancelled = false;
+    setOcCountLoading(true);
+    fetchMyOcCount(profile.id, editPending?.id || null)
+      .then(count => { if (!cancelled) setOcNumber(count + 1); })
+      .catch(err => console.warn('[NARP] OC count fetch failed:', err))
+      .finally(() => { if (!cancelled) setOcCountLoading(false); });
+    return () => { cancelled = true; };
+  }, [isEdit, profile?.id, editPending?.id]);
 
   // Population per village per rank, straight from the public roster tables.
   useEffect(() => {
@@ -2000,7 +2025,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const bloodlineFull = selectedInfo.status === 'full';
 
   const squadRequired = !!squadType && !!village;
-  const submitDisabled = !name.trim() || !ninjaRank || !village || !ocNumber
+  const submitDisabled = !name.trim() || !ninjaRank || !village || !ocNumber || ocCountLoading
     || (squadRequired && !squadChoice) || bloodlineFull || submitting;
 
   const handleSubmit = async (e) => {
@@ -2054,7 +2079,39 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         ...squadFields,
         ...(needsReservation ? { subType: 'reservation_request', reservationStatus: 'requested' } : {}),
       };
-      await submitPendingJutsu('insert', null, data, 'pending_review');
+      const inserted = await submitPendingJutsu('insert', null, data, 'pending_review');
+
+      // Admin+ don't need a second approver — auto-approve right away, unless
+      // this went into the reservation flow (that's inherently a waiting
+      // period while the bloodline slot is held). If the approval-time sheet
+      // check (see handleApprovePending) rejects it because the sheet isn't
+      // filled in yet, it just stays in the Inbox for a normal approval later.
+      if (isAdmin && !needsReservation && onSubmitAndApprove && inserted?.id) {
+        try {
+          await onSubmitAndApprove(inserted.id, {
+            id: inserted.id,
+            operation: 'insert',
+            target_id: null,
+            data,
+            status: 'pending_review',
+            submitted_by: profile.id,
+            submitter: profile,
+            first_reviewer: profile,
+          });
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
+        } catch (approveErr) {
+          console.warn('[NARP] Admin auto-approve failed, left in the review queue:', approveErr);
+          alert(
+            'Submitted, but could not auto-approve: ' + (approveErr.message || approveErr) +
+            '\n\nIt is waiting in the Inbox — approve it from there once ready.'
+          );
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
+        }
+      }
 
       const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
@@ -2115,25 +2172,15 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             />
           </div>
 
-          {/* Which OC — how many characters the player already runs, shown to reviewers */}
+          {/* Which OC — auto-calculated from the player's existing OCs, shown to reviewers */}
           <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you? (Mandatory)</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[[1, 'First OC'], [2, 'Second OC'], [3, 'Third OC']].map(([n, label]) => {
-                const active = ocNumber === n;
-                return (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setOcNumber(n)}
-                    className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${
-                      active ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you?</label>
+            <div className="p-3 rounded-xl border-2 border-slate-200 bg-slate-50 text-sm font-bold text-slate-800 flex items-center gap-2">
+              {ocCountLoading ? (
+                <><Icon n="Refresh" size={14} className="animate-spin text-slate-400" /> Calculating…</>
+              ) : (
+                <>Your {ordinalLabel(ocNumber)} OC</>
+              )}
             </div>
           </div>
 
@@ -4768,7 +4815,7 @@ export default function App() {
     });
   };
 
-  const handleApprovePending = async (id) => {
+  const handleApprovePending = async (id, itemOverride = null) => {
     if (approvingIds.has(id)) return;
     setApprovingIds(prev => new Set([...prev, id]));
     try {
@@ -4776,8 +4823,10 @@ export default function App() {
       setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the approval to Discord before committing it. The submitter is the
       // staff member who queued the entry; the current user is the reviewer
-      // (the "2nd pair of eyes" in the double-approver workflow).
-      const item = pendingJutsus.find(p => p.id === id);
+      // (the "2nd pair of eyes" in the double-approver workflow). itemOverride
+      // lets an admin's own just-submitted OC (never in pendingJutsus, which
+      // excludes your own submissions) auto-approve through this same path.
+      const item = itemOverride || pendingJutsus.find(p => p.id === id);
       if (item) {
         const isDelete = item.operation === 'delete';
         const rawDisplayData = isDelete
@@ -4790,6 +4839,23 @@ export default function App() {
         };
 
         const isCharacter = item.data?.type === 'Character';
+
+        // A character can't be approved until its OC sheet is filled in --
+        // players/staff fill it from the pending item (PendingJutsuCard) while
+        // it's still awaiting review, same idea as the "final step" gate below.
+        if (isCharacter && !isDelete) {
+          const characterName = (item.data?.name || '').trim();
+          let sheetRow = null;
+          try {
+            sheetRow = characterName ? await fetchCharacterSheetByName(characterName) : null;
+          } catch (sheetErr) {
+            console.warn('[NARP] Character sheet lookup failed:', sheetErr);
+          }
+          const sheetOk = sheetRow && characterSheetHasContent(normalizeCharacterSheet(sheetRow.data));
+          if (!sheetOk) {
+            throw new Error(`${characterName || 'This character'} needs a completed character sheet before approval. Fill it in from the Inbox, then approve again.`);
+          }
+        }
 
         // Auto-insert the approved character into their bloodline's roster
         // slots (name + character-area link). A granted reservation held for
@@ -6245,6 +6311,8 @@ export default function App() {
           bloodlines={db.bloodlines || []}
           onClose={() => setStatelessType(null)}
           onAfterSubmit={refreshPending}
+          isAdmin={isAdmin}
+          onSubmitAndApprove={handleApprovePending}
         />
       )}
       {statelessType && statelessType !== 'Character' && (
