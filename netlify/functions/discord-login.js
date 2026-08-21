@@ -117,34 +117,37 @@ export default async (req) => {
     // 4b. Role Sync Logic
     // Determine the user's application role (appRole) based on exact hierarchy:
     // - IF the member's roles array includes the admin role ID, set appRole = 'admin'.
-    // - ELSE IF the member's roles array includes the reviewer role ID, set appRole = 'staff'. (NOTE: Keep the database value as 'staff', do not use 'reviewer').
-    // - ELSE IF the member's roles array includes the OC staff role ID, set appRole = 'oc_staff' ("Staff" — OC-only reviewer).
+    // - ELSE IF the member's roles array includes the reviewer role ID, set appRole = 'reviewer'.
+    // - ELSE IF the member's roles array includes the grader role ID, set appRole = 'grader' (OC-only reviewer + RP grading).
     // - ELSE, set appRole = 'user'.
     // 'owner' is never auto-derived here — it is only ever set by a direct
     // database edit (see STEP 6 below, which also never downgrades an
     // existing owner regardless of what this hierarchy computes).
     // Role IDs prefer the live DB config (System Tools) over the env vars, since
     // env vars are frozen at deploy time and the operator panel edits the DB.
+    // The grader key falls back to the old oc_staff key so existing Discord
+    // role assignments keep working after the role migration.
     let adminRoleId = envAdminRoleId;
     let reviewerRoleId = envReviewerRoleId;
-    let ocStaffRoleId = process.env.DISCORD_OC_STAFF_ROLE_ID;
+    let graderRoleId = process.env.DISCORD_GRADER_ROLE_ID || process.env.DISCORD_OC_STAFF_ROLE_ID;
     try {
       const { data: cfgRows } = await supabaseAdmin
         .from('webhook_config')
         .select('config_key, config_value')
-        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_oc_staff_role_id']);
+        .in('config_key', ['discord_admin_role_id', 'discord_reviewer_role_id', 'discord_grader_role_id', 'discord_oc_staff_role_id']);
       adminRoleId = cfgRows?.find(r => r.config_key === 'discord_admin_role_id')?.config_value || adminRoleId;
       reviewerRoleId = cfgRows?.find(r => r.config_key === 'discord_reviewer_role_id')?.config_value || reviewerRoleId;
-      ocStaffRoleId = cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || ocStaffRoleId;
+      graderRoleId = cfgRows?.find(r => r.config_key === 'discord_grader_role_id')?.config_value
+        || cfgRows?.find(r => r.config_key === 'discord_oc_staff_role_id')?.config_value || graderRoleId;
     } catch { /* fall through to env vars already read above */ }
 
     let appRole = 'user';
     if (adminRoleId && memberRoles.includes(String(adminRoleId))) {
       appRole = 'admin';
     } else if (reviewerRoleId && memberRoles.includes(String(reviewerRoleId))) {
-      appRole = 'staff';
-    } else if (ocStaffRoleId && memberRoles.includes(String(ocStaffRoleId))) {
-      appRole = 'oc_staff';
+      appRole = 'reviewer';
+    } else if (graderRoleId && memberRoles.includes(String(graderRoleId))) {
+      appRole = 'grader';
     }
 
     // Generate a highly secure, random 32-character string to serve as session password

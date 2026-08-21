@@ -1,4 +1,4 @@
-# NARP Database
+# SARP Database
 
 A jutsu reference database for a text-based Naruto roleplay Discord server. Players browse jutsus, filter them in detail, build a personal "session list" they can paste into Discord, and (for the right roles) edit the catalog directly from the browser. Bloodlines remain as filter values but live behind the admin panel; limited specs were moved to a separate site.
 
@@ -18,33 +18,37 @@ Built on React + Vite, styled with Tailwind, backed by Supabase (Postgres + Disc
 8. [Step 7 — Connect Netlify to Supabase via the official extension](#step-7--connect-netlify-to-supabase-via-the-official-extension)
 9. [Step 8 — Finish the redirect URL handshake](#step-8--finish-the-redirect-url-handshake)
 10. [Step 9 — First sign-in (you're auto-promoted to owner)](#step-9--first-sign-in)
-11. [Step 10 — Add admins and staff via the whitelist](#step-10--add-admins-and-staff-via-the-whitelist)
-12. [The pending approval workflow](#the-pending-approval-workflow)
-13. [The env-var reference](#the-env-var-reference)
-14. [Troubleshooting](#troubleshooting)
+11. [Step 10 — Add admins, reviewers, and graders via the whitelist](#step-10--add-admins-reviewers-and-graders-via-the-whitelist)
+12. [Pages and links](#pages-and-links)
+13. [The pending approval workflow](#the-pending-approval-workflow)
+14. [The env-var reference](#the-env-var-reference)
+15. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Permission model
 
-The site has four tiers. Anyone (signed in or not) can browse the jutsu catalog — these tiers only gate editing and management.
+The site has five tiers. Anyone (signed in or not) can browse the jutsu catalog — these tiers only gate editing and management.
 
-| Tier      | Browse jutsus | Edit jutsus     | Manage bloodlines | Manage roles | Manage whitelist |
-| :-------- | :------------ | :-------------- | :-------------------------------- | :----------- | :--------------- |
-| **User**  | ✓ read-only   | —               | —                                 | —            | —                |
-| **Staff** | ✓             | ✓ via approval  | —                                 | —            | —                |
-| **Admin** | ✓             | ✓ direct        | ✓ direct                          | User↔Staff   | Staff entries    |
-| **Owner** | ✓             | ✓ direct        | ✓ direct                          | Anything     | Anything         |
+| Tier         | Browse jutsus | Edit jutsus     | Grade RPs (Gate 1) | Approve upgrades (Gate 2) | Manage bloodlines | Manage roles         | Manage whitelist        |
+| :----------- | :------------ | :-------------- | :----------------- | :------------------------ | :---------------- | :------------------- | :---------------------- |
+| **User**     | ✓ read-only   | —               | —                  | —                         | —                 | —                    | —                       |
+| **Grader**   | ✓             | — (OC review only) | ✓               | —                         | —                 | —                    | —                       |
+| **Reviewer** | ✓             | ✓ via approval  | ✓                  | ✓                         | —                 | —                    | —                       |
+| **Admin**    | ✓             | ✓ direct        | ✓                  | ✓                         | ✓ direct          | User↔Grader↔Reviewer | Grader/Reviewer entries |
+| **Owner**    | ✓             | ✓ direct        | ✓                  | ✓                         | ✓ direct          | Anything             | Anything                |
 
 **Key rules baked into the database (not just the UI):**
 
-- **Only one public tab: Jutsus.** Bloodlines are managed inside System Tools — they populate the bloodline-name dropdown in jutsu filters but don't have their own browse view.
+- **The catalog, bloodlines and roster are public.** Everything else needs a sign-in or a role — see [Pages and links](#pages-and-links).
 - **Slot tracking moved off-site.** Bloodline and limited-spec slot tracking lives on a separate website now. Jutsus still track their own Limited slots (with the view-slots eye icon for users to see who holds them).
-- **Staff can't directly edit jutsus.** Their inserts, edits, and deletes go to a `pending_jutsus` queue and need a second person to approve.
-- **Anyone who isn't the submitter can approve.** Another Staff is enough — it doesn't have to be an admin. Admins bypass approval for their own changes.
-- **Staff cannot touch bloodlines at all.** Admin+ only.
-- **Only the Owner can promote/demote Admins.** Admins can only flip people between User and Staff.
-- **The owner email is hardcoded.** `grisales4000@gmail.com` gets the owner role automatically on first sign-in, and the trigger re-asserts it on every sign-in to prevent accidental SQL lockouts. To change it, edit one string in `supabase/schema.sql` and re-run.
+- **Reviewers can't directly edit jutsus.** Their inserts, edits, and deletes go to a `pending_jutsus` queue and need a second person to approve.
+- **Anyone who isn't the submitter can approve.** Another Reviewer is enough — it doesn't have to be an admin. Admins bypass approval for their own changes.
+- **Graders are OC + RP specialists.** They can review Character submissions and grade RPs (minting upgrade credits), but not jutsu submissions or upgrade requests.
+- **Reviewers cannot touch bloodlines at all.** Admin+ only.
+- **Only the Owner can promote/demote Admins.** Admins can only flip people between User, Grader, and Reviewer.
+- **Grading and upgrade approvals are conflict-guarded.** A grader who participated in an RP can't grade it, and a reviewer can't approve an upgrade for their own OC — enforced in the database functions, not just hidden in the UI.
+- **The first owner is granted via the whitelist, not a hardcoded email.** Before your first sign-in, insert your own email into the `whitelist` table with `role = 'owner'`; `ensure-profile` (and the `handle_new_user` trigger's whitelist check) consumes that row on your first login and deletes it.
 
 ---
 
@@ -53,13 +57,13 @@ The site has four tiers. Anyone (signed in or not) can browse the jutsu catalog 
 You need **Node 18 or newer**. Check with `node -v`.
 
 ```bash
-git clone <your-fork-url> narp-database
-cd narp-database
+git clone <your-fork-url> sarp-database
+cd sarp-database
 npm install
 npm run dev
 ```
 
-The dev server runs at `http://localhost:5173`. Without Supabase env vars yet, the app boots on seed data and shows a "Dev: User / Dev: Admin" toggle in the header — useful for testing the UI without a backend. (Dev mode only has two effective tiers; the full four-tier system needs Supabase.)
+The dev server runs at `http://localhost:5173`. Without Supabase env vars yet, the app boots on seed data and shows a "Dev: User / Dev: Admin" toggle in the header — useful for testing the UI without a backend. (Dev mode only has two effective tiers; the full five-tier system needs Supabase.)
 
 ---
 
@@ -75,16 +79,14 @@ The dev server runs at `http://localhost:5173`. Without Supabase env vars yet, t
 
 ### Run the schema
 
+> **Note:** this repo does not contain a single consolidated base schema file. `supabase/` only has incremental `add-*.sql` patch scripts (plus `auth-trigger.sql` and `submission-queue-updates.sql`) that assume the base tables (`jutsus`, `bloodlines`, `specializations`, `profiles`, `whitelist`, `pending_jutsus`, `role_change_log`, and more added since) already exist. There is no documented run order and no fully self-contained way to stand up a brand-new Supabase project from this repo alone. If you're forking this project, get a schema-only export (Supabase dashboard → **Database** → **Backups**, or `supabase db dump --schema public`) from an existing deployment first, or ask the maintainer for one — then layer any `add-*.sql` files newer than that export on top, oldest to newest by git history.
+
 1. Click **SQL Editor** in the left nav.
-2. Click **New query**.
-3. Open `supabase/schema.sql` from this repo, copy the whole thing, paste it into the SQL Editor.
+2. Click **New query**, paste in your base schema export, and **Run** it.
+3. Open a new query, paste in `supabase/auth-trigger.sql`, and **Run** it. This creates the `handle_new_user()` trigger that copies each new Discord sign-in into `profiles` (checking `whitelist` for a pre-assigned role).
+4. Apply any remaining `supabase/add-*.sql` files that aren't already reflected in your base export, each in its own query.
 
-   **If your owner email isn't `grisales4000@gmail.com`**, find the `owner_email := 'grisales4000@gmail.com'` line in the `handle_new_user()` function (and the matching one in the `on conflict` clause), replace with your email, then run.
-
-4. Click **Run**.
-5. Open a new query, paste in `supabase/add-username.sql`, and **Run** it too. This adds the `username` column that every member is prompted to choose on their first sign-in.
-
-Quick sanity check: click **Table Editor** in the left nav. You should see seven tables — `jutsus`, `bloodlines`, `specializations`, `profiles`, `whitelist`, `pending_jutsus`, `role_change_log`. The `profiles` table should now have a `username` column.
+Quick sanity check: click **Table Editor** in the left nav and confirm `jutsus`, `bloodlines`, `specializations`, `profiles`, `whitelist`, `pending_jutsus`, and `role_change_log` are all present with a `username` column on `profiles`.
 
 ### Grab your two credentials
 
@@ -103,7 +105,7 @@ Discord OAuth is quick — one application, one secret.
 ### 3a. Create a Discord application
 
 1. Go to [discord.com/developers/applications](https://discord.com/developers/applications).
-2. Click **New Application**, name it (`NARP Database` is fine), accept the terms, **Create**.
+2. Click **New Application**, name it (`SARP Database` is fine), accept the terms, **Create**.
 3. In the left nav, open **OAuth2**.
 4. Copy the **Client ID** and, under **Client Secret**, click **Reset Secret** → **Copy**. Keep these handy for Step 4.
 
@@ -131,7 +133,7 @@ Discord OAuth is quick — one application, one secret.
 ## Step 5 — Push the repo to GitHub
 
 ```bash
-cd narp-database
+cd sarp-database
 git init
 git add .
 git commit -m "Initial commit"
@@ -140,7 +142,7 @@ git commit -m "Initial commit"
 Create an empty repository on GitHub (no README), then:
 
 ```bash
-git remote add origin git@github.com:your-username/narp-database.git
+git remote add origin git@github.com:your-username/sarp-database.git
 git branch -M main
 git push -u origin main
 ```
@@ -202,40 +204,63 @@ Two small fix-ups to make sign-in actually work.
 1. Open your deployed site.
 2. Click **Sign in with Discord** in the top-right.
 3. Authorize the app with your Discord account.
-4. On your very first sign-in you'll be asked to **choose a username** before you can use the site. Pick one (3–20 characters, letters/numbers/underscores) — it's how you'll appear to staff and other members.
+4. On your very first sign-in you'll be asked to **choose a username** before you can use the site. Pick one (3–20 characters, letters/numbers/underscores) — it's how you'll appear to the review team and other members.
 
-If your email matches the hardcoded one in `handle_new_user()`, you'll come back as the **owner** automatically — you should see your role badge say `owner`, plus a **System Tools** button in the header and a **Manage Users & Whitelist** option in your avatar dropdown.
+If you inserted your email into `whitelist` with `role = 'owner'` before this sign-in (see [Permission model](#permission-model)), you'll come back as the **owner** automatically — you should see your role badge say `owner`, plus a **System Tools** button in the header and a **Manage Users & Whitelist** option in your avatar dropdown.
 
-If you forgot to change the hardcoded email in the schema before running it, the simplest fix: edit `supabase/schema.sql`, re-run the whole thing (it's idempotent), then sign out and sign back in.
+If you forgot that step and signed in as a plain `user`, the simplest fix: in the SQL Editor, run `update public.profiles set role = 'owner' where email = 'you@example.com';` with your own email, then sign out and back in.
 
 ---
 
-## Step 10 — Add admins and staff via the whitelist
+## Step 10 — Add admins, reviewers, and graders via the whitelist
 
 This is your day-to-day workflow for granting access.
 
 1. Click your avatar → **Manage Users & Whitelist**.
 2. Click the **Whitelist** sub-tab.
-3. Type someone's Gmail address, pick **staff** or **admin**, click **Add**.
+3. Type someone's Gmail address, pick **grader**, **reviewer**, or **admin**, click **Add**.
 4. Tell them to sign in to the site with Discord. As soon as they do, they'll have the role you whitelisted them with. No manual approval, no waiting.
 
 If they already signed in once as a `user` before being whitelisted, no problem — adding them to the whitelist also retroactively updates their role.
 
 To revoke: remove their whitelist entry, then in the **People** tab change their role to `user`. They keep their Discord account but lose all privileges. (Their pending submissions auto-cancel on demotion.)
 
-> **Admins see a filtered view.** Admins can only see User and Staff profiles, and Staff-level whitelist entries. Owner sees everything. Owner is the only one who can demote an Admin or remove an admin whitelist entry.
+> **Admins see a filtered view.** Admins can only see User, Grader, and Reviewer profiles, and grader/reviewer-level whitelist entries. Owner sees everything. Owner is the only one who can demote an Admin or remove an admin whitelist entry.
+
+---
+
+## Pages and links
+
+Every section has its own address, so you can link someone straight to it:
+
+| Link | What it is | Who can open it |
+| :--- | :--- | :--- |
+| `/` | The jutsu catalog | anyone |
+| `/bloodlines` | Bloodline list | anyone |
+| `/roster` | Village roster | anyone |
+| `/grading` | Grading & Upgrade Requests — submit RPs, spend credits, review the queues | signed in |
+| `/history/work-log` | Review throughput per person | reviewers+ |
+| `/history/audit-log` | Role-change history | admins+ |
+| `/inbox` | Your submissions and review chats (a tab of the jutsu catalog) | signed in |
+| `/members` | Member board | admins+ |
+
+The dark strip under the site title switches between these top-level sections; the
+Jutsus/Bloodlines/Inbox tabs and the jutsu filter bar only appear on the catalog itself.
+The green **Submit** button for filing a new entry lives in the persistent header, reachable
+from any tab. Opening a page you don't have access to tells you so rather than bouncing you
+back to the catalog.
 
 ---
 
 ## The pending approval workflow
 
-When **Staff** edits a jutsu (insert, edit, or delete), it doesn't go live immediately — it lands in the **Pending** tab as a submission waiting for a second pair of eyes.
+When a **Reviewer** edits a jutsu (insert, edit, or delete), it doesn't go live immediately — it lands in the **Pending** tab as a submission waiting for a second pair of eyes.
 
 The flow:
 
-1. Staff member fills out the Add/Edit form and clicks **Submit for Approval**. An amber banner in the form makes this obvious before they click.
-2. The entry appears in the **Pending** tab (only Staff+ can see this tab — regular users don't even know it exists).
-3. Any *other* Staff member or any Admin can hit **Approve** — at which point the change applies to the live jutsus table.
+1. The reviewer fills out the Add/Edit form and clicks **Submit for Approval**. An amber banner in the form makes this obvious before they click.
+2. The entry appears in the **Pending** tab (only reviewers+ can see this tab — regular users don't even know it exists).
+3. Any *other* Reviewer or any Admin can hit **Approve** — at which point the change applies to the live jutsus table.
 4. The submitter cannot approve their own submission. They can **Cancel** it, which deletes the pending entry. To make changes, they have to cancel and start over (no inline editing of pending entries).
 
 **Admins skip the queue entirely.** When an admin clicks Save in the form, it writes directly to the database. They can still view/approve/cancel anyone's pending entries.
@@ -309,25 +334,25 @@ The redirect URL handshake (Step 8) is incomplete. Check:
 - The **Discord** provider is enabled in Supabase (**Authentication → Providers**) with a valid Client ID and Secret
 
 **I signed in as the owner email but my role says `user`.**
-Either (a) you didn't update the email in `handle_new_user()` before running the schema, or (b) the trigger didn't fire because you ran the schema *after* signing in. Fix: in Supabase SQL Editor, run `UPDATE profiles SET role = 'owner' WHERE email = 'your@email.com';` — that's the one-time bootstrap.
+Either (a) you didn't whitelist your email with `role = 'owner'` before signing in, or (b) the trigger didn't fire because you ran the schema *after* signing in. Fix: in Supabase SQL Editor, run `UPDATE profiles SET role = 'owner' WHERE email = 'your@email.com';` — that's the one-time bootstrap.
 
 **Whitelist add says "Only the owner can whitelist admins."**
-You're signed in as an admin, not the owner. Admins can only add Staff entries. Only the owner can grant admin-level access.
+You're signed in as an admin, not the owner. Admins can only add Grader and Reviewer entries. Only the owner can grant admin-level access.
 
-**A Staff member's edit isn't showing up in the Jutsus tab.**
-That's by design — it's in the Pending tab waiting for a second approval. Click the Pending tab and hit Approve. (Or, if you're the original submitter, ask another Staff or any Admin to approve.)
+**A Reviewer's edit isn't showing up in the Jutsus tab.**
+That's by design — it's in the Pending tab waiting for a second approval. Click the Pending tab and hit Approve. (Or, if you're the original submitter, ask another Reviewer or any Admin to approve.)
 
 **"Permission denied" when trying to change a role.**
-Owners can change anyone. Admins can only flip people between user and staff. If you're trying to promote someone to admin or demote an admin and you're not the owner, that's blocked at the database level.
+Owners can change anyone. Admins can only flip people between user, grader, and reviewer. If you're trying to promote someone to admin or demote an admin and you're not the owner, that's blocked at the database level.
 
 **Edits work locally but not on the deployed site.**
 Env vars aren't reaching the production build. Check Netlify's environment variables and trigger a fresh deploy.
 
 **The Pending tab is empty but I just submitted something.**
-Check the browser console for `[NARP] submitPendingJutsu failed`. Usually means your role is `user`, not `staff` — staff submissions go to pending, user submissions are blocked entirely. Get the owner to whitelist you as staff.
+Check the browser console for `[NARP] submitPendingJutsu failed`. Usually means your role is `user`, not `reviewer` — reviewer submissions go to pending, user submissions are blocked entirely. Get the owner to whitelist you as a reviewer.
 
-**I demoted a Staff to User and their pending submissions disappeared.**
-By design — `cleanup_pending_on_demotion` trigger cancels their pending entries automatically when they lose staff privileges. Otherwise they'd be ghost submissions from someone who can no longer resubmit.
+**I demoted a Reviewer to User and their pending submissions disappeared.**
+By design — `cleanup_pending_on_demotion` trigger cancels their pending entries automatically when they lose team privileges. Otherwise they'd be ghost submissions from someone who can no longer resubmit.
 
 **I enabled the bell but no push notifications arrive.**
 Work down this list:
@@ -341,8 +366,9 @@ Work down this list:
 ## Project structure
 
 ```
-narp-database/
+sarp-database/
 ├── README.md                   ← this file
+├── CLAUDE.md                   ← guidance for AI coding agents working in this repo
 ├── package.json
 ├── vite.config.js
 ├── tailwind.config.js
@@ -351,29 +377,22 @@ narp-database/
 ├── index.html
 ├── .env.example
 ├── .gitignore
-├── App.claude-preview.jsx      ← single-file version for Claude artifact preview (not used by build)
-├── supabase/
-│   ├── schema.sql              ← run once in Supabase SQL Editor
-│   └── add-username.sql        ← run once to add the username column
+├── supabase/                   ← incremental `add-*.sql` patch scripts, run manually (see "Run the schema" above)
+├── netlify/
+│   ├── functions/              ← Node serverless functions (service-role access, Discord webhooks/DM, push)
+│   └── edge-functions/         ← Deno edge functions (env injection, markdown rendering for crawlers)
 └── src/
     ├── main.jsx
     ├── index.css
-    ├── App.jsx                 ← all UI + business logic (production)
-    └── lib/
-        └── supabase.js         ← Supabase client + data layer + auth + RPC
+    ├── App.jsx                 ← most of the UI + business logic (production)
+    ├── lib/
+    │   └── supabase.js         ← Supabase client + data layer + auth + RPC
+    ├── pages/                  ← RosterPage, InboxPage, WorkStatsPage
+    ├── components/             ← feature/modal/layout/ui components imported by App.jsx and the pages above
+    ├── constants/              ← catalog + character/jutsu sheet shape constants
+    ├── hooks/
+    └── utils/
 ```
-
-### About `App.claude-preview.jsx`
-
-This is a single-file copy of `src/App.jsx` with all Supabase imports replaced by inline no-op stubs. It exists because Claude's artifact runtime can only resolve a fixed allowlist of imports (`react`, `lucide-react`, `recharts`, etc.) — it can't load `./lib/supabase`. With the stubs, `isSupabaseConfigured()` returns false and the app boots into dev mode (localStorage + seed data + role toggle), so you can preview/debug the UI inside Claude without a backend.
-
-**The build (`npm run build` / Netlify) does NOT use this file.** It uses `src/App.jsx`. The preview file exists purely for in-Claude debugging — paste it into a Claude artifact and iterate.
-
-**What you can test from the preview:** all jutsu UI flows, the view-slots eye-icon button on Limited jutsus, the catalog management modal for bloodlines, the dev role toggle (Dev: User / Dev: Admin), filters, sorting, session-list cart, personal tags.
-
-**What you can't test:** Discord sign-in, the pending-approval workflow, the whitelist, the audit log. These need a real Supabase backend — deploy to Netlify to test those.
-
-**Keeping the two files in sync:** any structural change you make in `src/App.jsx` should be mirrored to `App.claude-preview.jsx`. The only intentional difference is the import block at the top.
 
 ---
 

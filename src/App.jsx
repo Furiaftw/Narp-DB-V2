@@ -1,5 +1,10 @@
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from 'react';
+import { Routes, Route, Navigate, NavLink, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { DiscordSDK } from '@discord/embedded-app-sdk';
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  PieChart, Pie, Legend,
+} from 'recharts';
 import {
   supabase,
   isSupabaseConfigured,
@@ -22,6 +27,9 @@ import {
   fetchAllProfiles,
   setUserRole,
   grantWandererTicket,
+  removeMember,
+  banMember,
+  unbanMember,
   consumeWandererTicket,
   fetchWhitelist,
   addToWhitelist,
@@ -36,7 +44,6 @@ import {
   cancelPendingJutsu,
   buildJutsuPayload,
   fromRowJutsu,
-  fetchRoleChangeLog,
   logWorkAction,
   fetchWorkLogMonthly,
   fetchReviewChats,
@@ -53,21 +60,27 @@ import {
   deletePushSubscription,
   saveJutsuReviewHistory,
   fetchJutsuReviewHistory,
+  fetchStorageStats,
+  fetchMyOcCount,
+  fetchCharacterSheetByName,
 } from './lib/supabase';
 import { isNotifEnabled, setNotifEnabled, requestNotifPermission, getNotifPermission, showChatNotification, subscribeToPush, unsubscribeFromPush } from './lib/notifications';
-import { getNetlifyImageUrl, getNetlifyImageSrcSet } from './utils/helpers';
-import RosterPage from './pages/RosterPage';
-import WorkStatsPage from './pages/WorkStatsPage';
-import JutsuStatsModal from './components/modals/JutsuStatsModal';
-import InboxPage from './pages/InboxPage';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, formatBytes } from './utils/helpers';
+import { normalizeSheet as normalizeCharacterSheet, sheetHasContent as characterSheetHasContent } from './constants/characterSheet';
+const RosterPage = lazy(() => import('./pages/RosterPage'));
+const JutsuStatsModal = lazy(() => import('./components/modals/JutsuStatsModal'));
+const InboxPage = lazy(() => import('./pages/InboxPage'));
+const GradingPage = lazy(() => import('./pages/GradingPage'));
+const HistoryPage = lazy(() => import('./pages/HistoryPage'));
 import { JOIN_PREFIX } from './components/features/ReviewChat';
 import JutsuSheetModal from './components/features/JutsuSheetModal';
 import JutsuHistoryModal from './components/features/JutsuHistoryModal';
+import CharacterSheetModal from './components/features/CharacterSheetModal';
 import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent, jutsuDocsHaveContent } from './constants/jutsuSheet';
 
 
 /* ============================================================================
-   NARP DATABASE — Clean Unified Build
+   SARP DATABASE — Clean Unified Build
    ============================================================================ */
 
 /* ---------------------------------------------------------------------------
@@ -361,7 +374,9 @@ const Icon = ({ n, size = 24, className = '' }) => (
    UNIVERSAL RANK PROFILE LOGO
    --------------------------------------------------------------------------- */
 function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
-  const cleanRole = ['owner', 'admin', 'staff', 'user'].includes(role) ? role : 'user';
+  // Legacy DB values from before the grader/reviewer migration still render.
+  const mapped = role === 'staff' ? 'reviewer' : role === 'oc_staff' ? 'grader' : role;
+  const cleanRole = ['owner', 'admin', 'reviewer', 'grader', 'user'].includes(mapped) ? mapped : 'user';
 
   const config = {
     owner: {
@@ -383,12 +398,21 @@ function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
         </svg>
       )
     },
-    staff: {
+    reviewer: {
       gradient: "from-emerald-400 to-emerald-600 text-emerald-50 shadow-emerald-500/20",
       svg: (
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
           {/* Star Badge */}
           <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+        </svg>
+      )
+    },
+    grader: {
+      gradient: "from-teal-400 to-teal-600 text-teal-50 shadow-teal-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Quill Check */}
+          <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
         </svg>
       )
     },
@@ -463,7 +487,7 @@ const MANAGE_TABLES = {
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
       { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, req: true, col: 2 },
       { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, req: true, col: 1 },
-      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, hideIfInc: { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, req: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, req: true, col: 1 },
@@ -1191,7 +1215,7 @@ const formatSessionList = (items) => {
   if (groups.has('Other'))      ordered.push('Other');
   if (groups.has('Battlemode')) ordered.push('Battlemode');
 
-  const out = ['**My NARP List**'];
+  const out = ['**My SARP List**'];
   ordered.forEach(name => {
     const grp = groups.get(name);
     const heading = grp.type === 'bloodline' ? `${name} (Bloodline)` : name;
@@ -1405,9 +1429,9 @@ function FilterBar({ tab, f, setF, activeFilterCount, bloodlinesDb, specOptions,
 
 /* ============================================================================
    COMPONENT: AddSubmissionMenu — lives in the persistent header (not the
-   Jutsus-tab-only FilterBar) so "Submit OC"/Jutsu/Summon/Custom Item is
-   reachable from every tab, not just discoverable if you happen to be
-   looking at the jutsu database.
+   Jutsus-tab-only FilterBar), but only rendered while a Database-section tab
+   (Jutsus/Bloodlines/Inbox, i.e. `isCatalog`) is active — filing a new
+   Jutsu/OC/Summon/Custom Item entry only makes sense from there.
    ============================================================================ */
 const ADD_MENU_WIDTH = 256;
 
@@ -1673,9 +1697,13 @@ function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDirectUpl
       const data = buildData();
       await submitPendingJutsu('insert', null, data, 'pending_review');
 
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: data.name,
@@ -1834,8 +1862,21 @@ const ocNeedLevel = (val, max) => {
   return 'surplus';
 };
 
-function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPending = null, onSavedEdit = null }) {
+const ordinalLabel = (n) => {
+  const v = Number(n) || 0;
+  const mod100 = v % 100;
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th'
+    : v % 10 === 1 ? 'st' : v % 10 === 2 ? 'nd' : v % 10 === 3 ? 'rd' : 'th';
+  return `${v}${suffix}`;
+};
+
+function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, onAfterSubmit, editPending = null, onSavedEdit = null, isAdmin = false, onSubmitAndApprove = null }) {
   const initial = editPending?.data || {};
+  // Character Sheet button (mirrors the jutsu form's "Add Documentation"
+  // button): opens CharacterSheetModal as its own overlay so it can be
+  // filled in while still composing the submission, not just afterward.
+  const [sheetEditorOpen, setSheetEditorOpen] = useState(false);
+  const [sheetFilled, setSheetFilled] = useState(false);
   const [name, setName] = useState(initial.name || '');
   const [ninjaRank, setNinjaRank] = useState(initial.ninja_rank || '');
   const [village, setVillage] = useState(initial.village || '');
@@ -1845,7 +1886,10 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   );
   const [mentorSquad, setMentorSquad] = useState(initial.mentor_squad_number ? String(initial.mentor_squad_number) : '');
   const [councilor, setCouncilor] = useState(!!initial.councilor);
+  // Auto-calculated from the player's existing OCs (approved roster + other
+  // in-flight submissions) instead of self-reported — see fetchMyOcCount.
   const [ocNumber, setOcNumber] = useState(initial.oc_number ? Number(initial.oc_number) : 0);
+  const [ocCountLoading, setOcCountLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rosterCounts, setRosterCounts] = useState(null);
   const [rosterSquads, setRosterSquads] = useState([]);
@@ -1856,6 +1900,29 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   // Discord). Editing an existing Wanderer submission stays allowed even
   // without a ticket, since the ticket was already spent to create it.
   const hasWandererTicket = isEdit ? initial.village === 'Wanderer' : !!profile?.wanderer_ticket;
+
+  useEffect(() => {
+    if (isEdit || !profile?.id) return;
+    let cancelled = false;
+    setOcCountLoading(true);
+    fetchMyOcCount(profile.id, editPending?.id || null)
+      .then(count => { if (!cancelled) setOcNumber(count + 1); })
+      .catch(err => console.warn('[NARP] OC count fetch failed:', err))
+      .finally(() => { if (!cancelled) setOcCountLoading(false); });
+    return () => { cancelled = true; };
+  }, [isEdit, profile?.id, editPending?.id]);
+
+  // Tracks whether the character sheet (opened via the button below) has
+  // been filled in yet, so the button can say "Add" vs "Edit" like the
+  // jutsu form's documentation button does.
+  useEffect(() => {
+    if (isEdit || !name.trim()) { setSheetFilled(false); return; }
+    let cancelled = false;
+    fetchCharacterSheetByName(name.trim())
+      .then(row => { if (!cancelled) setSheetFilled(!!row && characterSheetHasContent(normalizeCharacterSheet(row.data))); })
+      .catch(() => { if (!cancelled) setSheetFilled(false); });
+    return () => { cancelled = true; };
+  }, [isEdit, name, sheetEditorOpen]);
 
   // Population per village per rank, straight from the public roster tables.
   useEffect(() => {
@@ -1977,7 +2044,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   const bloodlineFull = selectedInfo.status === 'full';
 
   const squadRequired = !!squadType && !!village;
-  const submitDisabled = !name.trim() || !ninjaRank || !village || !ocNumber
+  const submitDisabled = !name.trim() || !ninjaRank || !village || !ocNumber || ocCountLoading
     || (squadRequired && !squadChoice) || bloodlineFull || submitting;
 
   const handleSubmit = async (e) => {
@@ -2031,11 +2098,49 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         ...squadFields,
         ...(needsReservation ? { subType: 'reservation_request', reservationStatus: 'requested' } : {}),
       };
-      await submitPendingJutsu('insert', null, data, 'pending_review');
+      const inserted = await submitPendingJutsu('insert', null, data, 'pending_review');
 
+      // Admin+ don't need a second approver — auto-approve right away, unless
+      // this went into the reservation flow (that's inherently a waiting
+      // period while the bloodline slot is held). If the approval-time sheet
+      // check (see handleApprovePending) rejects it because the sheet isn't
+      // filled in yet (the "Character Sheet" button above is optional, not
+      // required, before submitting), it just stays in the Inbox for a
+      // normal approval later once the sheet is done.
+      if (isAdmin && !needsReservation && onSubmitAndApprove && inserted?.id) {
+        try {
+          await onSubmitAndApprove(inserted.id, {
+            id: inserted.id,
+            operation: 'insert',
+            target_id: null,
+            data,
+            status: 'pending_review',
+            submitted_by: profile.id,
+            submitter: profile,
+            first_reviewer: profile,
+          });
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
+        } catch (approveErr) {
+          console.warn('[NARP] Admin auto-approve failed, left in the review queue:', approveErr);
+          alert(
+            'Submitted, but could not auto-approve: ' + (approveErr.message || approveErr) +
+            '\n\nIt is waiting in the Inbox — approve it from there once ready.'
+          );
+          if (onAfterSubmit) onAfterSubmit();
+          onClose();
+          return;
+        }
+      }
+
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
@@ -2057,6 +2162,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
   };
 
   return (
+    <>
     <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
       <div className="bg-white rounded-3xl max-w-lg w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
         <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
@@ -2073,7 +2179,7 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
           {!isEdit && (
             <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2.5 text-xs text-emerald-800">
               <Icon n="Info" size={14} className="shrink-0 mt-0.5" />
-              <span>No Google Doc needed — once your character is approved, click their name in the Roster tab to fill in their full character sheet right here on the site.</span>
+              <span>No Google Doc needed — use the Character Sheet button below to fill in their full sheet right here on the site. It has to be filled in before a reviewer can approve this character.</span>
             </div>
           )}
           <div>
@@ -2088,25 +2194,15 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             />
           </div>
 
-          {/* Which OC — how many characters the player already runs, shown to reviewers */}
+          {/* Which OC — auto-calculated from the player's existing OCs, shown to reviewers */}
           <div>
-            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you? (Mandatory)</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[[1, 'First OC'], [2, 'Second OC'], [3, 'Third OC']].map(([n, label]) => {
-                const active = ocNumber === n;
-                return (
-                  <button
-                    key={n}
-                    type="button"
-                    onClick={() => setOcNumber(n)}
-                    className={`p-3 rounded-xl border-2 text-sm font-bold transition-all ${
-                      active ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-800 hover:border-slate-300'
-                    }`}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
+            <label className="text-xs font-bold text-slate-500 uppercase tracking-widest block mb-1.5">Which OC is this for you?</label>
+            <div className="p-3 rounded-xl border-2 border-slate-200 bg-slate-50 text-sm font-bold text-slate-800 flex items-center gap-2">
+              {ocCountLoading ? (
+                <><Icon n="Refresh" size={14} className="animate-spin text-slate-400" /> Calculating…</>
+              ) : (
+                <>Your {ordinalLabel(ocNumber)} OC</>
+              )}
             </div>
           </div>
 
@@ -2332,6 +2428,25 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
             )}
           </div>
 
+          {/* Character Sheet — mirrors the jutsu form's "Add Documentation" button */}
+          {!isEdit && (
+            <div className="p-4 bg-slate-50 border rounded-2xl">
+              <p className="text-sm font-bold text-slate-800">Character Sheet</p>
+              <p className="text-xs text-slate-500 mb-3">
+                Required before a reviewer can approve this character. Fill it in now, or later from the Inbox.
+              </p>
+              <button
+                type="button"
+                onClick={() => setSheetEditorOpen(true)}
+                disabled={!name.trim()}
+                title={!name.trim() ? 'Enter a character name first' : undefined}
+                className="bg-white border-2 border-emerald-200 text-emerald-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                <Icon n="Edit" size={14}/> {sheetFilled ? 'Edit Character Sheet' : 'Add Character Sheet'}
+              </button>
+            </div>
+          )}
+
           <div className="flex justify-end gap-3 pt-2 border-t border-slate-100 shrink-0">
             <button
               type="button"
@@ -2355,6 +2470,23 @@ function OCSubmissionModal({ profile, bloodlines, onClose, onAfterSubmit, editPe
         </form>
       </div>
     </div>
+    {sheetEditorOpen && (
+      <CharacterSheetModal
+        characterName={name.trim()}
+        currentUserId={profile?.id}
+        ownerIdHint={profile?.id}
+        jutsus={jutsus}
+        prefill={{
+          village,
+          shinobi_rank: ninjaRank,
+          clan_kkg: bloodline && bloodline !== CLANLESS ? bloodline : '',
+          oc_number: ocNumber || null,
+        }}
+        onClose={() => setSheetEditorOpen(false)}
+        onSaved={() => setSheetFilled(true)}
+      />
+    )}
+    </>
   );
 }
 
@@ -2511,6 +2643,61 @@ function BloodlineRosterCard({ bl, isAdmin, onEdit }) {
   );
 }
 
+/* ---- Bloodline stat charts (same visual language as JutsuStatsModal) ------ */
+const BL_ORIGIN_COLORS = { Canon: '#10b981', Custom: '#f59e0b' };
+const BL_SUBCAT_COLORS = { Dojutsu: '#a855f7', 'Kekkei Genkai': '#6366f1', Hiden: '#f43f5e', Specialization: '#06b6d4', Other: '#94a3b8' };
+const BL_GENERIC_PALETTE = ['#6366f1', '#06b6d4', '#8b5cf6', '#34d399', '#f59e0b', '#ec4899', '#38bdf8', '#a855f7', '#f87171', '#22c55e'];
+
+const BL_TT = {
+  contentStyle: { background: '#ffffff', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12 },
+  labelStyle: { color: '#334155', fontWeight: 700 },
+  itemStyle: { color: '#475569' },
+};
+
+function BLChartCard({ title, subtitle, children }) {
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">{title}</p>
+      {subtitle && <p className="text-[10px] text-slate-400 mb-3">{subtitle}</p>}
+      {!subtitle && <div className="mb-3" />}
+      {children}
+    </div>
+  );
+}
+
+function BLBarSection({ title, subtitle, data, colorFor }) {
+  return (
+    <BLChartCard title={title} subtitle={subtitle}>
+      <ResponsiveContainer width="100%" height={200}>
+        <BarChart data={data} barCategoryGap="25%">
+          <XAxis dataKey="name" tick={{ fill: '#475569', fontSize: 10, fontWeight: 700 }} axisLine={false} tickLine={false} interval={0} angle={-20} textAnchor="end" height={50} />
+          <YAxis tick={{ fill: '#94a3b8', fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+          <Tooltip {...BL_TT} />
+          <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+            {data.map((d, i) => <Cell key={i} fill={colorFor(d.name, i)} fillOpacity={0.85} />)}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </BLChartCard>
+  );
+}
+
+function BLPieSection({ title, subtitle, data, colorFor }) {
+  return (
+    <BLChartCard title={title} subtitle={subtitle}>
+      <ResponsiveContainer width="100%" height={200}>
+        <PieChart>
+          <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} innerRadius={36} paddingAngle={3} strokeWidth={0}>
+            {data.map((d, i) => <Cell key={i} fill={colorFor(d.name, i)} fillOpacity={0.85} />)}
+          </Pie>
+          <Tooltip {...BL_TT} />
+          <Legend iconType="circle" iconSize={8} formatter={v => <span style={{ color: '#475569', fontSize: 10, fontWeight: 700 }}>{v}</span>} />
+        </PieChart>
+      </ResponsiveContainer>
+    </BLChartCard>
+  );
+}
+
 /* ============================================================================
    COMPONENT: BloodlinesRosterTab
    ============================================================================ */
@@ -2530,11 +2717,15 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
     const all = bloodlines || [];
     const bySub = ORDER.reduce((acc, s) => ({ ...acc, [s]: 0 }), {});
     all.forEach(b => { bySub[ORDER.includes(b.subcategory) ? b.subcategory : 'Other'] += 1; });
+    const canon = all.filter(b => b.category === 'Canon').length;
+    const custom = all.filter(b => b.category === 'Custom').length;
     return {
       total:  all.length,
-      canon:  all.filter(b => b.category === 'Canon').length,
-      custom: all.filter(b => b.category === 'Custom').length,
+      canon,
+      custom,
       bySub,
+      originData: [{ name: 'Canon', value: canon }, { name: 'Custom', value: custom }],
+      subcatData: ORDER.map(s => ({ name: SUBCAT_LABELS[s], value: bySub[s] })),
     };
   }, [bloodlines]);
 
@@ -2587,13 +2778,29 @@ function BloodlinesRosterTab({ bloodlines, isAdmin, onEdit, bF, setBF }) {
           <Icon n={statsOpen ? 'Up' : 'Down'} size={16} className="text-slate-400" />
         </button>
         {statsOpen && (
-          <div className="px-4 pb-4 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-            {STAT_TILES.map(tile => (
-              <div key={tile.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
-                <p className={`text-xl font-black leading-tight ${tile.accent}`}>{tile.value}</p>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{tile.label}</p>
-              </div>
-            ))}
+          <div className="px-4 pb-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+              {STAT_TILES.map(tile => (
+                <div key={tile.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center">
+                  <p className={`text-xl font-black leading-tight ${tile.accent}`}>{tile.value}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400 mt-0.5">{tile.label}</p>
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <BLPieSection
+                title="Canon vs. Custom"
+                subtitle="Share of the bloodline database"
+                data={blStats.originData}
+                colorFor={(name) => BL_ORIGIN_COLORS[name] || BL_GENERIC_PALETTE[0]}
+              />
+              <BLBarSection
+                title="By Subcategory"
+                subtitle="Bloodlines per classification"
+                data={blStats.subcatData}
+                colorFor={(name, i) => BL_SUBCAT_COLORS[name] || BL_GENERIC_PALETTE[i % BL_GENERIC_PALETTE.length]}
+              />
+            </div>
           </div>
         )}
       </div>
@@ -3068,78 +3275,6 @@ function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willGoToPend
 }
 
 /* ============================================================================
-   MODAL: AuditLogModal
-   ============================================================================ */
-function AuditLogModal({ onClose }) {
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await fetchRoleChangeLog(200);
-        if (!cancelled) setEntries(list);
-      } catch (e) {
-        if (!cancelled) setError(e.message || 'Failed to load audit log.');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const arrow = (from, to) => {
-    const colors = { user: 'text-slate-500', staff: 'text-emerald-600', oc_staff: 'text-teal-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
-    const label = (r) => r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff' : (r || '∅');
-    return (
-      <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{label(from)}</span>
-        <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{label(to)}</span>
-      </span>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon n="Clock" size={20} className="text-amber-400" />
-            <h3 className="font-bold text-lg">Audit Log — Role Changes</h3>
-          </div>
-          <button onClick={onClose}><Icon n="X" size={18} /></button>
-        </div>
-
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {error && <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold">{error}</div>}
-          {loading ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
-          ) : entries.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">No role changes recorded yet.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {entries.map(e => (
-                <div key={e.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                  <div className="text-slate-400 font-mono shrink-0 w-32 truncate">{new Date(e.changed_at).toLocaleString()}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-800 truncate">{maskEmail(e.target_email) || '(unknown)'}</div>
-                    <div className="text-slate-500 truncate">by {maskEmail(e.changed_by_email) || 'system'}</div>
-                  </div>
-                  <div className="shrink-0">{arrow(e.old_role, e.new_role)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
    MODAL: SystemToolsModal
    ============================================================================ */
 const SUBMISSION_GATE_TYPES = [
@@ -3150,13 +3285,28 @@ const SUBMISSION_GATE_TYPES = [
 ];
 const SUBMISSION_GATE_LABELS = Object.fromEntries(SUBMISSION_GATE_TYPES.map(({ key, label }) => [key, label]));
 
-function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, isAdmin, isStaff, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
+function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onManageBL, isOwner, isAdmin, isReviewer, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
   const [newTtag, setNewTtag] = useState('');
   const [pendingDelTtag, setPendingDelTtag] = useState(null);
   const [togglePending, setTogglePending] = useState({});
+  const [storageStats, setStorageStats] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError, setStorageError] = useState('');
+
+  const loadStorageStats = async () => {
+    setStorageLoading(true);
+    setStorageError('');
+    try {
+      setStorageStats(await fetchStorageStats());
+    } catch (e) {
+      setStorageError(e.message || 'Failed to calculate storage.');
+    } finally {
+      setStorageLoading(false);
+    }
+  };
 
   const handleToggle = async (key) => {
     if (!isOwner || !isSupabaseConfigured()) return;
@@ -3226,7 +3376,7 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(db, null, 2));
     const a = document.createElement('a');
     a.href = dataStr;
-    a.download = 'narp_database_backup.json';
+    a.download = 'sarp_database_backup.json';
     a.click();
     setMsg('JSON Exported Successfully');
   };
@@ -3312,16 +3462,58 @@ function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAud
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Storage Calculator */}
+            {isAdmin && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+                  <Icon n="Database" size={20} className="text-indigo-500" /> Storage Calculator
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">How much data the Jutsu/Battlemode catalog, Bloodlines, and Roster are actually using.</p>
+                <button onClick={loadStorageStats} disabled={storageLoading}
+                        className="bg-indigo-600 text-white py-2.5 px-4 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50">
+                  <Icon n="Refresh" size={14} className={storageLoading ? 'animate-spin' : ''} /> {storageStats ? 'Refresh' : 'Calculate'}
+                </button>
+                {storageError && <p className="text-xs text-rose-600 mt-3 font-semibold">{storageError}</p>}
+                {storageStats && (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200">
+                          <th className="py-2 pr-4">Category</th>
+                          <th className="py-2 pr-4 text-right">Rows</th>
+                          <th className="py-2 pr-4 text-right">Data size</th>
+                          <th className="py-2 text-right">On disk (table + indexes)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {storageStats.map(row => (
+                          <tr key={row.category} className="border-b border-slate-200 last:border-0">
+                            <td className="py-2 pr-4 font-semibold text-slate-700">{row.category}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-500">{row.row_count}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-700">{row.data_bytes != null ? formatBytes(row.data_bytes) : '—'}</td>
+                            <td className="py-2 text-right tabular-nums text-slate-700">{row.table_bytes != null ? formatBytes(row.table_bytes) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                      "Data size" sums each row's own content (name, description, stats, etc.) — Jutsu and Battlemode are split out of the same table. "On disk" is the full Postgres table size, indexes included, which is why it doesn't match the data size exactly.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Audit Log */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
                 <Icon n="Clock" size={20} className="text-amber-500" /> Audit Log
               </h3>
               <p className="text-xs text-slate-500 mb-6">View the history of role changes — who promoted or demoted whom, and when.</p>
-              <button onClick={onOpenAuditLog}
-                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
+              <NavLink to="/history/audit-log" onClick={onClose}
+                       className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
                 <Icon n="Eye" size={16}/> View log
-              </button>
+              </NavLink>
             </div>
 
             {/* Manage Bloodlines */}
@@ -3783,7 +3975,9 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
   const roleColors = {
     owner: 'bg-amber-500 text-amber-50 border-amber-600',
     admin: 'bg-indigo-500 text-indigo-50 border-indigo-600',
+    reviewer: 'bg-emerald-500 text-emerald-50 border-emerald-600',
     staff: 'bg-emerald-500 text-emerald-50 border-emerald-600',
+    grader: 'bg-teal-500 text-teal-50 border-teal-600',
     oc_staff: 'bg-teal-500 text-teal-50 border-teal-600',
     user:  'bg-slate-600 text-slate-50 border-slate-700',
   };
@@ -3795,7 +3989,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-1 pr-2.5 transition-colors">
         <ProfileAvatar profile={activeProfile} className="w-6 h-6 rounded-md" />
         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${roleColors[activeProfile.role] || roleColors.user}`}>
-          {activeProfile.role === 'staff' ? 'Reviewer' : activeProfile.role === 'oc_staff' ? 'Staff' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
+          {['staff', 'reviewer'].includes(activeProfile.role) ? 'Reviewer' : ['oc_staff', 'grader'].includes(activeProfile.role) ? 'Grader' : activeProfile.role === 'owner' ? 'Operator' : activeProfile.role}
         </span>
         <Icon n="Down" size={12} className="text-slate-400" />
       </button>
@@ -3814,8 +4008,8 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
             </div>
           </div>
 
-          {/* Site Nickname — staff / oc_staff / admin / owner only */}
-          {supabaseReady && profile && ['staff', 'oc_staff', 'admin', 'owner'].includes(profile.role) && (
+          {/* Site Nickname — grader / reviewer / admin / owner only */}
+          {supabaseReady && profile && ['grader', 'reviewer', 'admin', 'owner'].includes(profile.role) && (
             <div className="border-b border-slate-100 px-4 py-3">
               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Site Nickname</div>
               {!nicknameEditing ? (
@@ -3896,8 +4090,8 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
               >
                 <option value="owner">Operator (default)</option>
                 <option value="admin">Admin</option>
-                <option value="staff">Reviewer</option>
-                <option value="oc_staff">Staff (OC only)</option>
+                <option value="reviewer">Reviewer</option>
+                <option value="grader">Grader</option>
                 <option value="user">User</option>
               </select>
             </div>
@@ -3908,7 +4102,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                 <Icon n="Key" size={10} className="text-indigo-400"/> Dev · Role
               </div>
               <div className="flex flex-wrap gap-1">
-                {['user', 'staff', 'oc_staff', 'admin', 'owner'].map(r => (
+                {['user', 'grader', 'reviewer', 'admin', 'owner'].map(r => (
                   <button key={r} type="button"
                     onClick={() => onToggleDevRole(r)}
                     className={`text-xs px-2.5 py-1 rounded-lg font-bold border transition-colors ${
@@ -3916,7 +4110,7 @@ function UserMenu({ profile, onSignIn, onDevSignIn, onSignOut, supabaseReady, de
                         ? 'bg-indigo-600 text-white border-indigo-600'
                         : 'text-slate-600 border-slate-200 bg-white hover:bg-slate-100'
                     }`}>
-                    {r === 'staff' ? 'Reviewer' : r === 'oc_staff' ? 'Staff (OC)' : r === 'owner' ? 'Operator' : r}
+                    {r === 'owner' ? 'Operator' : r}
                   </button>
                 ))}
               </div>
@@ -4060,8 +4254,42 @@ const getPendingAssignedId = (p) => {
 const getChatTurn = (lastMsg, myId, iAmSubmitter) => {
   if (!lastMsg) return null;
   if (iAmSubmitter) return lastMsg.sender_id === myId ? 'them' : 'you';
-  return ['staff', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
+  return ['reviewer', 'admin', 'owner'].includes(lastMsg.profiles?.role) ? 'them' : 'you';
 };
+
+/* ---------------------------------------------------------------------------
+   ROUTE HELPERS
+   --------------------------------------------------------------------------- */
+
+// HistoryPage takes the sub-view as a prop; useParams keeps that out of App.
+function HistoryRoute({ profile, role }) {
+  const { view } = useParams();
+  if (view !== 'work-log' && view !== 'audit-log') {
+    return <Navigate to="/history/work-log" replace />;
+  }
+  return <HistoryPage view={view} profile={profile} role={role} />;
+}
+
+// Gate panels: a shared link should explain itself rather than silently
+// bouncing someone to the catalog.
+function NoAccess({ what }) {
+  return (
+    <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-8 text-center">
+      <Icon n="Lock" size={28} className="text-slate-300 mx-auto mb-3" />
+      <p className="text-sm font-semibold text-slate-600">{what}</p>
+      <p className="text-xs text-slate-400 mt-1">Ask an admin if you think you should have access.</p>
+    </div>
+  );
+}
+
+function SignedOutNotice({ what }) {
+  return (
+    <div className="max-w-3xl mx-auto bg-white rounded-3xl border border-slate-200 p-8 text-center">
+      <Icon n="User" size={28} className="text-slate-300 mx-auto mb-3" />
+      <p className="text-sm font-semibold text-slate-600">Sign in with Discord to see {what}.</p>
+    </div>
+  );
+}
 
 export default function App() {
   const headerRef = useRef(null);
@@ -4078,14 +4306,17 @@ export default function App() {
   const [submissionControls, setSubmissionControls] = useState({ jutsu_paused: false, custom_item_paused: false, summon_paused: false, character_paused: false, discord_notifications_paused: false });
   const supabaseReady = isSupabaseConfigured();
 
-  const role    = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
-  const isStaff = role === 'staff' || role === 'admin' || role === 'owner';
+  // Legacy role strings from a session cached before the grader/reviewer
+  // migration normalize to the new names; the DB migration renames the rest.
+  const rawRole = supabaseReady ? (viewAsRole || profile?.role || 'guest') : devRole;
+  const role    = rawRole === 'staff' ? 'reviewer' : rawRole === 'oc_staff' ? 'grader' : rawRole;
+  const isReviewer = role === 'reviewer' || role === 'admin' || role === 'owner';
   const isAdmin = role === 'admin' || role === 'owner';
   const isOwner = role === 'owner';
-  // 'oc_staff' ("Staff" in the UI) is a narrower reviewer tier that can only
-  // claim/review/approve OC (Character) submissions — everything else in the
-  // app treats them like a plain 'user'.
-  const isOcStaff = role === 'oc_staff';
+  // 'grader' is the narrower tier: it can claim/review/approve OC (Character)
+  // submissions and grade RPs (Gate 1) — everything else in the app treats
+  // them like a plain 'user'.
+  const isGrader = role === 'grader';
 
   const [pendingJutsus, setPendingJutsus] = useState([]);
   const pendingJutsusRef = useRef([]);
@@ -4139,7 +4370,20 @@ export default function App() {
 
   const [profilesList, setProfilesList] = useState([]);
   const [profilesLoading, setProfilesLoading] = useState(false);
-  const [tab, setTab]           = useState('jutsus');
+  // Navigation is the URL. `tab` is derived, kept as a short name because the
+  // catalog's filter/expand logic reads it in a dozen places: 'jutsus' and
+  // 'bloodlines' are the two catalog views, everything else is its own page.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const pathname = location.pathname;
+  const tab = pathname === '/bloodlines' ? 'bloodlines'
+            : pathname === '/'           ? 'jutsus'
+            : pathname.split('/')[1] || 'jutsus';
+  const isCatalog = tab === 'jutsus' || tab === 'bloodlines' || tab === 'inbox';
+  // Roster and History (work log) paint their own full-bleed layouts, so the
+  // shell must not add its page padding on top of them.
+  const selfLaidOut = pathname === '/roster'
+    || (pathname.startsWith('/history') && pathname !== '/history/audit-log');
 
   const loadProfiles = useCallback(async () => {
     if (!supabaseReady || !isAdmin) return;
@@ -4176,6 +4420,38 @@ export default function App() {
     } catch (err) {
       console.error('[NARP] Failed to grant Wanderer ticket:', err);
       alert('Failed to grant ticket: ' + (err.message || err));
+    }
+  };
+
+  const handleRemoveMember = async (userId, username) => {
+    if (!window.confirm(`Permanently remove ${username || 'this member'}? This deletes their login account and profile. This cannot be undone.`)) return;
+    try {
+      await removeMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to remove member:', err);
+      alert('Failed to remove member: ' + (err.message || err));
+    }
+  };
+
+  const handleBanMember = async (userId, username) => {
+    if (!window.confirm(`Ban ${username || 'this member'}? They will be unable to sign in until unbanned.`)) return;
+    try {
+      await banMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to ban member:', err);
+      alert('Failed to ban member: ' + (err.message || err));
+    }
+  };
+
+  const handleUnbanMember = async (userId, username) => {
+    try {
+      await unbanMember(userId);
+      await loadProfiles();
+    } catch (err) {
+      console.error('[NARP] Failed to unban member:', err);
+      alert('Failed to unban member: ' + (err.message || err));
     }
   };
 
@@ -4244,7 +4520,7 @@ export default function App() {
     return () => observer.disconnect();
   }, [loading]);
 
-  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, audit: false, manageBL: false, iosInstall: false, stats: false });
+  const [modals, setModals]         = useState({ credits: false, copiedId: null, system: false, manageBL: false, iosInstall: false, stats: false });
   const [installPrompt, setInstallPrompt] = useState(null);
   const [appInstalled, setAppInstalled]   = useState(() => window.matchMedia('(display-mode: standalone)').matches || !!window.navigator.standalone);
 
@@ -4384,7 +4660,7 @@ export default function App() {
   const handleSignOut = async () => { try { await signOut(); setProfile(null); setViewAsRole(null); } catch (e) { console.warn('[NARP] sign-out failed:', e); } };
 
   const refreshPending = useCallback(async () => {
-    if (!supabaseReady || (!isStaff && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
+    if (!supabaseReady || (!isReviewer && !profile?.id)) { setPendingJutsus([]); setMyOwnSubmissions([]); setPendingLoaded(false); return; }
     try {
       const list = await fetchPendingJutsus();
 
@@ -4395,9 +4671,9 @@ export default function App() {
 
       // Staff see all submissions EXCEPT their own in the Pending review tab.
       // OC Staff see the same, narrowed to Character (OC) entries only.
-      const filtered = isStaff
+      const filtered = isReviewer
         ? list.filter(p => p.submitted_by !== profile?.id)
-        : isOcStaff
+        : isGrader
           ? list.filter(p => p.submitted_by !== profile?.id && p.data?.type === 'Character')
           : [];
       
@@ -4446,15 +4722,15 @@ export default function App() {
     } catch (e) {
       console.warn('[NARP] fetchPendingJutsus failed:', e);
     }
-  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
+  }, [supabaseReady, isReviewer, isGrader, profile?.id]);
 
   useEffect(() => { refreshPending(); }, [refreshPending]);
 
   useEffect(() => {
     if (!supabaseReady || !profile?.id) return;
     fetchChatOverview().then(setChatThreads).catch(() => {});
-    if (isStaff || isOcStaff) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
-  }, [supabaseReady, isStaff, isOcStaff, profile?.id]);
+    if (isReviewer || isGrader) fetchMyParticipatingChatIds(profile.id).then(setMyParticipatingIds).catch(() => {});
+  }, [supabaseReady, isReviewer, isGrader, profile?.id]);
 
   const [refreshing, setRefreshing] = useState(false);
   const refreshDB = useCallback(async () => {
@@ -4471,6 +4747,20 @@ export default function App() {
   }, [refreshPending]);
 
   useEffect(() => { tabRef.current = tab; }, [tab]);
+  // react-router does not restore scroll on navigation.
+  useEffect(() => { window.scrollTo(0, 0); }, [pathname]);
+
+  // Entering the catalog starts from a clean slate, the way switching tabs
+  // used to. Leaving it collapses any expanded row.
+  useEffect(() => {
+    setExpRow(null);
+    if (isCatalog) {
+      clearF();
+      setF(p => ({ ...p, sort: 'az', showFilters: false }));
+    }
+    if (pathname === '/inbox') setInboxHasNew(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   useEffect(() => {
     if (!supabaseReady || !profile) return;
@@ -4532,7 +4822,7 @@ export default function App() {
         }
       }
     };
-  }, [supabaseReady, profile, refreshDB, refreshPending, isStaff]);
+  }, [supabaseReady, profile, refreshDB, refreshPending, isReviewer]);
 
   // 30-second polling to catch submissions missed by realtime
   useEffect(() => {
@@ -4566,7 +4856,7 @@ export default function App() {
     }
 
     const shouldGoToPending = isJutsus && (
-      ((role === 'user' || role === 'staff') && !isAdmin) ||
+      ((role === 'user' || role === 'reviewer') && !isAdmin) ||
       (isAdmin && askSecondApproval)
     );
 
@@ -4580,9 +4870,13 @@ export default function App() {
       await submitPendingJutsu(operation, targetId, payload, status);
 
       const tab = t;
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           triggerType: 'creation',
           itemName: entity?.name || 'Unknown',
@@ -4623,7 +4917,7 @@ export default function App() {
     }
 
     throw new Error('Permission denied');
-  }, [isAdmin, isStaff, role, adminForm, supabaseReady, refreshPending, profile]);
+  }, [isAdmin, isReviewer, role, adminForm, supabaseReady, refreshPending, profile]);
 
   const applyChangeLocally = (t, operation, targetId, entity) => {
     setDb(d => {
@@ -4636,7 +4930,7 @@ export default function App() {
     });
   };
 
-  const handleApprovePending = async (id) => {
+  const handleApprovePending = async (id, itemOverride = null) => {
     if (approvingIds.has(id)) return;
     setApprovingIds(prev => new Set([...prev, id]));
     try {
@@ -4644,8 +4938,10 @@ export default function App() {
       setPendingJutsus(prev => prev.filter(p => p.id !== id));
       // Log the approval to Discord before committing it. The submitter is the
       // staff member who queued the entry; the current user is the reviewer
-      // (the "2nd pair of eyes" in the double-approver workflow).
-      const item = pendingJutsus.find(p => p.id === id);
+      // (the "2nd pair of eyes" in the double-approver workflow). itemOverride
+      // lets an admin's own just-submitted OC (never in pendingJutsus, which
+      // excludes your own submissions) auto-approve through this same path.
+      const item = itemOverride || pendingJutsus.find(p => p.id === id);
       if (item) {
         const isDelete = item.operation === 'delete';
         const rawDisplayData = isDelete
@@ -4658,6 +4954,23 @@ export default function App() {
         };
 
         const isCharacter = item.data?.type === 'Character';
+
+        // A character can't be approved until its OC sheet is filled in --
+        // players/staff fill it from the pending item (PendingJutsuCard) while
+        // it's still awaiting review, same idea as the "final step" gate below.
+        if (isCharacter && !isDelete) {
+          const characterName = (item.data?.name || '').trim();
+          let sheetRow = null;
+          try {
+            sheetRow = characterName ? await fetchCharacterSheetByName(characterName) : null;
+          } catch (sheetErr) {
+            console.warn('[NARP] Character sheet lookup failed:', sheetErr);
+          }
+          const sheetOk = sheetRow && characterSheetHasContent(normalizeCharacterSheet(sheetRow.data));
+          if (!sheetOk) {
+            throw new Error(`${characterName || 'This character'} needs a completed character sheet before approval. Fill it in from the Inbox, then approve again.`);
+          }
+        }
 
         // Auto-insert the approved character into their bloodline's roster
         // slots (name + character-area link). A granted reservation held for
@@ -5007,9 +5320,13 @@ export default function App() {
 
       // No work log embed at first-check time — the single combined embed is sent at approval.
 
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: 1 }),
       }).catch((pingErr) => {
         console.warn('Failed to send reviewer second approval ping:', pingErr);
@@ -5095,9 +5412,13 @@ export default function App() {
 
       await recordSecondApprovalPing(id, nextCount);
 
+      const _pingSess = await getCurrentSession();
       await fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: nextCount }),
       });
     } catch (e) {
@@ -5113,9 +5434,13 @@ export default function App() {
       const itemType = 'Jutsu';
 
       // Post a plain retraction notice to the Discord log channel — no work log
+      const _pingSess = await getCurrentSession();
       fetch('/.netlify/functions/reviewer-ping', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
+        },
         body: JSON.stringify({ triggerType: 'retracted', itemName, itemType }),
       }).catch(err => console.warn('[NARP] Retraction ping failed:', err));
 
@@ -5260,7 +5585,7 @@ export default function App() {
     if (!profile?.id) return [];
     const seen = new Set();
     const source = [];
-    for (const p of [...myOwnSubmissions, ...((isStaff || isOcStaff) ? pendingJutsus : [])]) {
+    for (const p of [...myOwnSubmissions, ...((isReviewer || isGrader) ? pendingJutsus : [])]) {
       if (!seen.has(p.id)) { seen.add(p.id); source.push(p); }
     }
     return source.map(p => {
@@ -5281,7 +5606,7 @@ export default function App() {
         : (turn === 'you' ? 'awaiting_you' : 'awaiting_them');
       return { pending: p, messages: thread.messages, lastMessage: thread.lastMessage, turn, unreadCount, status };
     });
-  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isStaff, isOcStaff, chatReadMap]);
+  }, [chatThreadById, pendingJutsus, myOwnSubmissions, profile?.id, isReviewer, isGrader, chatReadMap]);
 
   const inboxItemById = useMemo(
     () => new Map(inboxItems.map(it => [it.pending.id, it])),
@@ -5322,22 +5647,24 @@ export default function App() {
     );
   }
 
-  const TABS = [
-    { id: 'jutsus',     label: 'Jutsus',     count: (db.jutsus || []).length },
-    { id: 'bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
-    ...(profile ? [{ id: 'inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
-    ...(isAdmin ? [{ id: 'members', label: 'Member Board' }] : []),
-    { id: 'roster', label: 'Roster' },
-    ...(isStaff ? [{ id: 'worklog', label: 'Work Log' }] : []),
+  // The catalog's own two views — the only thing left in the tab bar.
+  const CATALOG_TABS = [
+    { to: '/',           label: 'Jutsus',     count: (db.jutsus || []).length },
+    { to: '/bloodlines', label: 'Bloodlines', count: (db.bloodlines || []).length },
+    ...(profile ? [{ to: '/inbox', label: 'Inbox', count: inboxItems.length, unread: inboxUnreadCount, hasNew: inboxHasNew }] : []),
   ];
 
-  const switchTab = (tabId) => {
-    setTab(tabId);
-    if (tabId === 'inbox') setInboxHasNew(false);
-    setExpRow(null);
-    clearF();
-    setF(p => ({ ...p, sort: 'az', showFilters: false }));
-  };
+  // Everything else is its own page, reachable from the header switcher.
+  const SECTIONS = [
+    { to: '/', label: 'Database', match: (p) => p === '/' || p === '/bloodlines' || p === '/inbox' },
+    { to: '/roster', label: 'Roster' },
+    ...(profile || !supabaseReady ? [{ to: '/grading', label: 'Grading/Upgrade Requests' }] : []),
+    ...(isReviewer ? [{ to: '/history/work-log', label: 'History', match: (p) => p.startsWith('/history') }] : []),
+    ...(isAdmin ? [{ to: '/members', label: 'Member Board' }] : []),
+  ];
+
+  const activeSection = SECTIONS.find(sec => sec.match ? sec.match(pathname) : pathname.startsWith(sec.to));
+  const headerTitle = `SARP ${activeSection ? activeSection.label : 'Database'}`;
 
   // Pending's four review-queue groups (drawn only from OTHER people's
   // submissions), plus a fifth bucket for the viewer's own — folding My
@@ -5376,7 +5703,7 @@ export default function App() {
           <div className="bg-amber-50 border-b border-amber-200 text-amber-900 text-sm px-4 py-3 flex items-start gap-3">
             <Icon n="Alert" size={18} className="text-amber-600 mt-0.5 shrink-0" />
             <div className="flex-1">
-              <p className="font-bold mb-1">NARP DB is shutting down on August 20th.</p>
+              <p className="font-bold mb-1">SARP DB is shutting down on August 20th.</p>
               <p>
                 Running this site costs money to keep online, and that cost isn't sustainable long-term. Please
                 save or export anything you need before then.
@@ -5384,7 +5711,7 @@ export default function App() {
               <p className="mt-1.5 font-mono text-xs sm:text-sm font-semibold tracking-wide">
                 {msUntilShutdown > 0
                   ? `${shutdownCountdown.days}d ${String(shutdownCountdown.hours).padStart(2, '0')}h ${String(shutdownCountdown.mins).padStart(2, '0')}m ${String(shutdownCountdown.secs).padStart(2, '0')}s remaining`
-                  : 'NARP DB has shut down.'}
+                  : 'SARP DB has shut down.'}
               </p>
             </div>
             <button
@@ -5399,12 +5726,12 @@ export default function App() {
         {/* HEADER */}
         <div className="bg-black text-white p-4 flex flex-col sm:flex-row justify-between items-center gap-3">
           <h1 className="text-lg font-bold tracking-widest uppercase flex items-center gap-2 w-full sm:w-auto justify-center sm:justify-start">
-            <Icon n="Book" size={18} className="text-red-500" />
-            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">NARP Database</button>
+            <Icon n="Book" size={18} className="text-blue-600" />
+            <button onClick={() => setModals(m => ({ ...m, credits: true }))} className="hover:text-indigo-300">{headerTitle}</button>
           </h1>
           <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-center sm:justify-end pb-1 sm:pb-0">
             <div className="flex items-center gap-2">
-              {isStaff && (
+              {isReviewer && (
                 <button
                   onClick={refreshDB}
                   disabled={refreshing}
@@ -5413,7 +5740,7 @@ export default function App() {
                   <Icon n="Refresh" size={15} className={refreshing ? 'animate-spin' : ''} />
                 </button>
               )}
-              {isStaff && (
+              {isReviewer && (
                 <button onClick={() => setModals(m => ({ ...m, system: true }))}
                         className="text-xs px-3 py-1.5 font-bold rounded-lg border border-slate-700 bg-slate-800 text-slate-200 hover:bg-slate-700 flex items-center gap-1.5 shrink-0">
                   <Icon n="Settings" size={14}/>
@@ -5502,15 +5829,17 @@ export default function App() {
             </div>
             {viewAsRole && (
               <span className="text-[10px] font-bold px-2 py-1 bg-amber-500 text-white rounded-full shrink-0">
-                Previewing as {viewAsRole === 'staff' ? 'Reviewer' : viewAsRole}
+                Previewing as {viewAsRole === 'owner' ? 'Operator' : viewAsRole}
               </span>
             )}
-            <AddSubmissionMenu
-              canSubmit={role !== 'guest'}
-              onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
-              onOpenStatelessSubmission={setStatelessType}
-              submissionControls={submissionControls}
-            />
+            {isCatalog && (
+              <AddSubmissionMenu
+                canSubmit={role !== 'guest'}
+                onAdd={() => setAdminForm({ r: {}, tab: 'jutsus' })}
+                onOpenStatelessSubmission={setStatelessType}
+                submissionControls={submissionControls}
+              />
+            )}
             <UserMenu
               profile={profile}
               supabaseReady={supabaseReady}
@@ -5526,8 +5855,39 @@ export default function App() {
           </div>
         </div>
 
-        {/* FILTER BAR — jutsu tab only */}
-        {tab === 'jutsus' && (
+        {/* SECTION SWITCHER — the one nav that spans every page */}
+        <div className="bg-slate-900 border-t border-slate-800">
+          <div className="max-w-6xl mx-auto px-4 flex gap-1 overflow-x-auto scrollbar-hide">
+            {SECTIONS.map(sec => {
+              const active = sec.match ? sec.match(pathname) : pathname.startsWith(sec.to);
+              return (
+                <NavLink key={sec.to} to={sec.to}
+                  className={`relative px-3.5 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap border-b-2 -mb-px flex items-center gap-1.5 transition-colors ${
+                    active ? 'border-blue-500 text-white' : 'border-transparent text-slate-400 hover:text-slate-100'
+                  }`}>
+                  <span className="relative">
+                    {sec.label}
+                    {sec.hasNew && !active && (
+                      <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
+                    )}
+                  </span>
+                  {sec.count !== undefined && (
+                    <span className={`text-[10px] tabular-nums px-1.5 py-0.5 rounded-full ${active ? 'bg-slate-700 text-slate-100' : 'bg-slate-800 text-slate-400'}`}>{sec.count}</span>
+                  )}
+                  {sec.unread > 0 && (
+                    <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm"
+                          title={`${sec.unread} conversation${sec.unread === 1 ? '' : 's'} with unread messages`}>
+                      {sec.unread}
+                    </span>
+                  )}
+                </NavLink>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* FILTER BAR — jutsu catalog only */}
+        {pathname === '/' && (
           <FilterBar
             tab={tab} f={f} setF={setF}
             activeFilterCount={fCount}
@@ -5537,7 +5897,7 @@ export default function App() {
       </div>
 
       {/* FILTER PANEL — outside sticky header, in normal document flow */}
-      {tab === 'jutsus' && (
+      {pathname === '/' && (
         <FilterBarPanel
           tab={tab} f={f} setF={setF}
           bloodlinesDb={sortedBloodlines}
@@ -5545,36 +5905,42 @@ export default function App() {
           jutsuTypeTagOptions={sortedJutsuTypeTags} />
       )}
 
-      {/* TAB BAR */}
-      {TABS.length > 1 && (
+      {/* CATALOG TAB BAR — Database section only */}
+      {isCatalog && (
         <div className="bg-white border-b border-slate-300 shadow-sm shrink-0 sticky z-20" style={{ top: `${headerHeight}px` }}>
           <div className="max-w-6xl mx-auto px-4 flex gap-1 pt-2 overflow-x-auto scrollbar-hide">
-            {TABS.map(t => (
-              <button key={t.id} onClick={() => switchTab(t.id)}
-                      className={`px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${tab === t.id ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-                <span className="relative">
-                  {t.label}
-                  {t.hasNew && tab !== t.id && (
-                    <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
-                  )}
-                </span>
-                {t.count !== undefined && (
-                  <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${tab === t.id ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+            {CATALOG_TABS.map(t => (
+              <NavLink key={t.to} to={t.to} end
+                className={({ isActive }) => `px-4 py-3 text-sm font-bold whitespace-nowrap border-b-2 -mb-px flex items-center gap-2 ${isActive ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
+                {({ isActive }) => (
+                  <>
+                    <span className="relative">
+                      {t.label}
+                      {t.hasNew && !isActive && (
+                        <span className="absolute -top-1 -right-2 w-2 h-2 rounded-full bg-red-500 shadow-sm" />
+                      )}
+                    </span>
+                    <span className={`text-[10px] tabular-nums px-2 py-0.5 rounded-full ${isActive ? 'bg-indigo-100' : 'bg-slate-100'}`}>{t.count}</span>
+                    {t.unread > 0 && (
+                      <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm"
+                            title={`${t.unread} conversation${t.unread === 1 ? '' : 's'} with unread messages`}>
+                        {t.unread}
+                      </span>
+                    )}
+                  </>
                 )}
-                {t.unread > 0 && (
-                  <span className="text-[10px] font-bold tabular-nums px-1.5 py-0.5 rounded-full bg-red-500 text-white shadow-sm" title={`${t.unread} conversation${t.unread === 1 ? '' : 's'} with unread messages`}>
-                    {t.unread}
-                  </span>
-                )}
-              </button>
+              </NavLink>
             ))}
           </div>
         </div>
       )}
 
-      {/* MAIN CONTENT */}
-      <div className={`flex-1 overflow-y-auto ${tab === 'roster' || tab === 'worklog' ? '' : 'p-4 md:p-6 pb-20'}`}>
-        {tab === 'jutsus' && (
+      {/* MAIN CONTENT — one route per page. Pages that paint their own
+          full-bleed layout (Roster, History) opt out of the shell padding. */}
+      <div className={`flex-1 overflow-y-auto ${selfLaidOut ? '' : 'p-4 md:p-6 pb-20'}`}>
+        <Suspense fallback={null}>
+          <Routes>
+            <Route path="/" element={
           <div className="max-w-6xl mx-auto h-full">
             {filtJ.length === 0 ? (
               <div className="text-center py-16">
@@ -5591,13 +5957,13 @@ export default function App() {
                                viewMode={viewMode} expRow={expRow} setExpRow={setExpRow}
                                pTags={pTags} setPersonalTagsForJutsu={setPersonalTagsForJutsu}
                                handleCopy={handleCopy} cart={cart} copiedId={modals.copiedId}
-                               isAdmin={isStaff}
+                               isAdmin={isReviewer}
                                isActualAdmin={isAdmin}
                                onEdit={() => setAdminForm({ r: j, tab: 'jutsus' })}
                                onDelete={() => setConfirmDel({ id: j._id, name: j.name })}
                                onViewSlots={(jutsu) => setSlotsView(jutsu)}
                                onViewSheet={(jutsu) => { setSheetView(jutsu); setSheetViewRank(null); }}
-                               onViewHistory={isStaff ? (jutsu) => setHistoryView(jutsu) : null} />
+                               onViewHistory={isReviewer ? (jutsu) => setHistoryView(jutsu) : null} />
                   ))}
                 </div>
                 {filtJ.length > visibleCount && (
@@ -5616,9 +5982,9 @@ export default function App() {
               </>
             )}
           </div>
-        )}
+            } />
 
-        {tab === 'bloodlines' && (
+            <Route path="/bloodlines" element={
           <BloodlinesRosterTab
             bloodlines={db.bloodlines || []}
             isAdmin={isAdmin}
@@ -5626,16 +5992,17 @@ export default function App() {
             bF={bF}
             setBF={setBF}
           />
-        )}
+            } />
 
-        {tab === 'inbox' && profile && (
+            <Route path="/inbox" element={profile ? (
+          <Suspense fallback={null}>
           <InboxPage
             inboxItems={inboxItems}
             pendingGroups={pendingGroups}
             profile={profile}
             role={role}
             isAdmin={isAdmin}
-            isStaff={isStaff || isOcStaff}
+            isStaff={isReviewer || isGrader}
             selectedId={selectedInboxId}
             onSelect={setSelectedInboxId}
             onMarkRead={markChatRead}
@@ -5657,9 +6024,10 @@ export default function App() {
             visibleRecentChats={visibleRecentChats}
             pendingLoaded={pendingLoaded}
           />
-        )}
+          </Suspense>
+            ) : <SignedOutNotice what="your inbox" />} />
 
-        {tab === 'members' && isAdmin && (
+            <Route path="/members" element={isAdmin ? (
           <div className="max-w-6xl mx-auto">
             <div className="bg-white rounded-3xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
@@ -5696,11 +6064,13 @@ export default function App() {
                           <th className="py-3 px-4">Work Thread ID</th>
                           <th className="py-3 px-4">Wanderer Ticket</th>
                           <th className="py-3 px-4 text-right">Role</th>
+                          <th className="py-3 px-4 text-right">Moderation</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {profilesList.map((m) => {
                           const isCurrentUser = m.id === profile?.id;
+                          const canModerate = isAdmin && !isCurrentUser && m.role !== 'owner' && (isOwner || m.role !== 'admin');
                           return (
                             <tr key={m.id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="py-3 px-4 flex items-center gap-3">
@@ -5763,10 +6133,45 @@ export default function App() {
                                   className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 disabled:opacity-50 disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer transition-all"
                                 >
                                   <option value="user">User</option>
-                                  <option value="staff">Reviewer</option>
-                                  <option value="oc_staff">Staff (OC only)</option>
+                                  <option value="grader">Grader</option>
+                                  <option value="reviewer">Reviewer</option>
                                   <option value="admin">Admin</option>
                                 </select>
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                {m.banned_at && (
+                                  <span className="inline-block mb-1 text-[10px] font-extrabold uppercase tracking-wider px-2 py-1 rounded border bg-red-100 text-red-700 border-red-200">
+                                    Banned
+                                  </span>
+                                )}
+                                {canModerate ? (
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    {m.banned_at ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleUnbanMember(m.id, m.username)}
+                                        className="border border-slate-200 hover:border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 bg-white shadow-xs transition-all"
+                                      >
+                                        Unban
+                                      </button>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleBanMember(m.id, m.username)}
+                                        className="border border-amber-200 hover:border-amber-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 shadow-xs transition-all"
+                                      >
+                                        Ban
+                                      </button>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveMember(m.id, m.username)}
+                                      className="border border-red-200 hover:border-red-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-700 bg-red-50 shadow-xs transition-all"
+                                    >
+                                      Remove
+                                    </button>
+                                  </div>
+                                ) : (!m.banned_at && <span className="text-slate-300 text-xs">—</span>)}
                               </td>
                             </tr>
                           );
@@ -5778,15 +6183,18 @@ export default function App() {
               </div>
             </div>
           </div>
-        )}
+            ) : <NoAccess what="The member board is admin-only." />} />
 
-        {tab === 'roster' && (
-          <RosterPage userRole={role} userId={profile?.id} />
-        )}
+            <Route path="/grading" element={<GradingPage profile={profile} role={role} jutsus={db.jutsus || []} />} />
+            <Route path="/roster"  element={<RosterPage userRole={role} userId={profile?.id} jutsus={db.jutsus || []} />} />
 
-        {tab === 'worklog' && (
-          <WorkStatsPage userId={profile?.id} userRole={role} />
-        )}
+            <Route path="/history" element={<Navigate to="/history/work-log" replace />} />
+            <Route path="/history/:view" element={<HistoryRoute profile={profile} role={role} />} />
+
+            <Route path="/submissions" element={<Navigate to="/inbox" replace />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </div>
 
       {/* FOOTER */}
@@ -5798,7 +6206,9 @@ export default function App() {
 
       {/* MODALS */}
       {modals.stats && (
-        <JutsuStatsModal db={db} onClose={() => setModals(m => ({ ...m, stats: false }))} />
+        <Suspense fallback={null}>
+          <JutsuStatsModal db={db} onClose={() => setModals(m => ({ ...m, stats: false }))} />
+        </Suspense>
       )}
       {slotsView && (
         <SlotsViewModal jutsu={slotsView} onClose={() => setSlotsView(null)} />
@@ -5831,7 +6241,7 @@ export default function App() {
             onClose={() => setAdminForm(null)}
             db={db}
             onSubmit={submitChange}
-            willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'staff') && !isAdmin && !adminForm.isPendingEdit}
+            willGoToPending={formTab === 'jutsus' && (role === 'user' || role === 'reviewer') && !isAdmin && !adminForm.isPendingEdit}
             isAdmin={isAdmin}
             isPendingEdit={adminForm.isPendingEdit}
           />
@@ -5845,23 +6255,19 @@ export default function App() {
           refreshing={refreshing}
           isOwner={isOwner}
           isAdmin={isAdmin}
-          isStaff={isStaff}
+          isReviewer={isReviewer}
           webhookConfig={webhookConfig}
           onWebhookConfigSave={(key, value) => {
             saveWebhookConfig(key, value).then(() => {
               setWebhookConfig(prev => ({ ...prev, [key]: value }));
             }).catch(e => console.warn('[NARP] webhook config save failed:', e));
           }}
-          onOpenAuditLog={() => setModals(m => ({ ...m, audit: true }))}
           onManageBL={() => setModals(m => ({ ...m, manageBL: true }))}
           submissionControls={submissionControls}
           onToggleSubmission={(key, value) => setSubmissionControls(prev => ({ ...prev, [key]: value }))}
           currentUserId={profile?.id}
           profile={profile}
           onProfileUpdate={setProfile} />
-      )}
-      {modals.audit && isAdmin && (
-        <AuditLogModal onClose={() => setModals(m => ({ ...m, audit: false }))} />
       )}
       {modals.manageBL && isAdmin && (
         <CatalogManagementModal
@@ -5877,7 +6283,7 @@ export default function App() {
       {confirmDel && (() => {
         const effectiveTab = confirmDel.tab || tab;
         const isPendingDelete = effectiveTab === 'jutsus' && (
-          (isStaff && !isAdmin) || (isAdmin && askSecondApprovalDelete)
+          (isReviewer && !isAdmin) || (isAdmin && askSecondApprovalDelete)
         );
         return (
           <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={() => { setConfirmDel(null); setAskSecondApprovalDelete(false); }}>
@@ -5962,7 +6368,7 @@ export default function App() {
                         if (outcome === 'accepted') { setInstallPrompt(null); setAppInstalled(true); setModals(m => ({ ...m, credits: false })); }
                       }}
                       className="w-full flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 text-white font-bold py-2.5 rounded-xl text-sm transition-colors">
-                      <Icon n="Download" size={14} /> Install NARP Database
+                      <Icon n="Download" size={14} /> Install SARP Database
                     </button>
                   ) : (
                     <button
@@ -5989,7 +6395,7 @@ export default function App() {
               <button onClick={() => setModals(m => ({ ...m, iosInstall: false }))} className="text-slate-400 hover:text-white"><Icon n="X" size={18} /></button>
             </div>
             <div className="p-6 space-y-4 text-sm text-slate-700">
-              <p className="font-semibold text-slate-800">Add NARP Database to your home screen in 3 steps:</p>
+              <p className="font-semibold text-slate-800">Add SARP Database to your home screen in 3 steps:</p>
               <ol className="space-y-3">
                 <li className="flex items-start gap-3">
                   <span className="shrink-0 w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs flex items-center justify-center">1</span>
@@ -6020,8 +6426,11 @@ export default function App() {
         <OCSubmissionModal
           profile={profile}
           bloodlines={db.bloodlines || []}
+          jutsus={db.jutsus || []}
           onClose={() => setStatelessType(null)}
           onAfterSubmit={refreshPending}
+          isAdmin={isAdmin}
+          onSubmitAndApprove={handleApprovePending}
         />
       )}
       {statelessType && statelessType !== 'Character' && (

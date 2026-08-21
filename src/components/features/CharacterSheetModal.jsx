@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { X, Pencil, Save, Loader2, Trash2, Plus, ExternalLink, FileText, ChevronDown } from 'lucide-react';
 import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, Radar,
@@ -9,13 +9,15 @@ import {
   fetchCharacterSheetByName,
   saveCharacterSheet,
   deleteCharacterSheet,
+  fetchProfileById,
+  fetchMyOcCount,
 } from '../../lib/supabase';
 import {
-  STAT_RANKS, SKILL_LEVELS, SHINOBI_RANKS, SHEET_VILLAGES, THREAT_LEVELS,
-  CHARACTER_SLOTS, ECONOMIC_STATUS, GENDERS, BLOOD_TYPES, MONTHS,
-  FAMILY_STATUS, SHEET_NATURES, JUTSU_RANKS, APPROVED_STATES,
+  STAT_RANKS, SKILL_LEVELS, SHINOBI_RANKS, SHEET_VILLAGES,
+  ECONOMIC_STATUS, GENDERS, BLOOD_TYPES, MONTHS,
+  FAMILY_STATUS, SHEET_NATURES, JUTSU_RANKS,
   ACADEMY_JUTSUS, LIMITS, RANK_LIMITS,
-  normalizeSheet, computeCU, sheetHasContent,
+  normalizeSheet, computeCU, sheetHasContent, computeThreatLevel, ocSlotLabel,
 } from '../../constants/characterSheet';
 import {
   PAPER, PAPER_BG, CARD, INK, INK_MUTED, HAIRLINE, RULE, HANKO, LINK_COLOR,
@@ -23,6 +25,7 @@ import {
   Dash, Text, Choice, Area, Link, Field, Section, Table, Cell, SubHead,
   SheetShell, HankoStamp,
 } from './SheetKit';
+import { toArray } from '../../utils/helpers';
 
 /*
  * The NARP OC sheet, rendered from the database instead of a Google Doc.
@@ -109,6 +112,67 @@ function JutsuRankChart({ data, accent }) {
   );
 }
 
+/*
+ * Search-to-select box for an empty jutsu slot. Only ever renders the
+ * *unfilled* state — once a jutsu is picked the caller draws the filled row
+ * itself (name plus catalog-derived info), so this component's whole job is
+ * turning a search into an `onSelect(jutsuRow)`.
+ */
+function JutsuPicker({ editing, onSelect, pool, placeholder = 'Search the jutsu database…' }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e) => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  if (!editing) return <Dash />;
+
+  const q = query.trim().toLowerCase();
+  const matches = (q ? pool.filter(j => j.name.toLowerCase().includes(q)) : pool).slice(0, 40);
+
+  return (
+    <div className="relative" ref={wrapRef}>
+      <input
+        type="text"
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder={placeholder}
+        className={inputCls}
+        style={inputStyle}
+      />
+      {open && (
+        <div className="absolute z-20 mt-1 w-full max-h-72 overflow-y-auto rounded-sm shadow-xl"
+             style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+          {matches.length === 0 ? (
+            <p className="px-3 py-2.5 text-[12px] italic" style={{ color: INK_MUTED }}>No matching jutsu in the database</p>
+          ) : matches.map(j => {
+            const meta = [toArray(j.rank).join(' / '), toArray(j.nature).join(' / '), toArray(j.spec).join(' / '), j.bloodline]
+              .filter(Boolean).join(' · ');
+            return (
+              <button
+                key={j._id}
+                type="button"
+                onClick={() => { onSelect(j); setQuery(''); setOpen(false); }}
+                className="w-full text-left px-3 py-2 hover:brightness-95 transition-all"
+                style={{ borderBottom: `1px solid ${HAIRLINE}` }}
+              >
+                <span className="block text-[12.5px] font-semibold leading-tight" style={{ color: INK }}>{j.name}</span>
+                {meta && <span className="block text-[10.5px] mt-0.5" style={{ color: INK_MUTED }}>{meta}</span>}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── MODAL ───────────────────────────────────────────────────────────────────
 
 export default function CharacterSheetModal({
@@ -117,7 +181,18 @@ export default function CharacterSheetModal({
   characterLink = '',
   canEditAny = false,      // staff+ may edit anyone's sheet
   currentUserId = null,
+  jutsus = [],             // the live jutsu catalog, for the Techniques/Battle mode pickers
+  // The OC's actual owner, when the caller knows it and it might not be
+  // currentUserId (e.g. staff filling in a sheet on a player's behalf from
+  // their pending submission). Falls back to currentUserId when omitted.
+  ownerIdHint = null,
   accent = '#a23a2c',
+  // { village, shinobi_rank, clan_kkg, oc_number } from the OC's original
+  // creation submission, if the caller has it (PendingJutsuCard does — the
+  // submission that's still pending IS "the prior character creation entry").
+  // Only ever applied once, to a brand-new sheet, and never overwrites a
+  // value the player already typed in.
+  prefill = null,
   onClose,
   onSaved,
 }) {
@@ -133,6 +208,12 @@ export default function CharacterSheetModal({
 
   // Load by id when the roster already knows it, otherwise by name — a roster
   // row whose character has no sheet yet lands on the "not created" state.
+  // When nothing is found, village/shinobi_rank/clan_kkg are seeded from
+  // `prefill` right here, as part of the same state update that resolves
+  // the load -- doing it in a separate effect keyed off async-derived values
+  // (submitted_by/character_slot, below) raced this one: this effect's own
+  // `setSheet(normalizeSheet(...))` would land after that one and wipe out
+  // whatever it had just written.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -144,8 +225,30 @@ export default function CharacterSheetModal({
           : await fetchCharacterSheetByName(characterName);
         if (cancelled) return;
         setRow(found || null);
-        setSheet(normalizeSheet(found?.data));
+        // Functional update: merges onto whatever `sheet` currently holds
+        // rather than replacing it outright, so this can't race the other
+        // effect below (which merges submitted_by/character_slot) no matter
+        // which of the two resolves first.
+        setSheet(prev => {
+          if (found) return normalizeSheet(found.data);
+          if (!prefill) return prev;
+          return {
+            ...prev,
+            personal: {
+              ...prev.personal,
+              village: prefill.village || prev.personal.village,
+              shinobi_rank: prefill.shinobi_rank || prev.personal.shinobi_rank,
+              clan_kkg: prefill.clan_kkg || prev.personal.clan_kkg,
+            },
+          };
+        });
         setName(found?.character_name || characterName);
+        // Opened from a creation flow (OC submission / pending entry) with
+        // nothing saved yet: go straight into edit mode. Otherwise the
+        // prefilled values sit behind a "No character sheet yet / Create
+        // sheet" empty state that renders none of them, which reads as
+        // "the prefill didn't work" even though it did.
+        if (!found && prefill && currentUserId) setEditing(true);
       } catch (err) {
         if (!cancelled) setLoadError(err.message || String(err));
       } finally {
@@ -153,6 +256,9 @@ export default function CharacterSheetModal({
       }
     })();
     return () => { cancelled = true; };
+    // prefill is only ever meant to apply to this one initial load, not to
+    // re-run every time the caller's prefill object reference changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sheetId, characterName]);
 
   const isOwner = !!(row?.owner_id && currentUserId && row.owner_id === currentUserId);
@@ -177,9 +283,118 @@ export default function CharacterSheetModal({
     setSheet(prev => setIn(prev, path));
   }, []);
 
+  // Merges several keys into one row at once (name+rank+nature together),
+  // so picking a jutsu doesn't fire three separate patchRow re-renders.
+  const patchRowMerge = useCallback((path, index, patchObj) => {
+    const setIn = (node, keys) => {
+      const [head, ...rest] = keys;
+      if (!rest.length) {
+        const list = node[head] || [];
+        return { ...node, [head]: list.map((r, i) => (i === index ? { ...r, ...patchObj } : r)) };
+      }
+      return { ...node, [head]: setIn(node[head] || {}, rest) };
+    };
+    setSheet(prev => setIn(prev, path));
+  }, []);
+
+  // Picking a jutsu with only one rank/nature auto-fills it; with several,
+  // it's left for the player to narrow down from just that jutsu's options.
+  const pickTechniqueInto = useCallback((path, index, jutsu) => {
+    const ranks = toArray(jutsu.rank);
+    const natures = toArray(jutsu.nature);
+    patchRowMerge(path, index, {
+      name: jutsu.name,
+      jutsu_id: jutsu._id,
+      rank: ranks.length === 1 ? ranks[0] : '',
+      nature: natures.length === 1 ? natures[0] : '',
+    });
+  }, [patchRowMerge]);
+  const clearTechniqueAt = useCallback((path, index) => {
+    patchRowMerge(path, index, { name: '', jutsu_id: '', rank: '', nature: '' });
+  }, [patchRowMerge]);
+  const pickBattleModeInto = useCallback((index, jutsu) => {
+    patchRowMerge(['battle_modes', 'slots'], index, { name: jutsu.name, jutsu_id: jutsu._id });
+  }, [patchRowMerge]);
+  const clearBattleModeAt = useCallback((index) => {
+    patchRowMerge(['battle_modes', 'slots'], index, { name: '', jutsu_id: '' });
+  }, [patchRowMerge]);
+
   const cu = useMemo(() => computeCU(sheet.stats), [sheet.stats]);
   const rankLimits = RANK_LIMITS[sheet.personal.shinobi_rank] || null;
   const hasContent = sheetHasContent(sheet);
+  const threatLevel = useMemo(() => computeThreatLevel(sheet.stats), [sheet.stats]);
+
+  // Jutsu picker pools: the Techniques table only offers non-Battlemode
+  // jutsus, the Battle mode slots only offer Battlemode jutsus of that exact
+  // tier — a jutsu "must already exist in this database" is now enforced by
+  // only ever letting you pick one, instead of trusting free text.
+  const techniquePool = useMemo(
+    () => jutsus.filter(j => !toArray(j.types).includes('Battlemode')),
+    [jutsus]
+  );
+  const jutsuById = useMemo(() => Object.fromEntries(jutsus.map(j => [j._id, j])), [jutsus]);
+  const battleModePoolByTier = useMemo(() => {
+    const byTier = { Primary: [], Secondary: [], Tertiary: [] };
+    jutsus.forEach(j => {
+      if (toArray(j.types).includes('Battlemode') && byTier[j.bm_tier]) byTier[j.bm_tier].push(j);
+    });
+    return byTier;
+  }, [jutsus]);
+  // Keep the stored value in sync so it's correct for anything reading
+  // data.personal.threat_level directly (exports, a future Discord bot, etc.)
+  // rather than only ever existing as a display-time computation.
+  useEffect(() => {
+    setSheet(prev => prev.personal.threat_level === threatLevel ? prev : { ...prev, personal: { ...prev.personal, threat_level: threatLevel } });
+  }, [threatLevel]);
+
+  // "Submitted by" — the owner's Discord username, fetched live so it stays
+  // correct even if they change it later. Owner is row.owner_id once saved,
+  // or whoever's about to become the owner (the current user) beforehand.
+  const ownerId = row?.owner_id || (!row ? (ownerIdHint || currentUserId) : null);
+  const [ownerProfile, setOwnerProfile] = useState(null);
+  useEffect(() => {
+    if (!ownerId) { setOwnerProfile(null); return; }
+    let cancelled = false;
+    fetchProfileById(ownerId)
+      .then(p => { if (!cancelled) setOwnerProfile(p); })
+      .catch(() => { if (!cancelled) setOwnerProfile(null); });
+    return () => { cancelled = true; };
+  }, [ownerId]);
+  const submittedByName = ownerProfile?.site_nickname || ownerProfile?.username || '';
+
+  // "Character slot" — computed once at creation and then frozen into the
+  // sheet (a live recount later would misreport an old OC as "4th" once the
+  // player has more). prefill.oc_number is exact (the submission already
+  // counted it); otherwise fall back to a live count for a sheet started
+  // straight from the roster, where no submission record survives.
+  const [liveOcCount, setLiveOcCount] = useState(null);
+  useEffect(() => {
+    if (row || prefill?.oc_number || !ownerId) return;
+    let cancelled = false;
+    fetchMyOcCount(ownerId).then(c => { if (!cancelled) setLiveOcCount(c + 1); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [row, ownerId, prefill?.oc_number]);
+  const computedSlotNumber = prefill?.oc_number || liveOcCount || null;
+
+  // Apply submitted_by/character_slot once they're known, to a sheet that
+  // doesn't exist in the database yet. village/shinobi_rank/clan_kkg are
+  // seeded by the load effect above instead -- keeping one effect per field
+  // group, each merging via a functional update, is what makes the order
+  // these two effects resolve in not matter.
+  const appliedAutoFillRef = useRef(false);
+  useEffect(() => {
+    if (row || appliedAutoFillRef.current) return;
+    if (!submittedByName && !computedSlotNumber) return;
+    appliedAutoFillRef.current = true;
+    setSheet(prev => ({
+      ...prev,
+      personal: {
+        ...prev.personal,
+        submitted_by: submittedByName || prev.personal.submitted_by,
+        character_slot: computedSlotNumber ? ocSlotLabel(computedSlotNumber) : prev.personal.character_slot,
+      },
+    }));
+  }, [row, submittedByName, computedSlotNumber]);
 
   // The sheet reserves 30 jutsu slots, but showing 30 empty inputs is a wall.
   // Editing exposes the filled ones plus a few spares, growing as they fill.
@@ -224,6 +439,7 @@ export default function CharacterSheetModal({
         ninjaRank: sheet.personal.shinobi_rank,
         bloodline: sheet.personal.clan_kkg,
         data: sheet,
+        ...(!row && ownerIdHint ? { ownerId: ownerIdHint } : {}),
       });
       setRow(saved);
       setEditing(false);
@@ -252,21 +468,99 @@ export default function CharacterSheetModal({
 
   const ed = editing;
 
+  // The sheet is full-screen, so there's no backdrop left to click — Escape
+  // is the keyboard way back out. Ignored while editing, so a stray keypress
+  // can't discard a half-filled sheet; use Cancel or Save for that.
+  useEffect(() => {
+    if (editing) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editing, onClose]);
+
+  /*
+   * One slot of the Techniques list. Picking the jutsu IS the whole
+   * interaction: everything shown next to the name (nature, specialization,
+   * origin) is read back from the catalog row rather than re-typed, so
+   * there's nothing to fill in and nothing to get out of sync.
+   *
+   * Rank is the one exception. It stays a control, but only for jutsus that
+   * actually exist at more than one rank — which rank the character learned
+   * is a real per-character fact the catalog can't answer, and the rank
+   * limits quoted at the top of this section ("1 B, 4 C or below") are
+   * counted against it. Single-rank jutsus just display their rank.
+   */
+  const renderTechniqueRow = (path, j, i, labelNode) => {
+    const linked = j.jutsu_id ? jutsuById[j.jutsu_id] : null;
+    const ranks = linked ? toArray(linked.rank) : [];
+    const multiRank = ranks.length > 1;
+    // Legacy rows (saved as free text before the picker existed) have no
+    // jutsu_id, so fall back to whatever was stored on the row itself.
+    const meta = linked
+      ? [toArray(linked.nature).join(' / '), toArray(linked.spec).join(' / '), linked.bloodline, linked.origin]
+      : [j.nature, j.rank];
+
+    return (
+      <div key={i} className="rounded-sm px-3.5 py-3 flex items-center gap-3"
+           style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+        {labelNode}
+        <div className="flex-1 min-w-0">
+          {j.name ? (
+            <>
+              <p className="font-semibold text-[13px] leading-tight break-words" style={{ color: INK }}>{j.name}</p>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                {multiRank && ed ? (
+                  <span className="inline-flex items-center gap-1">
+                    <span className="text-[9px] font-bold uppercase tracking-wide" style={{ color: INK_MUTED }}>Rank</span>
+                    <select value={j.rank || ''} onChange={e => patchRow(path, i, 'rank', e.target.value)}
+                            className="rounded-sm px-1.5 py-0.5 text-[11px] font-bold outline-none cursor-pointer"
+                            style={{ background: PAPER, border: `1px solid ${HAIRLINE}`, color: INK }}>
+                      <option value="">—</option>
+                      {ranks.map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </span>
+                ) : (
+                  (j.rank || ranks[0]) && (
+                    <span className="text-[11px] font-bold px-1.5 py-0.5 rounded-sm"
+                          style={{ background: `${accent}1f`, color: accent }}>
+                      {j.rank || ranks[0]}-Rank
+                    </span>
+                  )
+                )}
+                {meta.filter(Boolean).map((m, k) => (
+                  <span key={k} className="text-[11px]" style={{ color: INK_MUTED }}>{m}</span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <JutsuPicker editing={ed} name="" pool={techniquePool}
+                         onSelect={(jutsu) => pickTechniqueInto(path, i, jutsu)}
+                         onClear={() => clearTechniqueAt(path, i)} />
+          )}
+        </div>
+        {ed && j.name && (
+          <button type="button" onClick={() => clearTechniqueAt(path, i)} title="Remove this jutsu"
+                  className="shrink-0 p-1 rounded-sm opacity-50 hover:opacity-100 transition-opacity">
+            <X size={13} style={{ color: INK_MUTED }} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
   return (
-    <div className="fixed inset-0 z-[90] overflow-y-auto p-3 md:p-6"
-         style={{ background: 'rgba(10,8,5,0.82)', backdropFilter: 'blur(4px)' }}
-         onClick={onClose}>
-      <div className="w-full max-w-3xl mx-auto rounded-md shadow-2xl my-2"
-           style={{ background: PAPER_BG, border: '1px solid rgba(37,30,21,0.25)' }}
-           onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 z-[90] overflow-y-auto"
+         style={{ background: PAPER_BG }}>
+      <div className="w-full min-h-full"
+           style={{ background: PAPER_BG }}>
 
         {/* Header */}
-        <div className="sticky top-0 z-10 px-5 py-4 rounded-t-md"
+        <div className="sticky top-0 z-10 px-5 py-4"
              style={{ background: PAPER_BG, borderBottom: `1px solid ${HAIRLINE}` }}>
-          <div className="flex items-start justify-between gap-3">
+          <div className="max-w-6xl mx-auto flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[10px] font-bold uppercase tracking-[0.25em] mb-1 font-serif" style={{ color: INK_MUTED }}>
-                籍 NARP Character Sheet
+                籍 SARP Character Sheet
               </p>
               {ed ? (
                 <input value={name} onChange={e => setName(e.target.value)}
@@ -307,7 +601,14 @@ export default function CharacterSheetModal({
                           style={{ background: 'rgba(63,109,63,0.14)', color: '#3f6d3f', border: '1px solid rgba(63,109,63,0.35)' }}>
                     {saving ? <Loader2 size={11} className="animate-spin" /> : <Save size={11} />} Save
                   </button>
-                  <button onClick={() => { setEditing(false); setSheet(normalizeSheet(row?.data)); setName(row?.character_name || characterName); setSaveError(''); }}
+                  <button onClick={() => {
+                            // Nothing saved yet: there is no previous state to
+                            // revert to, so cancelling means leaving the sheet
+                            // (dropping to the empty state would just discard
+                            // the prefill and look broken).
+                            if (!row) { onClose(); return; }
+                            setEditing(false); setSheet(normalizeSheet(row.data)); setName(row.character_name || characterName); setSaveError('');
+                          }}
                           className="px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wider transition-colors hover:opacity-70"
                           style={{ color: INK_MUTED, border: `1px solid ${HAIRLINE}` }}>
                     Cancel
@@ -320,12 +621,12 @@ export default function CharacterSheetModal({
             </div>
           </div>
           {saveError && (
-            <p className="mt-2 text-[11px] font-semibold" style={{ color: HANKO }}>{saveError}</p>
+            <p className="max-w-6xl mx-auto mt-2 text-[11px] font-semibold" style={{ color: HANKO }}>{saveError}</p>
           )}
         </div>
 
         {/* Body */}
-        <div className="px-5 py-5">
+        <div className="max-w-6xl mx-auto px-5 py-6 pb-20">
           {loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-xs" style={{ color: INK_MUTED }}>
               <Loader2 size={14} className="animate-spin" /> Loading sheet…
@@ -358,11 +659,13 @@ export default function CharacterSheetModal({
 
               {/* 人 PERSONAL INFORMATION */}
               <Section kanji="人" title="Personal Information">
-                <Field label="Submitted by"><Text editing={ed} value={sheet.personal.submitted_by} onChange={v => patch('personal', 'submitted_by', v)} placeholder="Discord username" /></Field>
-                <Field label="Character slot"><Choice editing={ed} value={sheet.personal.character_slot} onChange={v => patch('personal', 'character_slot', v)} options={CHARACTER_SLOTS} /></Field>
+                <Field label="Submitted by" note="auto-filled"><Text editing={false} value={submittedByName || sheet.personal.submitted_by} /></Field>
+                <Field label="Character slot" note="auto-filled"><Text editing={false} value={sheet.personal.character_slot} /></Field>
                 <Field label="Alias(es)"><Text editing={ed} value={sheet.personal.aliases} onChange={v => patch('personal', 'aliases', v)} /></Field>
                 <Field label="Village affiliation"><Choice editing={ed} value={sheet.personal.village} onChange={v => patch('personal', 'village', v)} options={SHEET_VILLAGES} /></Field>
-                <Field label="Threat level"><Choice editing={ed} value={sheet.personal.threat_level} onChange={v => patch('personal', 'threat_level', v)} options={THREAT_LEVELS} /></Field>
+                <Field label="Threat level" note="auto-calculated from the four D-S stats below">
+                  <Text editing={false} value={threatLevel} placeholder="Fill in all four stats to calculate" />
+                </Field>
                 <Field label="Shinobi rank"><Choice editing={ed} value={sheet.personal.shinobi_rank} onChange={v => patch('personal', 'shinobi_rank', v)} options={SHINOBI_RANKS} /></Field>
                 <Field label="Clan / KKG"><Text editing={ed} value={sheet.personal.clan_kkg} onChange={v => patch('personal', 'clan_kkg', v)} /></Field>
                 <Field label="Economic status"><Choice editing={ed} value={sheet.personal.economic_status} onChange={v => patch('personal', 'economic_status', v)} options={ECONOMIC_STATUS} /></Field>
@@ -580,22 +883,16 @@ export default function CharacterSheetModal({
 
               {/* 術 TECHNIQUES */}
               <Section kanji="術" title="Techniques"
-                       note={`Every jutsu listed here must already exist in this database. ${rankLimits ? `${sheet.personal.shinobi_rank} — ${rankLimits.techniques}` : 'Check the NARP documentation for your allowed jutsu number and rank.'}`}>
+                       note={`Every jutsu listed here must already exist in this database. ${rankLimits ? `${sheet.personal.shinobi_rank} — ${rankLimits.techniques}` : 'Check the SARP documentation for your allowed jutsu number and rank.'}`}>
                 {anyJutsuRanked && <JutsuRankChart data={jutsuRankData} accent={accent} />}
-                <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
+                <div className="space-y-2">
                   {sheet.techniques.jutsu.map((j, i) => (
-                    (ed ? i < jutsuRowsShown : !!j.name) ? (
-                      <tr key={i} className={zebraRow}>
-                        <Cell className="w-10"><span className="text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span></Cell>
-                        <Cell><Text editing={ed} value={j.name} onChange={v => patchRow(['techniques', 'jutsu'], i, 'name', v)} /></Cell>
-                        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(['techniques', 'jutsu'], i, 'rank', v)} options={JUTSU_RANKS} placeholder="—" /></Cell>
-                        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(['techniques', 'jutsu'], i, 'nature', v)} options={SHEET_NATURES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(['techniques', 'jutsu'], i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(['techniques', 'jutsu'], i, 'link', v)} /></Cell>
-                      </tr>
-                    ) : null
+                    (ed ? i < jutsuRowsShown : !!j.name)
+                      ? renderTechniqueRow(['techniques', 'jutsu'], j, i,
+                          <span className="shrink-0 w-7 text-right text-[10px] font-bold tabular-nums" style={{ color: INK_MUTED }}>{i + 1}</span>)
+                      : null
                   ))}
-                </Table>
+                </div>
                 {!ed && !sheet.techniques.jutsu.some(j => j.name) && (
                   <p className="text-xs italic py-2" style={{ color: INK_MUTED }}>No techniques listed yet</p>
                 )}
@@ -603,25 +900,6 @@ export default function CharacterSheetModal({
                   <p className="text-[10px] italic mt-1.5" style={{ color: INK_MUTED }}>
                     Showing {jutsuRowsShown} of {LIMITS.jutsuSlots} slots — more appear as you fill these in.
                   </p>
-                )}
-
-                <SubHead>PvE slots</SubHead>
-                <Table headers={['Slot', 'Name', 'Rank', 'Nature', 'Approved?', 'Doc link']}>
-                  {sheet.techniques.pve.map((j, i) => (
-                    (ed || j.name) ? (
-                      <tr key={i} className={zebraRow}>
-                        <Cell className="w-14"><span className="text-[10px] font-bold" style={{ color: INK_MUTED }}>PvE {i + 1}</span></Cell>
-                        <Cell><Text editing={ed} value={j.name} onChange={v => patchRow(['techniques', 'pve'], i, 'name', v)} /></Cell>
-                        <Cell className="w-20"><Choice editing={ed} value={j.rank} onChange={v => patchRow(['techniques', 'pve'], i, 'rank', v)} options={JUTSU_RANKS} placeholder="—" /></Cell>
-                        <Cell className="w-28"><Choice editing={ed} value={j.nature} onChange={v => patchRow(['techniques', 'pve'], i, 'nature', v)} options={SHEET_NATURES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Choice editing={ed} value={j.approved} onChange={v => patchRow(['techniques', 'pve'], i, 'approved', v)} options={APPROVED_STATES} placeholder="—" /></Cell>
-                        <Cell className="w-24"><Link editing={ed} value={j.link} onChange={v => patchRow(['techniques', 'pve'], i, 'link', v)} /></Cell>
-                      </tr>
-                    ) : null
-                  ))}
-                </Table>
-                {!ed && !sheet.techniques.pve.some(j => j.name) && (
-                  <p className="text-xs italic py-2" style={{ color: INK_MUTED }}>No PvE techniques listed yet</p>
                 )}
               </Section>
 
@@ -636,15 +914,43 @@ export default function CharacterSheetModal({
                 </div>
 
                 <SubHead>Battle mode list</SubHead>
-                <Table headers={['Slot type', 'Name of battle mode / technique', 'Link']}>
-                  {sheet.battle_modes.slots.map((b, i) => (
-                    <tr key={i} className={zebraRow}>
-                      <Cell className="w-40"><span className="text-[11px] font-bold uppercase tracking-wide font-serif" style={{ color: INK }}>{b.slot}</span></Cell>
-                      <Cell><Text editing={ed} value={b.name} onChange={v => patchRow(['battle_modes', 'slots'], i, 'name', v)} /></Cell>
-                      <Cell className="w-24"><Link editing={ed} value={b.link} onChange={v => patchRow(['battle_modes', 'slots'], i, 'link', v)} /></Cell>
-                    </tr>
-                  ))}
-                </Table>
+                <div className="space-y-2">
+                  {sheet.battle_modes.slots.map((b, i) => {
+                    const tier = b.slot.replace(' Battle Mode', '');
+                    const linked = b.jutsu_id ? jutsuById[b.jutsu_id] : null;
+                    return (
+                      <div key={i} className="rounded-sm px-3.5 py-3 flex items-center gap-3"
+                           style={{ background: CARD, border: `1px solid ${HAIRLINE}` }}>
+                        <span className="shrink-0 w-24 text-[10px] font-bold uppercase tracking-wide font-serif" style={{ color: INK_MUTED }}>{tier}</span>
+                        <div className="flex-1 min-w-0">
+                          {b.name ? (
+                            <>
+                              <p className="font-semibold text-[13px] leading-tight break-words" style={{ color: INK }}>{b.name}</p>
+                              {linked && (
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-1">
+                                  {[toArray(linked.nature).join(' / '), toArray(linked.spec).join(' / '), linked.bloodline, linked.origin]
+                                    .filter(Boolean)
+                                    .map((m, k) => <span key={k} className="text-[11px]" style={{ color: INK_MUTED }}>{m}</span>)}
+                                </div>
+                              )}
+                            </>
+                          ) : (
+                            <JutsuPicker editing={ed} name="" pool={battleModePoolByTier[tier] || []}
+                                         placeholder={`Search ${tier.toLowerCase()} battle modes…`}
+                                         onSelect={(jutsu) => pickBattleModeInto(i, jutsu)}
+                                         onClear={() => clearBattleModeAt(i)} />
+                          )}
+                        </div>
+                        {ed && b.name && (
+                          <button type="button" onClick={() => clearBattleModeAt(i)} title="Remove this battle mode"
+                                  className="shrink-0 p-1 rounded-sm opacity-50 hover:opacity-100 transition-opacity">
+                            <X size={13} style={{ color: INK_MUTED }} />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
 
                 <div className="mt-4">
                   <Field label="Awakening skill">

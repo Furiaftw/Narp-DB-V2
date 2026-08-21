@@ -34,10 +34,6 @@ export const SHEET_VILLAGES = [
   'Wanderer', 'Rogue',
 ];
 
-// Bingo-book style threat rating, using the same letter scale as jutsu ranks.
-export const THREAT_LEVELS = ['Unranked', 'E', 'D', 'C', 'B', 'A', 'S'];
-
-export const CHARACTER_SLOTS = ['First OC', 'Second OC', 'Third OC'];
 
 export const ECONOMIC_STATUS = ['Destitute', 'Poor', 'Lower Class', 'Middle Class', 'Upper Class', 'Wealthy'];
 
@@ -87,7 +83,6 @@ export const LIMITS = {
   specialTools: 2,
   family: 5,           // 2 parents + 3 other
   jutsuSlots: 30,
-  pveSlots: 5,
   puppets: 12,
   images: 6,
 };
@@ -173,7 +168,6 @@ export const emptySheet = () => ({
   },
   techniques: {
     jutsu: rows(LIMITS.jutsuSlots, { name: '', rank: '', nature: '', approved: '', link: '' }),
-    pve: rows(LIMITS.pveSlots, { name: '', rank: '', nature: '', approved: '', link: '' }),
   },
   battle_modes: {
     slots: BATTLE_MODE_SLOTS.map(slot => ({ slot, name: '', link: '' })),
@@ -235,7 +229,6 @@ export const normalizeSheet = (stored) => {
     },
     techniques: {
       jutsu: mergeRows(base.techniques.jutsu, stored.techniques?.jutsu),
-      pve:   mergeRows(base.techniques.pve, stored.techniques?.pve),
     },
     battle_modes: {
       ...base.battle_modes,
@@ -264,6 +257,44 @@ export const computeCU = (stats = {}) => {
   const extra = parseInt(String(stats.extra_cu ?? '').trim(), 10);
   const extraNum = Number.isFinite(extra) ? extra : 0;
   return { base, extra: extraNum, total: base + extraNum };
+};
+
+// Ordinal label for "which OC is this" ("1st OC", "2nd OC", ...) — same
+// suffix rule OCSubmissionModal and PendingJutsuCard use, kept separate here
+// since this file has no App.jsx/component dependency to share it from.
+export const ocSlotLabel = (n) => {
+  const v = Number(n) || 0;
+  if (!v) return '';
+  const mod100 = v % 100;
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th'
+    : v % 10 === 1 ? 'st' : v % 10 === 2 ? 'nd' : v % 10 === 3 ? 'rd' : 'th';
+  return `${v}${suffix} OC`;
+};
+
+/*
+ * Threat level ("Finding Your Shinobi Rank/Level"): average the scale value
+ * of the four D-S stats (Chakra Level, Chakra Control, Speed, Strength),
+ * round .5-and-under down / .6-and-over up, and map back to a letter grade.
+ * F and E both score 0, matching the CU table's "F sits under E and is worth
+ * the same 0 units" -- the source ruleset's scale (F/D/C/B/A/S) has no rung
+ * for E, so this is the value that keeps an E-rank stat from scoring higher
+ * than an F-rank one. Returns '' until all four stats are set.
+ */
+const THREAT_STAT_VALUE = { F: 0, E: 0, D: 1, C: 2, B: 3, A: 4, S: 5 };
+const THREAT_BANDS = [
+  { upTo: 0.5, label: 'F' },
+  { upTo: 1.5, label: 'D' },
+  { upTo: 2.5, label: 'C' },
+  { upTo: 3.5, label: 'B' },
+  { upTo: 4.5, label: 'A' },
+  { upTo: Infinity, label: 'S' },
+];
+export const computeThreatLevel = (stats = {}) => {
+  const values = ['chakra_level', 'chakra_control', 'speed', 'strength']
+    .map(k => THREAT_STAT_VALUE[stats[k]]);
+  if (values.some(v => v === undefined)) return '';
+  const avg = values.reduce((a, b) => a + b, 0) / 4;
+  return THREAT_BANDS.find(b => avg <= b.upTo).label;
 };
 
 // A sheet is "started" once anything meaningful is in it — used to show an

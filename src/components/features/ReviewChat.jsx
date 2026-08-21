@@ -8,7 +8,7 @@ import {
   updatePendingJutsuData,
   getCurrentSession,
 } from '../../lib/supabase';
-import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText } from '../../utils/helpers';
+import { getNetlifyImageUrl, getNetlifyImageSrcSet, copyText, renderDiscordMarkdown } from '../../utils/helpers';
 import Icon from '../ui/Icon';
 import ConfirmButton from '../ui/ConfirmButton';
 import useIsDesktop from '../../hooks/useIsDesktop';
@@ -57,12 +57,12 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending, pa
     isServerThreadLink(d.myCharactersLink) &&
     (d.upgradesConfirmed || d.upgradesLink);
 
-  // Discord mentions of every reviewer involved: staff who entered this chat
-  // (claimer, joiners, anyone who messaged), plus the recorded first/second
-  // reviewers as a fallback when chat data hasn't loaded.
+  // Discord mentions of every reviewer involved: team members who entered
+  // this chat (claimer, joiners, anyone who messaged), plus the recorded
+  // first/second reviewers as a fallback when chat data hasn't loaded.
   const reviewerMentions = [...new Set([
     ...participants
-      .filter(p => ['staff', 'admin', 'owner'].includes(p.role) && p.id !== pending?.submitted_by)
+      .filter(p => ['reviewer', 'admin', 'owner'].includes(p.role) && p.id !== pending?.submitted_by)
       .map(p => p.discord_id),
     pending?.assignee?.discord_id,
     pending?.first_reviewer?.discord_id,
@@ -91,7 +91,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
   };
 
   const handleSave = async () => {
-    if (!myLinkComplete) { setError('Paste your Character Area thread link from the NARP server (right-click your thread → Copy Link).'); return; }
+    if (!myLinkComplete) { setError('Paste your Character Area thread link from the SARP server (right-click your thread → Copy Link).'); return; }
     if (!areaChecked || !upgradesChecked) { setError('Check both boxes once the threads are created.'); return; }
     setError('');
     setSaving(true);
@@ -111,9 +111,13 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
     }
     setNudging(true);
     try {
+      const sess = await getCurrentSession();
       const res = await fetch('/.netlify/functions/nudge-reviewer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
         body: JSON.stringify({
           pendingId: pending.id,
           submitterName: pending.submitter?.username || 'Player',
@@ -205,7 +209,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
                 placeholder="https://discord.com/channels/.../your-thread-id"
                 className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"
               />
-              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Paste your thread's link from the NARP server (right-click the thread → Copy Link)</p>}
+              {!myLinkValid && <p className="text-red-400 text-[10px] font-bold">Invalid link. Paste your thread's link from the SARP server (right-click the thread → Copy Link)</p>}
             </div>
 
             <div className="flex items-start gap-2.5 bg-slate-950 rounded-2xl p-4 border border-slate-800/80">
@@ -360,30 +364,7 @@ export default function ReviewChat({
     return names.length ? new RegExp(`@(${names.join('|')})`, 'gi') : null;
   }, [participants]);
 
-  const renderMessageBody = (text, isMe) => {
-    if (!text) return '';
-    const urlParts = String(text).split(/(https?:\/\/[^\s]+)/g);
-    return urlParts.map((part, i) => {
-      if (/^https?:\/\//.test(part)) {
-        return (
-          <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-500 hover:text-blue-400 hover:underline">
-            {part}
-          </a>
-        );
-      }
-      if (!mentionRegex) return part;
-      const segs = part.split(mentionRegex);
-      if (segs.length === 1) return part;
-      return segs.map((seg, j) => j % 2 === 1
-        ? (
-          <span key={`${i}-${j}`} className={`font-bold rounded px-1 ${isMe ? 'bg-white/25 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
-            @{seg}
-          </span>
-        )
-        : seg
-      );
-    });
-  };
+  const renderMessageBody = (text, isMe) => renderDiscordMarkdown(text, { mentionRegex, isMe });
 
   // Load messages on open / parent refresh
   useEffect(() => {
@@ -658,7 +639,7 @@ export default function ReviewChat({
   };
 
   const lastStaffMsgTime = messages
-    .filter(m => ['staff', 'admin', 'owner'].includes(m.profiles?.role))
+    .filter(m => ['reviewer', 'admin', 'owner'].includes(m.profiles?.role))
     .reduce((latest, m) => Math.max(latest, new Date(m.created_at).getTime()), 0);
   const nudgeReviewerLocked = lastStaffMsgTime > 0 && Date.now() - lastStaffMsgTime < 30 * 60 * 1000;
 
@@ -898,10 +879,11 @@ export default function ReviewChat({
                                     isMe
                                       ? 'bg-indigo-500/30 text-indigo-50'
                                       : r === 'admin' ? 'bg-indigo-100 text-indigo-700'
-                                      : r === 'staff' ? 'bg-emerald-100 text-emerald-700'
+                                      : r === 'reviewer' || r === 'staff' ? 'bg-emerald-100 text-emerald-700'
+                                      : r === 'grader' || r === 'oc_staff' ? 'bg-teal-100 text-teal-700'
                                       : 'bg-slate-100 text-slate-600'
                                   }`}>
-                                    {r === 'staff' ? 'Reviewer' : r}
+                                    {r === 'staff' || r === 'reviewer' ? 'Reviewer' : r === 'oc_staff' || r === 'grader' ? 'Grader' : r}
                                   </span>
                                 );
                               })()}

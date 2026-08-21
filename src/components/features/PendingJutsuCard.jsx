@@ -4,11 +4,22 @@ import {
   getCurrentSession,
   sendReviewChat,
   updatePendingJutsuData,
+  fetchCharacterSheetByName,
 } from '../../lib/supabase';
+import { normalizeSheet, sheetHasContent } from '../../constants/characterSheet';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from '../../utils/helpers';
 import Icon from '../ui/Icon';
 import ConfirmButton from '../ui/ConfirmButton';
 import ReviewChat, { JOIN_PREFIX } from './ReviewChat';
+import CharacterSheetModal from './CharacterSheetModal';
+
+const ordinal = (n) => {
+  const v = Number(n) || 0;
+  const mod100 = v % 100;
+  const suffix = (mod100 >= 11 && mod100 <= 13) ? 'th'
+    : v % 10 === 1 ? 'st' : v % 10 === 2 ? 'nd' : v % 10 === 3 ? 'rd' : 'th';
+  return `${v}${suffix}`;
+};
 
 /* ============================================================================
    COMPONENT: ReservationControls — reviewer tools for a "Réservation Request"
@@ -193,6 +204,7 @@ export const OP_BADGE_LABELS = { insert: 'New', update: 'Edit', delete: 'Delete'
 export default function PendingJutsuCard({
   pending,
   originalJutsu,
+  allJutsus = [],
   currentUserId,
   isAdmin,
   onApprove,
@@ -221,17 +233,17 @@ export default function PendingJutsuCard({
   const op = pending.operation;
   // Characters can't be approved until the player finishes the final step
   // (see isCharacterEntry/ocFinalStepDone below) — also doubles as the scope
-  // gate for 'oc_staff' ("Staff"), a reviewer tier restricted to OCs only.
+  // gate for 'grader', a review tier restricted to OCs only.
   const isCharacterEntry = pending.data?.type === 'Character';
-  const isOcStaffRole = currentUser.role === 'oc_staff';
+  const isGraderRole = currentUser.role === 'grader';
 
-  const hasStaffPrivileges = (['staff', 'admin', 'owner'].includes(currentUser.role) || (isOcStaffRole && isCharacterEntry)) && !isStrictSubmitter;
+  const hasStaffPrivileges = (['reviewer', 'admin', 'owner'].includes(currentUser.role) || (isGraderRole && isCharacterEntry)) && !isStrictSubmitter;
 
   const isMine     = pending.submitted_by === currentUserId;
   const submitter  = pending.submitter;
   const submitterName = submitter?.username || 'Unknown';
 
-  const isReviewerOrAdmin = ['staff', 'admin', 'owner'].includes(currentUserRole) || (isOcStaffRole && isCharacterEntry);
+  const isReviewerOrAdmin = ['reviewer', 'admin', 'owner'].includes(currentUserRole) || (isGraderRole && isCharacterEntry);
   const isStaff = isReviewerOrAdmin;
 
   const opColors = OP_BADGE_COLORS;
@@ -242,6 +254,20 @@ export default function PendingJutsuCard({
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatSenderIds, setChatSenderIds] = useState(() => new Set());
   const [isJoiningChat, setIsJoiningChat] = useState(false);
+
+  // Character sheet, checked by name since the OC isn't on the roster yet --
+  // approval is gated on this having real content (see ocSheetDone below).
+  // null = still loading/unknown, so the gate doesn't flash "missing" first.
+  const [sheetStatus, setSheetStatus] = useState(null);
+  const [sheetModalOpen, setSheetModalOpen] = useState(false);
+  useEffect(() => {
+    if (!isCharacterEntry || !name || op === 'delete') return;
+    let cancelled = false;
+    fetchCharacterSheetByName(name)
+      .then(row => { if (!cancelled) setSheetStatus(!!row && sheetHasContent(normalizeSheet(row.data))); })
+      .catch(() => { if (!cancelled) setSheetStatus(false); });
+    return () => { cancelled = true; };
+  }, [isCharacterEntry, name, op, refreshTrigger, sheetModalOpen]);
 
   const isClaimed = !!(
     pendingItem.assigned_to !== null &&
@@ -303,6 +329,12 @@ export default function PendingJutsuCard({
     pending.data?.myCharactersLink &&
     (pending.data?.upgradesConfirmed || pending.data?.upgradesLink)
   );
+  // Character sheet filled in with real content — required before approval.
+  const ocSheetDone = !isCharacterEntry || sheetStatus === true;
+  const canApproveCharacter = ocFinalStepDone && ocSheetDone;
+  const pendingStepMessage = !ocFinalStepDone
+    ? '⏳ Final step pending — the player must register their character area threads first'
+    : '⏳ Character sheet needed — fill it in below before this can be approved';
 
   const assignedId = pendingItem.assigned_to && typeof pendingItem.assigned_to === 'object'
     ? pendingItem.assigned_to.id
@@ -393,7 +425,7 @@ export default function PendingJutsuCard({
 
       {op !== 'delete' && (
         <div className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg p-3 space-y-1">
-          {display.oc_number                               && <div><span className="font-semibold">OC:</span> {display.oc_number === 1 ? 'First' : display.oc_number === 2 ? 'Second' : 'Third'} character</div>}
+          {display.oc_number                               && <div><span className="font-semibold">OC:</span> {ordinal(display.oc_number)} character</div>}
           {display.ninja_rank                              && <div><span className="font-semibold">Ninja Rank:</span> {display.ninja_rank}{display.councilor ? ' · Councilor' : ''}</div>}
           {display.village                                 && <div><span className="font-semibold">{display.village === 'Wanderer' ? 'Faction' : 'Village'}:</span> {display.village}</div>}
           {display.squad_type && display.squad_number      && <div><span className="font-semibold">Squad:</span> {display.squad_type === 'genin' ? 'Genin' : 'Chunin'} Squad {display.squad_number}{display.squad_is_new ? ' (new squad)' : ''}</div>}
@@ -405,6 +437,20 @@ export default function PendingJutsuCard({
           {Array.isArray(display.spec) && display.spec.length > 0 && <div><span className="font-semibold">Specialization:</span> {display.spec.join(', ')}</div>}
           {display.link && <div><span className="font-semibold">Link:</span>{' '}<a href={display.link} target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline break-all">{display.link}</a></div>}
         </div>
+      )}
+      {isCharacterEntry && op !== 'delete' && (isMine || hasStaffPrivileges) && (
+        <button
+          type="button"
+          onClick={() => setSheetModalOpen(true)}
+          className={`text-xs font-bold rounded-lg px-3 py-2 flex items-center justify-center gap-1.5 border transition-colors ${
+            sheetStatus === true
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+              : 'bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100'
+          }`}
+        >
+          <Icon n={sheetStatus === true ? 'Check' : 'Edit'} size={13} />
+          {sheetStatus === null ? 'Checking character sheet…' : sheetStatus === true ? 'Character Sheet — Complete' : 'Fill Out Character Sheet (required to approve)'}
+        </button>
       )}
       {op === 'delete' && (
         <div className="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-lg p-3">
@@ -455,7 +501,7 @@ export default function PendingJutsuCard({
                         <Icon n="Check" size={14}/> Begin Second Review
                       </ConfirmButton>
                       {['admin', 'owner'].includes(currentUser.role) && (
-                        ocFinalStepDone ? (
+                        canApproveCharacter ? (
                           <ConfirmButton
                             onConfirm={() => onApprove(pending.id)}
                             disabled={isApproving}
@@ -468,7 +514,7 @@ export default function PendingJutsuCard({
                           </ConfirmButton>
                         ) : (
                           <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
-                            ⏳ Final step pending — the player must register their character area threads first
+                            {pendingStepMessage}
                           </div>
                         )
                       )}
@@ -507,7 +553,7 @@ export default function PendingJutsuCard({
                     </ConfirmButton>
                   )}
                   {hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
-                    ocFinalStepDone ? (
+                    canApproveCharacter ? (
                       <ConfirmButton
                         onConfirm={() => onApprove(pending.id)}
                         disabled={isApproving}
@@ -520,7 +566,7 @@ export default function PendingJutsuCard({
                       </ConfirmButton>
                     ) : (
                       <div className="flex-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 flex items-center justify-center text-center">
-                        ⏳ Final step pending — the player must register their character area threads first
+                        {pendingStepMessage}
                       </div>
                     )
                   )}
@@ -631,6 +677,23 @@ export default function PendingJutsuCard({
           refreshPending={refreshPending}
           onClose={() => setIsChatOpen(false)}
           onRead={onChatOpened}
+        />
+      )}
+      {sheetModalOpen && (
+        <CharacterSheetModal
+          characterName={name}
+          currentUserId={currentUserId}
+          jutsus={allJutsus}
+          ownerIdHint={pending.submitted_by}
+          canEditAny={hasStaffPrivileges}
+          prefill={{
+            village: pending.data?.village || '',
+            shinobi_rank: pending.data?.ninja_rank || '',
+            clan_kkg: pending.data?.bloodline && pending.data.bloodline !== 'Clanless' ? pending.data.bloodline : '',
+            oc_number: pending.data?.oc_number || null,
+          }}
+          onClose={() => setSheetModalOpen(false)}
+          onSaved={() => {}}
         />
       )}
     </div>

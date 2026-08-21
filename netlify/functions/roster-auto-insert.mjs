@@ -41,8 +41,8 @@ export default async (req) => {
 
   const { data: profile } = await supabase
     .from('profiles').select('role').eq('id', user.id).maybeSingle();
-  if (!['staff', 'admin', 'owner'].includes(profile?.role)) {
-    return json({ error: 'Staff access required' }, 403);
+  if (!['grader', 'reviewer', 'admin', 'owner'].includes(profile?.role)) {
+    return json({ error: 'Reviewer access required' }, 403);
   }
 
   let body;
@@ -51,7 +51,7 @@ export default async (req) => {
   if (!pendingId) return json({ error: 'Missing pendingId' }, 400);
 
   const { data: pendingRow, error: pendErr } = await supabase
-    .from('pending_jutsus').select('id, data').eq('id', pendingId).maybeSingle();
+    .from('pending_jutsus').select('id, data, submitted_by').eq('id', pendingId).maybeSingle();
   if (pendErr) return json({ error: 'Pending lookup failed: ' + pendErr.message }, 500);
   if (!pendingRow) return json({ error: 'Pending entry not found' }, 404);
 
@@ -72,13 +72,17 @@ export default async (req) => {
     status: 'approved',
     approved_by: user.id,
   };
+  // The actual OC owner (original submitter), not the reviewer running this
+  // approval. Only applied to rows that represent a real character below --
+  // never to the captainless sentinel placeholder rows.
+  const owner = { owner_id: pendingRow.submitted_by || null };
 
   // Wanderers live outside the village system: one entry in the Wanderer
   // roster section, no squads/elite/council rows.
   if (isWanderer) {
     try {
       const { error: wErr } = await supabase.from('roster_entries').insert({
-        roster_type: 'wanderer', name, discord_link: link, meta: {}, ...stamp,
+        roster_type: 'wanderer', name, discord_link: link, meta: {}, ...stamp, ...owner,
       });
       if (wErr) throw wErr;
       return json({ ok: true, inserted: 'wanderer', warnings });
@@ -112,7 +116,7 @@ export default async (req) => {
         // New squad: captainless placeholder row, same as the manual flow.
         rows.push({ village: villageId, squad_type: squadType, squad_number: num, role: 'sentinel', name: '', ...stamp });
       }
-      rows.push({ village: villageId, squad_type: squadType, squad_number: num, role: memberRole, name, discord_link: link, ...stamp });
+      rows.push({ village: villageId, squad_type: squadType, squad_number: num, role: memberRole, name, discord_link: link, ...stamp, ...owner });
 
       const { error: insErr } = await supabase.from('roster_squads').insert(rows);
       if (insErr) throw insErr;
@@ -123,12 +127,12 @@ export default async (req) => {
     if (rank === 'Jōnin' || rank === 'Special Jōnin') {
       const rosterType = rank === 'Jōnin' ? `${villageId}_jonin` : `${villageId}_special_jonin`;
       const entryRows = [
-        { roster_type: rosterType, name, discord_link: link, meta: {}, ...stamp },
+        { roster_type: rosterType, name, discord_link: link, meta: {}, ...stamp, ...owner },
       ];
       // Councilor is a symbolic rank: the character stays a Jōnin and is
       // additionally listed in the Village Council section.
       if (rank === 'Jōnin' && d.councilor) {
-        entryRows.push({ roster_type: `${villageId}_council`, name, discord_link: link, meta: {}, ...stamp });
+        entryRows.push({ roster_type: `${villageId}_council`, name, discord_link: link, meta: {}, ...stamp, ...owner });
       }
       const { error: entErr } = await supabase.from('roster_entries').insert(entryRows);
       if (entErr) throw entErr;
@@ -148,7 +152,7 @@ export default async (req) => {
         } else {
           const { error: capErr } = await supabase.from('roster_squads').insert({
             village: villageId, squad_type: 'genin', squad_number: mentorNum,
-            role: 'captain', name, discord_link: link, ...stamp,
+            role: 'captain', name, discord_link: link, ...stamp, ...owner,
           });
           if (capErr) throw capErr;
           // Remove the captainless placeholder, mirroring the manual flow.

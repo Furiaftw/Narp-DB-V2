@@ -85,7 +85,10 @@ export const fetchMyProfile = async () => {
     try {
       const syncRes = await fetch('/.netlify/functions/sync-discord-roles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
         body: JSON.stringify({
           provider_token: session.provider_token,
           userId: session.user.id
@@ -217,11 +220,11 @@ export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket, banned_at')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
-    // Fallback: work_thread_id column does not exist in profiles table
+    // Fallback: work_thread_id / banned_at column does not exist in profiles table
     const fallback = await supabase
       .from('profiles')
       .select('id, email, username, avatar_url, role, discord_id, created_at')
@@ -234,12 +237,50 @@ export const fetchAllProfiles = async () => {
   return data || [];
 };
 
+// Single-profile lookup by id — used to display a character sheet's owner
+// ("Submitted by") without pulling every profile down first.
+export const fetchProfileById = async (id) => {
+  if (!supabase || !id) return null;
+  const { data, error } = await supabase
+    .from('profiles').select('id, username, site_nickname, discord_id').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+};
+
 export const setUserRole = async (userId, role) => {
   if (!supabase) return;
-  if (!['user', 'staff', 'oc_staff', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
+  if (!['user', 'grader', 'reviewer', 'admin', 'owner'].includes(role)) throw new Error('Invalid role');
   const { error } = await supabase.from('profiles').update({ role }).eq('id', userId);
   if (error) throw error;
 };
+
+/* --- Member moderation (Member Board: remove / ban / unban) ---------------
+   Both actions touch auth.users via the Supabase Admin API, which client-side
+   RLS cannot reach, so they run through the moderate-member Netlify function
+   using the service role key. That function re-derives and re-checks the
+   caller's role server-side -- it does not trust anything from the client
+   beyond the bearer token. */
+
+const callModerateMember = async (action, targetUserId) => {
+  if (!supabase) return;
+  const session = await getCurrentSession();
+  if (!session?.access_token) throw new Error('Must be signed in');
+  const res = await fetch('/.netlify/functions/moderate-member', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ action, targetUserId }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Request failed (${res.status})`);
+  return body;
+};
+
+export const removeMember = (targetUserId) => callModerateMember('remove', targetUserId);
+export const banMember = (targetUserId) => callModerateMember('ban', targetUserId);
+export const unbanMember = (targetUserId) => callModerateMember('unban', targetUserId);
 
 /* --- Wanderer tickets -------------------------------------------------------
    One-time, admin-granted permission to submit a Wanderer-faction OC. Both
@@ -257,6 +298,18 @@ export const consumeWandererTicket = async () => {
   const { data, error } = await supabase.rpc('consume_wanderer_ticket');
   if (error) throw error;
   return !!data;
+};
+
+/* --- Storage calculator (System Tools) -------------------------------------
+   Admin+ only -- get_storage_stats() (supabase/add-storage-stats.sql) checks
+   the caller's role itself and raises if they aren't admin/owner, so this is
+   safe to call from the client with just the authenticated session. */
+
+export const fetchStorageStats = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc('get_storage_stats');
+  if (error) throw error;
+  return data || [];
 };
 
 /* --- Webhook config -------------------------------------------------------- */
@@ -296,7 +349,7 @@ export const fetchWhitelist = async () => {
 
 export const addToWhitelist = async (email, role) => {
   if (!supabase) return;
-  if (!['staff', 'admin'].includes(role)) throw new Error('Whitelist role must be staff or admin');
+  if (!['grader', 'reviewer', 'admin'].includes(role)) throw new Error('Whitelist role must be grader, reviewer, or admin');
   const session = await getCurrentSession();
   const { error } = await supabase
     .from('whitelist')
@@ -343,19 +396,44 @@ export const fetchPendingJutsus = async () => {
 };
 
 export const submitPendingJutsu = async (operation, targetId, data, status = 'pending_approval') => {
-  if (!supabase) return;
+  if (!supabase) return null;
   if (!['insert', 'update', 'delete'].includes(operation)) throw new Error('Invalid operation');
   const session = await getCurrentSession();
   if (!session?.user?.id) throw new Error('Must be signed in to submit');
 
-  const { error } = await supabase.from('pending_jutsus').insert({
+  const { data: row, error } = await supabase.from('pending_jutsus').insert({
     operation,
     target_id: targetId || null,
     data: operation === 'delete' ? null : data,
     submitted_by: session.user.id,
     status,
-  });
+  }).select('id').single();
   if (error) throw error;
+  return row;
+};
+
+// How many OCs a player currently has: approved roster rows they own, plus
+// any other Character submissions of theirs still awaiting review (so a
+// second in-flight OC doesn't collide with the first on the same number).
+// Backs the auto-calculated "which OC is this for you?" in OCSubmissionModal.
+// owner_id is only populated on rows approved after
+// add-roster-owner-tracking.sql, so this undercounts OCs approved earlier.
+export const fetchMyOcCount = async (userId, excludePendingId = null) => {
+  if (!supabase || !userId) return 0;
+  const [entries, squads, pending] = await Promise.all([
+    supabase.from('roster_entries').select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId).eq('status', 'approved'),
+    supabase.from('roster_squads').select('id', { count: 'exact', head: true })
+      .eq('owner_id', userId).eq('status', 'approved').neq('role', 'sentinel'),
+    supabase.from('pending_jutsus').select('id, data').eq('submitted_by', userId),
+  ]);
+  if (entries.error) throw entries.error;
+  if (squads.error) throw squads.error;
+  if (pending.error) throw pending.error;
+  const pendingCharacterCount = (pending.data || []).filter(p =>
+    p.data?.type === 'Character' && p.id !== excludePendingId
+  ).length;
+  return (entries.count || 0) + (squads.count || 0) + pendingCharacterCount;
 };
 
 export const reviewPendingJutsu = async (id, reviewerId) => {
@@ -1039,6 +1117,198 @@ export const deleteCharacterSheet = async (id) => {
   if (!supabase || !id) return;
   const { error } = await supabase.from('character_sheets').delete().eq('id', id);
   if (error) throw error;
+};
+
+/* --- RP grading & upgrade credits (Phase 1) ---------------------------------
+   The two-gate pipeline: players submit RPs, a grader approves them (minting
+   one single-use credit per participating character), players spend credits
+   on upgrade requests, a reviewer approves those (auto-updating the sheet).
+   All state transitions run through SECURITY DEFINER RPCs — see
+   supabase/add-rp-grading-upgrades.sql. RLS scopes reads: players see their
+   own rows, grader+ sees the grading queue, reviewer+ the upgrade queue. */
+
+const RP_SUBMISSION_COLUMNS = `
+  id, submitter_id, rp_type, description, thread_url, status, grader_id,
+  sol_only, grader_notes, created_at, graded_at,
+  submitter:profiles!rp_submissions_submitter_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+  grader:profiles!rp_submissions_grader_id_fkey (id, username, site_nickname, avatar_url),
+  participants:rp_participants (
+    id, user_id, discord_user_id, character_id, claimed_tags,
+    profile:profiles!rp_participants_user_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+    character:character_sheets!rp_participants_character_id_fkey (id, character_name, ninja_rank, owner_id)
+  )
+`;
+
+export const submitRpSubmission = async ({ rpType, description, threadUrl, participants }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('You must be signed in to submit an RP');
+
+  const { data: submission, error } = await supabase
+    .from('rp_submissions')
+    .insert({
+      submitter_id: user.id,
+      rp_type: rpType,
+      description: (description || '').trim(),
+      thread_url: (threadUrl || '').trim(),
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+
+  const rows = (participants || []).map(p => ({
+    submission_id: submission.id,
+    user_id: p.userId,
+    discord_user_id: p.discordUserId || '',
+    character_id: p.characterId,
+    claimed_tags: p.claimedTags || [],
+  }));
+  const { error: pErr } = await supabase.from('rp_participants').insert(rows);
+  if (pErr) {
+    // Participants failed — don't leave a participant-less submission behind.
+    await supabase.from('rp_submissions').delete().eq('id', submission.id);
+    throw pErr;
+  }
+  return submission.id;
+};
+
+// RLS already scopes this: players get their own submissions (plus ones
+// they participate in), grader+ gets everything.
+export const fetchRpSubmissions = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('rp_submissions')
+    .select(RP_SUBMISSION_COLUMNS)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return []; // migration not run yet
+    throw error;
+  }
+  return data || [];
+};
+
+export const cancelRpSubmission = async (id) => {
+  if (!supabase || !id) return;
+  const { error } = await supabase.from('rp_submissions').delete().eq('id', id);
+  if (error) throw error;
+};
+
+// Gate 1 verdict. tagsByParticipant: { [participantRowId]: string[] } — the
+// eligible tags the grader approved for each participant's credit.
+export const gradeRpSubmission = async (id, { approve, solOnly, tagsByParticipant, notes }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('grade_rp_submission', {
+    p_submission_id: id,
+    p_approve: !!approve,
+    p_sol_only: !!solOnly,
+    p_participant_tags: tagsByParticipant || {},
+    p_notes: notes || '',
+  });
+  if (error) throw error;
+};
+
+export const fetchCreditsForCharacters = async (characterIds) => {
+  if (!supabase || !characterIds?.length) return [];
+  const { data, error } = await supabase
+    .from('rp_credits')
+    .select(`
+      id, submission_id, character_id, eligible_tags, status,
+      spent_on_upgrade_id, credit_value, created_at,
+      submission:rp_submissions!rp_credits_submission_id_fkey (
+        id, rp_type, description, thread_url, grader_notes, graded_at,
+        grader:profiles!rp_submissions_grader_id_fkey (username, site_nickname)
+      )
+    `)
+    .in('character_id', characterIds)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+};
+
+export const submitUpgradeRequest = async ({ characterId, upgradeType, target, computedCost, attachedCreditIds, warnings }) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user?.id) throw new Error('You must be signed in to request an upgrade');
+  const { data, error } = await supabase
+    .from('upgrade_requests')
+    .insert({
+      character_id: characterId,
+      requester_id: user.id,
+      upgrade_type: upgradeType,
+      target,
+      computed_cost: computedCost,
+      attached_credit_ids: attachedCreditIds || [],
+      warnings: warnings || [],
+    })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id;
+};
+
+// RLS-scoped like submissions: requester/owner sees their own, reviewer+ all.
+// The joined sheet `data` feeds the reviewer's live warning recompute.
+export const fetchUpgradeRequests = async () => {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from('upgrade_requests')
+    .select(`
+      id, character_id, requester_id, upgrade_type, target, computed_cost,
+      attached_credit_ids, warnings, status, reviewer_id, override_reason,
+      review_note, before_value, cycle_key, created_at, reviewed_at,
+      reverted_by, reverted_at,
+      character:character_sheets!upgrade_requests_character_id_fkey (id, character_name, ninja_rank, owner_id, data),
+      requester:profiles!upgrade_requests_requester_id_fkey (id, username, site_nickname, avatar_url, discord_id),
+      reviewer:profiles!upgrade_requests_reviewer_id_fkey (id, username, site_nickname)
+    `)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+};
+
+export const cancelUpgradeRequest = async (id) => {
+  if (!supabase || !id) return;
+  const { error } = await supabase.from('upgrade_requests').delete().eq('id', id);
+  if (error) throw error;
+};
+
+export const approveUpgradeRequest = async (id, overrideReason) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('approve_upgrade_request', {
+    p_request_id: id,
+    p_override_reason: overrideReason || null,
+  });
+  if (error) throw error;
+};
+
+export const rejectUpgradeRequest = async (id, reason) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('reject_upgrade_request', {
+    p_request_id: id,
+    p_reason: reason || null,
+  });
+  if (error) throw error;
+};
+
+export const revertUpgrade = async (id) => {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('revert_upgrade', { p_request_id: id });
+  if (error) throw error;
+};
+
+export const fetchApprovedThisCycle = async (characterId) => {
+  if (!supabase || !characterId) return 0;
+  const { data, error } = await supabase.rpc('approved_upgrades_this_cycle', {
+    p_character_id: characterId,
+  });
+  if (error) return 0;
+  return data || 0;
 };
 
 export const savePushSubscription = async (sub) => {

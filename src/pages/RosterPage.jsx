@@ -67,9 +67,9 @@ const JINCHURIKI_ACCENT = { accent: '#f97316', accentFaint: 'rgba(249,115,22,0.0
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
 function isAdmin(role) { return role === 'admin' || role === 'owner'; }
-function isReviewer(role) { return role === 'staff'; }
+function isReviewer(role) { return role === 'reviewer'; }
 
-// Double-approval: Reviewers (staff) insert rows with status 'pending';
+// Double-approval: Reviewers insert rows with status 'pending';
 // a DIFFERENT Reviewer or an Admin performs the second step (approve).
 // Admins keep writing directly (rows default to 'approved').
 function canModifyRow(perms, row) {
@@ -1465,7 +1465,7 @@ function DataTab({ entries, squads }) {
 
 // ─── MAIN PAGE ────────────────────────────────────────────────────────────────
 
-export default function RosterPage({ userRole, userId }) {
+export default function RosterPage({ userRole, userId, jutsus = [] }) {
   const [entries, setEntries]         = useState([]);
   const [squads, setSquads]           = useState([]);
   const [loading, setLoading]         = useState(true);
@@ -1483,8 +1483,8 @@ export default function RosterPage({ userRole, userId }) {
   const canAdd    = canEdit || reviewer;
   const staffView = canEdit || reviewer;
   const perms = useMemo(() => ({ admin: canEdit, reviewer, userId }), [canEdit, reviewer, userId]);
-  // Staff tiers may edit anyone's sheet; players edit only their own.
-  const canEditAnySheet = ['staff', 'oc_staff', 'admin', 'owner'].includes(userRole);
+  // Team tiers may edit anyone's sheet; players edit only their own.
+  const canEditAnySheet = ['grader', 'reviewer', 'admin', 'owner'].includes(userRole);
 
   const handleApproveEntry = async (id) => {
     setApprovingRosterId(id);
@@ -1902,6 +1902,7 @@ export default function RosterPage({ userRole, userId }) {
           accent={sheetModal.color || '#38bdf8'}
           canEditAny={canEditAnySheet}
           currentUserId={userId}
+          jutsus={jutsus}
           onClose={() => setSheetModal(null)}
           onSaved={() => refreshSheetIndex()}
         />

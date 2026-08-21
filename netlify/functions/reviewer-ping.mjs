@@ -14,6 +14,21 @@ export default async (req) => {
     });
   }
 
+  const authHeader = req.headers.get('authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return new Response(JSON.stringify({ error: 'Missing auth token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+  const { data: { user }, error: authError } = await supabase.auth.getUser(authHeader.slice(7));
+  if (authError || !user) {
+    return new Response(JSON.stringify({ error: 'Invalid token' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
   let body;
   try {
     body = await req.json();
@@ -82,6 +97,12 @@ export default async (req) => {
     if (triggerType === 'creation') {
       const byLine = submitterName ? ` by ${submitterName}` : '';
       messageString = `A new technique submission entry was uploaded: **${itemName}**${byLine}.`;
+    } else if (triggerType === 'rp_submission') {
+      const byLine = submitterName ? ` by ${submitterName}` : '';
+      messageString = `📖 A new RP grading submission is waiting in the queue: **${itemName}**${byLine}.`;
+    } else if (triggerType === 'upgrade_request') {
+      const byLine = submitterName ? ` by ${submitterName}` : '';
+      messageString = `⬆️ A new character upgrade request is waiting for review: **${itemName}**${byLine}.`;
     } else if (triggerType === 'retracted') {
       messageString = `Technique submission **${itemName}** was retracted by the player.`;
     } else if (triggerType === 'second_approval') {

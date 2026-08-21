@@ -91,7 +91,9 @@ function noChatCopy({ isStaff, iAmSubmitter, claimed }) {
 }
 
 /* ============================================================================
-   PAGE: InboxPage — merged Messages + Pending + My Submissions.
+   PAGE: InboxPage — the Database section's Inbox tab: merged Messages +
+   Pending + My Submissions. The Submit menu that files a new entry lives in
+   the persistent header, not here.
    Staff: Pending's collapsible review-queue groups (Claimed by Me / Pending
    Approval / Needs Reviewer / Claimed by Others / My Submissions), narrowed
    by Messages' filter chips + sort. Players: same shell, but only their own
@@ -186,7 +188,7 @@ export default function InboxPage({
 
   const renderChat = (p, variant) => {
     const iAmSubmitter = p.submitted_by === profile?.id;
-    const viewerIsStaff = (['staff', 'admin', 'owner'].includes(role) || role === 'oc_staff') && !iAmSubmitter;
+    const viewerIsStaff = (['reviewer', 'admin', 'owner'].includes(role) || role === 'grader') && !iAmSubmitter;
     return (
       <ReviewChat
         pending={p}
@@ -209,6 +211,7 @@ export default function InboxPage({
     <PendingJutsuCard
       pending={p}
       originalJutsu={p.target_id ? dbJutsus.find(j => j._id === p.target_id) : null}
+      allJutsus={dbJutsus}
       currentUserId={profile?.id}
       isAdmin={isAdmin}
       onApprove={onApprove}
@@ -375,11 +378,15 @@ export default function InboxPage({
         />
       )}
 
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h2 className="text-lg font-bold font-serif text-slate-800">Inbox</h2>
+      </div>
+
       {FilterSortBar}
 
       {!pendingLoaded ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm text-center py-14 px-6">
-          <p className="text-slate-500 font-semibold text-sm">Loading your inbox...</p>
+          <p className="text-slate-500 font-semibold text-sm">Loading your submissions...</p>
         </div>
       ) : visibleGroups.length === 0 ? (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm text-center py-14 px-6">
