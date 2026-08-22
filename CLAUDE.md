@@ -24,23 +24,56 @@ There is no test suite and no linter configured. Verification is manual: run the
 
 ## Architecture
 
-### The App.jsx monolith — and the trap next to it
+### App.jsx and the module layout
 
-`src/App.jsx` (~5,900 lines) is the layout shell plus most of the UI and business logic: the root `App` component, the route table, data loading, dev-mode fallback, and many components defined inline (JutsuCard, FilterBar, SessionListCart, PendingJutsuCard, AdminFormModal, SystemToolsModal, UserMenu, and more). The jutsu catalog, bloodlines view and member board are still inline here — they are the routes that stayed put; everything else lives in `src/pages/`.
+`src/App.jsx` (~2,200 lines) is now just the layout shell and the app-level state
+it owns: the root `App` component, the route table, auth/profile state, the
+pending-submission queue and its handlers, the jutsu catalog route, and the
+modal wiring. Everything else has its own module.
 
-**Important:** `src/components/` contains extracted copies of several of those same components (`features/JutsuCard.jsx`, `features/FilterBar.jsx`, `modals/AdminForm.jsx`, `modals/SystemTools.jsx`, `layout/UserMenu.jsx`) that are **not imported by anything** — App.jsx uses its own inline versions. Editing those files has no effect on the running app. Before touching a component, check what actually imports it. (The equivalent dead copies of SessionCart, PendingCard, and NotificationBell, plus the dead `modals/StatelessForm.jsx`, have been deleted outright rather than left to bit-rot.)
+There used to be a trap here worth knowing about, because its fingerprints are
+still in the git history: several components existed **twice** — an inline copy
+in App.jsx that the app actually rendered, and a same-named file under
+`src/components/` that nothing imported. The copies drifted, and the dead ones
+went stale in ways that would have broken things had anyone started importing
+them (`constants/catalog.js` had lost the `jutsu_type` and bloodline slot
+fields, `ui/RankLogo.jsx` predated the grader/reviewer migration and had no
+grader tier, `utils/helpers.jsx` still carried a `sendDiscordLog` that attached
+a chat transcript and a Google Doc PDF long after both were removed). That is
+resolved: every one of those is now a single module, populated from the version
+that was actually running. **There are no unimported duplicate components left
+— if you find yourself adding a second copy of something, don't.**
 
-What App.jsx *does* import from elsewhere:
-- `src/pages/RosterPage.jsx` — roster page
-- `src/pages/InboxPage.jsx` — Inbox tab of the Database section (`inbox*` identifiers throughout match the file name)
-- `src/pages/GradingPage.jsx` — Grading/Upgrade Requests page (see "RP grading & upgrade credits" below)
-- `src/pages/HistoryPage.jsx` — History page: Work Log + Audit Log panels
-- `src/components/features/ReviewChat.jsx` and `RecentChatActivity.jsx`
-- `src/components/ErrorBoundary.jsx` (via `main.jsx`)
-- `src/hooks/useIsDesktop.js`, `src/utils/helpers.jsx`
-- `src/components/ui/Icon.jsx` (used transitively by the pages/features above)
+Where things live:
 
-Catalog constants (natures, ranks, specializations, etc.) are duplicated between App.jsx and `src/constants/catalog.js`; the inline copies in App.jsx are what the main app uses.
+| Path | What |
+| :--- | :--- |
+| `pages/RosterPage.jsx` | roster |
+| `pages/BloodlinesPage.jsx` | `/bloodlines` view + its charts (lazy — owns the recharts bundle) |
+| `pages/MembersPage.jsx` | `/members` board + `MemberWorkThreadInput` |
+| `pages/InboxPage.jsx` | Inbox tab (`inbox*` identifiers match the file name) |
+| `pages/GradingPage.jsx` | Grading/Upgrade Requests (see below) |
+| `pages/HistoryPage.jsx` | Work Log + Audit Log panels |
+| `components/features/` | `JutsuCard` (+`JutsuDocRankPicker`), `FilterBar` (+`FilterBarPanel`), `SessionListCart`, `AddSubmissionMenu`, `ReviewChat`, `RecentChatActivity`, `PendingJutsuCard`, `CharacterSheetModal`, `JutsuSheetModal`, `JutsuHistoryModal`, `SheetKit` |
+| `components/modals/` | `AdminForm`, `SystemTools`, `OCSubmissionModal`, `StatelessSubmission`, `SlotsViewModal`, `CatalogManagement`, `JutsuStatsModal` |
+| `components/layout/` | `UserMenu`, `RouteGates` (`NoAccess` / `SignedOutNotice`) |
+| `components/ui/` | `Icon`, `RankLogo`, `ProfileAvatar`, `Dropdowns`, `SlotsEditor`, `ConfirmButton`, `UpdateBanner` |
+| `constants/catalog.js` | `STORAGE`, `SHUTDOWN_AT`, natures/ranks/specializations, `STATIC_SEED`, `MANAGE_TABLES` — the single source of truth |
+| `utils/helpers.jsx` | small pure helpers + `renderDiscordMarkdown` |
+| `utils/discordLog.js` | `sendDiscordLog` (the only copy) |
+| `utils/loadDb.js` | `normalizeDB` + `loadDB` |
+
+**Code splitting:** `BloodlinesPage` and the four admin/staff modals
+(`AdminForm`, `SystemTools`, `CatalogManagement`, `OCSubmissionModal`,
+`StatelessSubmission`) are `lazy()` behind their own `Suspense` boundary —
+they are not needed on first paint, and BloodlinesPage in particular keeps
+recharts out of the main bundle. Keep new heavy, on-demand surfaces lazy too.
+
+**No test suite:** the only safety net is `npm run build` plus driving the real
+UI. Note that dev mode (no Supabase) leaves whole branches unrendered — an
+empty `profilesList` means the member board's rows never paint — so a clean
+route-level smoke test does not prove a data-dependent path works. Mount the
+component against realistic data when you touch one.
 
 ### Routing and the navigation shell
 
@@ -52,7 +85,7 @@ tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` al
 | Path | Renders | Gate |
 | :--- | :--- | :--- |
 | `/` | jutsu catalog (inline in App.jsx) | public |
-| `/bloodlines` | bloodlines view (inline) | public |
+| `/bloodlines` | `BloodlinesPage` (lazy) | public |
 | `/roster` | `RosterPage` | public |
 | `/grading` | `GradingPage` | signed in |
 | `/history` | → redirects to `/history/work-log` | — |
@@ -60,7 +93,7 @@ tab bar, filter chrome, modals) wrapping one `<Routes>` block. `netlify.toml` al
 | `/history/audit-log` | `AuditLogPanel`, via `HistoryPage` | admin+ |
 | `/inbox` | `InboxPage` — queue + review chats | signed in |
 | `/submissions` | → redirects to `/inbox` | — |
-| `/members` | member board (inline) | admin+ |
+| `/members` | `MembersPage` | admin+ |
 | anything else | → redirects to `/` | — |
 
 Two navs, deliberately: the **section switcher** (dark strip in the header) spans every page,
@@ -99,7 +132,7 @@ The OC sheet that used to live in a Google Doc is now a database record:
 - Both sheet modals (`CharacterSheetModal`, `JutsuSheetModal`) render **full-screen** — `fixed inset-0` with an opaque background, a sticky header carrying the close button, and content capped at `max-w-6xl`/`max-w-5xl` so long lines stay readable on wide displays. There is no backdrop left to click, so both close on **Escape** as well; the character sheet ignores Escape while editing so a stray keypress can't discard a half-filled sheet.
 - The Techniques/Battle mode lists no longer take free-text jutsu names: `JutsuPicker` (inside `CharacterSheetModal.jsx`) searches the live jutsu catalog (`jutsus` prop — threaded down from `App.jsx`'s `db.jutsus` via `RosterPage`/`PendingJutsuCard`/`OCSubmissionModal`) and only ever renders the *empty* state; once a slot is filled the row draws itself. A filled row is the jutsu name plus its nature/specialization/bloodline/origin read straight back off the catalog row — picking is the whole interaction, there is nothing else to type. **Rank is the one exception**: it stays a control, but only for jutsus that exist at more than one rank, since which rank the character learned is a real per-character fact the catalog can't answer and the rank limits quoted in that section are counted against it. Approved?/Doc-link columns are gone (a jutsu in the database is by definition approved, and it has its own sheet). Battle mode slots are filtered to Battlemode-type jutsus whose `bm_tier` matches that exact slot (Primary/Secondary/Tertiary). There is no PvE slots table any more (removed outright, including `LIMITS.pveSlots` and `techniques.pve` from the sheet shape).
 
-Both this and the jutsu sheet below share one visual toolkit — `src/components/features/SheetKit.jsx` — the cream-paper/ink-black/hanko-stamp "parchment" primitives (`Field`, `Section`, `Table`, `Text`, `Choice`, `Area`, `Link`, `SheetShell`, `HankoStamp`, plus the color tokens). Change the look in one place and both sheets stay identical.
+The character sheet's look comes from `src/components/features/SheetKit.jsx` — the cream-paper/ink-black/hanko-stamp "parchment" primitives (`Field`, `Section`, `Table`, `Text`, `Choice`, `Area`, `Link`, `SheetShell`, `HankoStamp`, plus the color tokens). **Only `CharacterSheetModal` imports it.** `JutsuSheetModal` deliberately does not: it defines its own `Field`/`Section`/`Text`/`Area` and is styled to match JutsuCard (white cards, slate-50 insets, indigo accents) rather than the parchment document look — see the comment at the top of that file. So editing SheetKit changes the character sheet only, and the two sheets are *not* meant to look identical.
 
 ### Jutsu sheets (the in-database jutsu write-up)
 
