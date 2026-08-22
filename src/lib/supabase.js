@@ -105,7 +105,7 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id, wanderer_ticket')
     .eq('id', session.user.id)
     .maybeSingle();
 
@@ -155,45 +155,11 @@ export const updateMyUsername = async (username) => {
   return data;
 };
 
-export const updateMyCustomItemThreadId = async (threadId) => {
-  if (!supabase) throw new Error('Supabase is not configured');
-  const session = await getCurrentSession();
-  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
-
-  const clean = (threadId || '').trim();
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ custom_item_thread_id: clean || null })
-    .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, custom_item_thread_id, summon_thread_id')
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
-export const updateMySummonThreadId = async (threadId) => {
-  if (!supabase) throw new Error('Supabase is not configured');
-  const session = await getCurrentSession();
-  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
-
-  const clean = (threadId || '').trim();
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ summon_thread_id: clean || null })
-    .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, custom_item_thread_id, summon_thread_id')
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
 export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, custom_item_thread_id, summon_thread_id, wanderer_ticket, banned_at')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, wanderer_ticket, banned_at')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
@@ -356,7 +322,7 @@ export const fetchPendingJutsus = async () => {
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role, discord_id, custom_item_thread_id, summon_thread_id')
+    .select('id, username, email, avatar_url, role, discord_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
@@ -567,7 +533,7 @@ export const updateMySiteNickname = async (nickname) => {
     .from('profiles')
     .update({ site_nickname: clean })
     .eq('id', session.user.id)
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, custom_item_thread_id, summon_thread_id')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id')
     .single();
   if (error) throw error;
   return data;
