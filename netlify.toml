@@ -45,10 +45,18 @@
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
 
+# stale-while-revalidate here would let Netlify's edge CDN (a layer in front
+# of both the browser and the service worker) serve a cached index.html up to
+# 24h old on any given request -- non-deterministic per edge node, which is
+# exactly the "sometimes new, sometimes old" symptom this was causing. The
+# SPA shell must always be revalidated so it references the current deploy's
+# hashed asset filenames; /assets/* below is where long-lived caching
+# actually belongs, since those filenames are content-hashed and safe to
+# cache forever.
 [[headers]]
   for = "/*"
   [headers.values]
-    Netlify-CDN-Cache-Control = "public, max-age=0, stale-while-revalidate=86400"
+    Netlify-CDN-Cache-Control = "public, max-age=0, must-revalidate"
 
 [images]
   remote_images = [
