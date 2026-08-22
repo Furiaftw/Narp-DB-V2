@@ -448,15 +448,6 @@ export const reviewPendingJutsu = async (id, reviewerId) => {
   if (error) throw error;
 };
 
-export const recordSecondApprovalPing = async (id, count) => {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from('pending_jutsus')
-    .update({ second_approval_ping_count: count, last_second_approval_ping_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) throw error;
-};
-
 export const claimPendingSubmission = async (pendingId, userId) => {
   if (!supabase) throw new Error('Supabase is not initialized');
   const { data, error } = await supabase
@@ -729,9 +720,7 @@ export const fetchRoleChangeLog = async (limit = 100) => {
   return data || [];
 };
 
-/* --- Work log stats (in-app monthly totals; separate from the Discord
-   reviewer-work-log system, which keeps logging the detailed per-item
-   narrative unchanged) ------------------------------------------------------- */
+/* --- Work log stats (in-app monthly totals, shown on the Work Log page) --- */
 
 // Increments a counter for this month/actionType by 1. Defaults to the
 // current user; pass targetUserId to credit another reviewer instead (e.g.

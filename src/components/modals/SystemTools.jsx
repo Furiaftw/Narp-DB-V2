@@ -9,6 +9,7 @@ import {
   setSpecializations as saveSpecializationsToSupabase,
   setJutsuTypeTags as saveJutsuTypeTagsToSupabase,
   updateSubmissionControl,
+  getCurrentSession,
 } from '../../lib/supabase';
 
 /* ============================================================================
@@ -347,7 +348,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                   <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
                 <p className="text-xs text-slate-500 mb-5">
-                  Temporarily mute every outbound Discord message tied to submissions — new-submission alerts, the second-reviewer-needed ping, the reviewer nudge DM, and the approval/denial log post. Everything still works normally in the app; Discord just stays quiet.
+                  Temporarily mute the reviewer nudge DM sent from the review chat's Final Step. Everything still works normally in the app; Discord just stays quiet. (The old webhook-based submission/approval alerts and pings were removed along with Discord forums — DMs to submitters about claims, approvals and denials are unaffected by this switch.)
                 </p>
                 {(() => {
                   const key = 'discord_notifications_paused';
@@ -429,31 +430,20 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               </div>
             </div>
 
-            {/* Webhook Config — owner only */}
+            {/* Discord Role Mapping — owner only */}
             {isOwner && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
-                  <Icon n="MessageSquare" size={20} className="text-violet-500" /> Discord Notification Config
+                  <Icon n="Shield" size={20} className="text-violet-500" /> Discord Role Mapping
                   <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
-                <p className="text-xs text-slate-500 mb-5">Configure where Discord notifications are sent. Webhook URLs remain in Netlify env vars (they contain auth tokens).</p>
-                <div className="space-y-3">
-                  {[
-                    { key: 'discord_guild_id',            label: 'Guild ID',             placeholder: '12345678901234567' },
-                    { key: 'discord_ping_thread_id',      label: 'Reviewer Ping Thread', placeholder: 'Thread ID (17-20 digits)' },
-                    { key: 'discord_reviewer_role_id',    label: 'Reviewer Role ID',     placeholder: 'Discord role snowflake' },
-                    { key: 'discord_admin_role_id',       label: 'Admin Role ID',        placeholder: 'Discord role snowflake' },
-                    { key: 'discord_oc_staff_role_id',    label: 'Staff (OC) Role ID',   placeholder: 'Discord role snowflake' },
-                  ].map(({ key, label, placeholder }) => (
-                    <WebhookConfigRow
-                      key={key}
-                      label={label}
-                      placeholder={placeholder}
-                      initialValue={webhookConfig[key] || ''}
-                      onSave={(value) => onWebhookConfigSave(key, value)}
-                    />
-                  ))}
-                </div>
+                <p className="text-xs text-slate-500 mb-5">
+                  Which Discord role grants which site tier, pulled live from the server so you pick from a list instead of typing a role ID by hand. Requires <code className="bg-white border border-slate-200 rounded px-1 py-0.5">VITE_DISCORD_GUILD_ID</code> and <code className="bg-white border border-slate-200 rounded px-1 py-0.5">DISCORD_BOT_TOKEN</code> to be set in Netlify, and the bot to be a member of the server.
+                </p>
+                <DiscordRoleMapping
+                  webhookConfig={webhookConfig}
+                  onWebhookConfigSave={onWebhookConfigSave}
+                />
                 <p className="text-[10px] text-slate-400 mt-4">Changes take effect immediately — no redeploy needed.</p>
               </div>
             )}
@@ -493,48 +483,108 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
 }
 
 /* ============================================================================
-   COMPONENT: WebhookConfigRow
+   COMPONENT: DiscordRoleMapping
+   Three dropdowns (Admin / Reviewer / Grader), populated from the live
+   Discord server via discord-guild-roles.mjs, saving into the same
+   webhook_config keys the old free-text fields wrote to. Falls back to
+   showing the raw saved ID if the roles can't be loaded yet (bot/guild not
+   configured, or the saved ID no longer exists on the server) so a value
+   is never silently dropped from the dropdown.
    ============================================================================ */
-export function WebhookConfigRow({ label, placeholder, initialValue, onSave }) {
-  const [value, setValue] = useState(initialValue);
-  const [status, setStatus] = useState('idle'); // idle | saving | success | error
-  const [errMsg, setErrMsg] = useState('');
+const ROLE_MAPPING_FIELDS = [
+  { key: 'discord_admin_role_id',    label: 'Admin' },
+  { key: 'discord_reviewer_role_id', label: 'Reviewer' },
+  { key: 'discord_grader_role_id',   label: 'Grader' },
+];
 
-  useEffect(() => { setValue(initialValue); }, [initialValue]);
+function DiscordRoleMapping({ webhookConfig, onWebhookConfigSave }) {
+  const [roles, setRoles] = useState(null); // null = not loaded yet
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [savedKey, setSavedKey] = useState(null);
 
-  const handleSave = async () => {
-    setStatus('saving');
-    setErrMsg('');
+  const loadRoles = async () => {
+    setLoading(true);
+    setError('');
     try {
-      await onSave(value.trim());
-      setStatus('success');
-      setTimeout(() => setStatus('idle'), 2000);
+      const sess = await getCurrentSession();
+      const res = await fetch('/.netlify/functions/discord-guild-roles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      setRoles(data.roles || []);
     } catch (e) {
-      setErrMsg(e.message || 'Save failed');
-      setStatus('error');
+      setError(e.message || 'Failed to load Discord roles');
+      setRoles(null);
+    } finally {
+      setLoading(false);
     }
   };
 
+  const handleChange = (key, roleId) => {
+    onWebhookConfigSave(key, roleId);
+    setSavedKey(key);
+    setTimeout(() => setSavedKey(k => (k === key ? null : k)), 2000);
+  };
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
-      <label className="text-xs font-bold text-slate-600 sm:w-36 sm:shrink-0">{label}</label>
-      <div className="flex items-center gap-2 min-w-0">
-        <input
-          type="text"
-          value={value}
-          onChange={e => { setValue(e.target.value); setStatus('idle'); }}
-          placeholder={placeholder}
-          className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 font-mono"
-        />
-        <button
-          onClick={handleSave}
-          disabled={status === 'saving'}
-          className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 shrink-0"
-        >
-          {status === 'saving' ? '…' : 'Save'}
-        </button>
-        {status === 'success' && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓</span>}
-        {status === 'error'   && <span className="text-red-500 text-[10px] shrink-0" title={errMsg}>✗</span>}
+    <div className="space-y-4">
+      <button
+        onClick={loadRoles}
+        disabled={loading}
+        className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 flex items-center gap-1.5"
+      >
+        <Icon n="Refresh" size={12} className={loading ? 'animate-spin' : ''} />
+        {loading ? 'Loading roles…' : roles ? 'Refresh roles' : 'Load roles from Discord'}
+      </button>
+      {error && (
+        <p className="text-red-500 text-[11px] font-semibold bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+      )}
+      <div className="space-y-3">
+        {ROLE_MAPPING_FIELDS.map(({ key, label }) => {
+          const currentValue = webhookConfig[key] || '';
+          const currentKnown = roles?.some(r => r.id === currentValue);
+          return (
+            <div key={key} className="flex flex-col gap-1">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                <label className="text-xs font-bold text-slate-600 sm:w-24 sm:shrink-0">{label}</label>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {roles ? (
+                    <select
+                      value={currentKnown ? currentValue : ''}
+                      onChange={e => handleChange(key, e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                    >
+                      <option value="">— none —</option>
+                      {roles.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentValue}
+                      placeholder="Load roles above to set this"
+                      className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-100 text-slate-500 font-mono"
+                    />
+                  )}
+                  {savedKey === key && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓ Saved</span>}
+                </div>
+              </div>
+              {roles && currentValue && !currentKnown && (
+                <p className="text-[10px] text-amber-600 sm:ml-[6.5rem]">
+                  Currently saved role ({currentValue}) wasn't found on the server — pick a role above to replace it.
+                </p>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

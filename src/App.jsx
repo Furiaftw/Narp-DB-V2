@@ -35,7 +35,6 @@ import {
   logWorkAction,
   fetchReviewChats,
   claimPendingSubmission,
-  recordSecondApprovalPing,
   fetchWebhookConfig,
   saveWebhookConfig,
   fetchSubmissionControls,
@@ -54,7 +53,6 @@ import {
   getSlotStatus,
   getSortKey,
 } from './utils/helpers';
-import { sendDiscordLog } from './utils/discordLog';
 import { Icon } from './components/ui/Icon';
 
 import SlotsEditor from './components/ui/SlotsEditor';
@@ -716,24 +714,6 @@ export default function App() {
       const status = 'pending_review';
       await submitPendingJutsu(operation, targetId, payload, status);
 
-      const tab = t;
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({
-          triggerType: 'creation',
-          itemName: entity?.name || 'Unknown',
-          itemType: tab === 'jutsus' ? 'Jutsu' : 'Bloodline',
-          submitterName: profile?.username || 'Unknown',
-        }),
-      }).catch((err) => {
-        console.warn('[NARP] Reviewer ping creation alert failed:', err);
-      });
-
       await refreshPending();
       return false;
     }
@@ -747,10 +727,6 @@ export default function App() {
             else if (t === 'bloodlines') await deleteBloodline(targetId);
           } else {
             if (t === 'jutsus') {
-              // Direct admin write bypasses the staff queue, so log it as a
-              // single-approver action (current user as both submitter and
-              // reviewer) before persisting the change.
-              await sendDiscordLog(entity, 'Approved', profile, profile, profile, webhookConfig);
               await upsertJutsu(entity);
             }
             else if (t === 'bloodlines') await upsertBloodline(entity);
@@ -876,7 +852,6 @@ export default function App() {
         // jutsu it belongs to. Reviewer+ only (matches who could see the
         // pending review chat in the first place).
         const isPlainJutsu = !isCharacter && item.data?.type !== 'Summon' && item.data?.type !== 'Custom Item';
-        let logData = null;
         try {
           const chats = await fetchReviewChats(id);
           let chatTranscript = null;
@@ -909,77 +884,26 @@ export default function App() {
               }
             }
           }
-          logData = await sendDiscordLog(
-            displayData,
-            isDelete ? 'Deleted' : 'Approved',
-            item.submitter,
-            item.first_reviewer,
-            profile,
-            webhookConfig
-          );
-        } catch (discordErr) {
-          console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        } catch (chatErr) {
+          console.warn('[NARP] Fetching review chats failed:', chatErr);
         }
 
         const approvalItemName = isCharacter
           ? (displayData?.name && displayData.name !== 'OC Submission' ? displayData.name : 'OC Submission')
           : (displayData?.name || 'Unknown');
-        const approvalDocLink = displayData?.link || 'N/A';
-        const mainLogUrl = logData?.messageId
-          ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
-          : '';
         const sess = await getCurrentSession();
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
 
-        // Single work log embed per reviewer at approval time, labelled by role.
+        // Work log stats (the in-app Work Log page) — logged for every
+        // approval regardless of Discord config.
         const firstReviewer = item.first_reviewer;
-        const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.work_thread_id && firstReviewer.id !== profile?.id;
-        if (item.operation === 'insert' && profile?.work_thread_id) {
+        const hasDifferentFirstReviewer = item.operation === 'insert' && firstReviewer?.id && firstReviewer.id !== profile?.id;
+        if (item.operation === 'insert') {
           // "Second Reviewer" when a different person did first check; "Solo Approver" otherwise.
           const actionType = hasDifferentFirstReviewer ? 'Second Reviewer' : 'Solo Approver';
-          try {
-            await fetch('/.netlify/functions/reviewer-work-log', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHdr },
-              body: JSON.stringify({
-                threadId: profile.work_thread_id,
-                reviewerId: profile.discord_id,
-                reviewerName: profile.username,
-                actionType,
-                itemName: approvalItemName,
-                docLink: approvalDocLink,
-                mainLogUrl,
-                myCharactersLink: displayData?.myCharactersLink || '',
-                upgradesLink: displayData?.upgradesLink || '',
-              }),
-            });
-          } catch (workLogErr) {
-            console.warn('[NARP] Final approver work log failed:', workLogErr);
-          }
           logWorkAction(actionType).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
-
-        // First reviewer's embed — sent at approval so it includes the log URL and all links.
         if (hasDifferentFirstReviewer) {
-          try {
-            await fetch('/.netlify/functions/reviewer-work-log', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHdr },
-              body: JSON.stringify({
-                threadId: firstReviewer.work_thread_id,
-                reviewerId: firstReviewer.discord_id,
-                reviewerName: firstReviewer.username,
-                actionType: 'First Reviewer',
-                itemName: approvalItemName,
-                docLink: approvalDocLink,
-                mainLogUrl,
-                myCharactersLink: displayData?.myCharactersLink || '',
-                upgradesLink: displayData?.upgradesLink || '',
-              }),
-            });
-          } catch (workLogErr) {
-            console.warn('[NARP] First reviewer work log failed:', workLogErr);
-          }
           logWorkAction('First Reviewer', firstReviewer.id).catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
@@ -1018,34 +942,9 @@ export default function App() {
     }
   };
 
-  const handleDirectSummonItemUpload = useCallback(async (data) => {
-    const entryData = { ...data, _createdAt: new Date().toISOString() };
-    const logData = await sendDiscordLog(entryData, 'Approved', profile, null, profile, webhookConfig);
-
-    if (profile?.work_thread_id) {
-      const sess = await getCurrentSession();
-      const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
-      const mainLogUrl = logData?.messageId
-        ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
-        : '';
-      await fetch('/.netlify/functions/reviewer-work-log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHdr },
-        body: JSON.stringify({
-          threadId: profile.work_thread_id,
-          reviewerId: profile.discord_id,
-          reviewerName: profile.username,
-          actionType: 'Direct Upload',
-          itemName: data.name || `${data.type} Submission`,
-          docLink: data.link || 'N/A',
-          mainLogUrl,
-          myCharactersLink: '',
-          upgradesLink: '',
-        }),
-      }).catch(err => console.warn('[NARP] Direct upload work log failed:', err));
-      logWorkAction('Direct Upload').catch(err => console.warn('[NARP] Work log stat failed:', err));
-    }
-  }, [profile, webhookConfig]);
+  const handleDirectSummonItemUpload = useCallback(async () => {
+    logWorkAction('Direct Upload').catch(err => console.warn('[NARP] Work log stat failed:', err));
+  }, []);
 
   // Frees the bloodline slot held by a granted Réservation Request. Called
   // before an entry is denied/retracted so reserved slots never leak.
@@ -1088,40 +987,17 @@ export default function App() {
         ));
 
         let chats = [];
-        let logData = null;
         try {
           chats = (await fetchReviewChats(id)) || [];
-          logData = await sendDiscordLog(displayData, 'Denied', item.submitter, item.first_reviewer, profile, webhookConfig);
-        } catch (discordErr) {
-          console.warn('[NARP] Pre-flight/Discord notification failed:', discordErr);
+        } catch (chatErr) {
+          console.warn('[NARP] Fetching review chats failed:', chatErr);
         }
 
         const denialItemName = displayData?.name || 'Unknown';
-        const denialDocLink = displayData?.link || 'N/A';
-        const denialLogUrl = logData?.messageId
-          ? `https://discord.com/channels/${import.meta.env.VITE_DISCORD_GUILD_ID}/${logData.threadId}/${logData.messageId}`
-          : '';
         const sess = await getCurrentSession();
         const authHdr = sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
 
-        if (item.operation === 'insert' && profile?.work_thread_id) {
-          try {
-            await fetch('/.netlify/functions/reviewer-work-log', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', ...authHdr },
-              body: JSON.stringify({
-                threadId: profile.work_thread_id,
-                reviewerId: profile.discord_id,
-                reviewerName: profile.username,
-                actionType: 'Denied',
-                itemName: denialItemName,
-                docLink: denialDocLink,
-                mainLogUrl: denialLogUrl,
-              }),
-            });
-          } catch (workLogErr) {
-            console.warn('[NARP] Reviewer work log failed:', workLogErr);
-          }
+        if (item.operation === 'insert') {
           logWorkAction('Denied').catch(err => console.warn('[NARP] Work log stat failed:', err));
         }
 
@@ -1154,30 +1030,13 @@ export default function App() {
       const op = item?.operation;
       const display = op === 'delete' ? ((db.jutsus || []).find(j => j._id === item?.target_id) || {}) : (item?.data || {});
       const itemName = display.name || 'Unknown Jutsu';
-      const itemType = 'Jutsu';
 
       // Optimistic: update status immediately so re-ordering happens at once
-      const pingedAt = new Date().toISOString();
       setPendingJutsus(prev => prev.map(p =>
-        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile, second_approval_ping_count: 1, last_second_approval_ping_at: pingedAt } : p
+        p.id === id ? { ...p, status: 'pending_approval', first_reviewer_id: profile.id, first_reviewer: profile } : p
       ));
 
       await reviewPendingJutsu(id, profile.id);
-      await recordSecondApprovalPing(id, 1);
-
-      // No work log embed at first-check time — the single combined embed is sent at approval.
-
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: 1 }),
-      }).catch((pingErr) => {
-        console.warn('Failed to send reviewer second approval ping:', pingErr);
-      });
 
       // DM submitter — their entry passed first check
       if (item?.submitter?.discord_id) {
@@ -1232,65 +1091,10 @@ export default function App() {
     }
   };
 
-  const SECOND_APPROVAL_PING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-
-  const handlePingSecondApproval = async (id) => {
-    try {
-      const item = pendingJutsus.find(p => p.id === id);
-      if (!item) return;
-
-      const lastPingAt = item.last_second_approval_ping_at ? new Date(item.last_second_approval_ping_at).getTime() : 0;
-      const remainingMs = SECOND_APPROVAL_PING_COOLDOWN_MS - (Date.now() - lastPingAt);
-      if (remainingMs > 0) {
-        alert(`You can send another ping in about ${Math.ceil(remainingMs / 3600000)}h.`);
-        return;
-      }
-
-      const op = item.operation;
-      const display = op === 'delete' ? ((db.jutsus || []).find(j => j._id === item.target_id) || {}) : (item.data || {});
-      const itemName = display.name || 'Unknown Jutsu';
-      const itemType = 'Jutsu';
-      const nextCount = (item.second_approval_ping_count || 0) + 1;
-      const pingedAt = new Date().toISOString();
-
-      setPendingJutsus(prev => prev.map(p =>
-        p.id === id ? { ...p, second_approval_ping_count: nextCount, last_second_approval_ping_at: pingedAt } : p
-      ));
-
-      await recordSecondApprovalPing(id, nextCount);
-
-      const _pingSess = await getCurrentSession();
-      await fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({ triggerType: 'second_approval', itemName, itemType, pingCount: nextCount }),
-      });
-    } catch (e) {
-      alert('Ping failed: ' + e.message);
-    }
-  };
-
   const handleSubmitterCancelPending = async (id) => {
     try {
       const item = pendingJutsus.find(p => p.id === id) || myOwnSubmissions.find(p => p.id === id);
       await releaseReservedSlot(item);
-      const itemName = (item?.data || {}).name || 'Unknown Submission';
-      const itemType = 'Jutsu';
-
-      // Post a plain retraction notice to the Discord log channel — no work log
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({ triggerType: 'retracted', itemName, itemType }),
-      }).catch(err => console.warn('[NARP] Retraction ping failed:', err));
-
       await cancelPendingJutsu(id);
       await refreshPending();
     } catch (e) {
@@ -1864,7 +1668,6 @@ export default function App() {
             onReview={handleReviewPending}
             onEdit={handleEditPending}
             onClaim={handleClaimPending}
-            onPingSecondApproval={handlePingSecondApproval}
             approvingIds={approvingIds}
             collapsedGroups={collapsedGroups}
             setCollapsedGroups={setCollapsedGroups}

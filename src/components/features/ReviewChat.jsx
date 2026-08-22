@@ -27,12 +27,12 @@ const displayNameOf = (p) => p?.site_nickname || p?.username || 'Unknown User';
 
 /* ---- SystemFinalStepBlock -------------------------------------------------- */
 
-// A forum THREAD link is discord.com/channels/<guildId>/<threadId> — it never
-// contains the parent forum's channel ID, so the only URL-checkable fact is
-// that the thread lives in our server (guild). Reviewers verify the rest.
-const NARP_GUILD_ID = '1473338897697214584';
-const isServerThreadLink = (link) =>
-  new RegExp(`discord(?:app)?\\.com/channels/${NARP_GUILD_ID}/\\d+`).test(link || '');
+// A Discord channel/thread link is discord.com/channels/<guildId>/<channelId>.
+// There's no single guild ID to check against any more — the server has been
+// rebuilt since this was written — so this only verifies the link has that
+// shape; reviewers verify the rest by eye.
+const isDiscordChannelLink = (link) =>
+  /discord(?:app)?\.com\/channels\/\d+\/\d+/.test(link || '');
 
 function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending, participants = [] }) {
   const d = pending?.data || {};
@@ -47,14 +47,14 @@ function SystemFinalStepBlock({ msg, pending, currentUserId, onUpdatePending, pa
 
   const isSubmitter = currentUserId === pending?.submitted_by;
 
-  const myLinkValid = !myLink || isServerThreadLink(myLink);
-  const myLinkComplete = !!myLink.trim() && isServerThreadLink(myLink);
+  const myLinkValid = !myLink || isDiscordChannelLink(myLink);
+  const myLinkComplete = !!myLink.trim() && isDiscordChannelLink(myLink);
 
   // Older entries stored an upgradesLink; either that or the new checkbox
   // confirmation counts as the upgrades thread being done.
   const linksSavedAndVerified =
     d.myCharactersLink &&
-    isServerThreadLink(d.myCharactersLink) &&
+    isDiscordChannelLink(d.myCharactersLink) &&
     (d.upgradesConfirmed || d.upgradesLink);
 
   // Discord mentions of every reviewer involved: team members who entered
@@ -148,12 +148,12 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
         <p className="font-bold text-white text-sm">Your character is almost approved! There is one last step before you are all set.</p>
         <p>Please create a thread in:</p>
         <div className="flex flex-col gap-1.5 pl-2 mt-1">
-          <a href="https://discord.com/channels/1473338897697214584/1473338902264676424" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
+          <span className="text-indigo-300 font-bold flex items-center gap-1.5">
             ◈ #my-characters → your character RP log area
-          </a>
-          <a href="https://discord.com/channels/1473338897697214584/1473338902264676425" target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1.5">
+          </span>
+          <span className="text-indigo-300 font-bold flex items-center gap-1.5">
             ◈ #character-upgrades → your character upgrades log area
-          </a>
+          </span>
         </div>
         <p className="mt-2">
           Make sure to use the template below for your character area thread. Once done, your character will be added to
@@ -204,7 +204,7 @@ Character Doc: ${d.link || "[Link your approved character's google doc here]"}`;
                 onChange={e => {
                   setMyLink(e.target.value);
                   setError('');
-                  if (!isServerThreadLink(e.target.value)) setAreaChecked(false);
+                  if (!isDiscordChannelLink(e.target.value)) setAreaChecked(false);
                 }}
                 placeholder="https://discord.com/channels/.../your-thread-id"
                 className="w-full text-xs border border-slate-800 bg-slate-900 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-indigo-500 placeholder-slate-600"

@@ -3,7 +3,7 @@ import { Icon } from '../ui/Icon';
 import { getSlotStatus } from '../../utils/helpers';
 import {
   submitPendingJutsu, fetchMyOcCount, fetchCharacterSheetByName,
-  consumeWandererTicket, getCurrentSession, supabase,
+  consumeWandererTicket, supabase,
 } from '../../lib/supabase';
 import { normalizeSheet as normalizeCharacterSheet, sheetHasContent as characterSheetHasContent } from '../../constants/characterSheet';
 import CharacterSheetModal from '../features/CharacterSheetModal';
@@ -332,23 +332,6 @@ export function OCSubmissionModal({ profile, bloodlines, jutsus = [], onClose, o
           return;
         }
       }
-
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({
-          triggerType: 'creation',
-          itemName: needsReservation ? `${data.name} (Réservation Request)` : data.name,
-          itemType: 'Character',
-          submitterName: profile?.username || 'Unknown',
-        }),
-      }).catch((pingErr) => {
-        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-      });
 
       if (onAfterSubmit) onAfterSubmit();
       onClose();

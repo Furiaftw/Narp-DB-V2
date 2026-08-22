@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Icon } from '../ui/Icon';
-import { submitPendingJutsu, getCurrentSession } from '../../lib/supabase';
+import { submitPendingJutsu } from '../../lib/supabase';
 
 /* ============================================================================
    COMPONENT: StatelessSubmissionModal
@@ -31,23 +31,6 @@ export function StatelessSubmissionModal({ type, profile, onClose, isAdmin, onDi
     try {
       const data = buildData();
       await submitPendingJutsu('insert', null, data, 'pending_review');
-
-      const _pingSess = await getCurrentSession();
-      fetch('/.netlify/functions/reviewer-ping', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(_pingSess?.access_token ? { Authorization: `Bearer ${_pingSess.access_token}` } : {}),
-        },
-        body: JSON.stringify({
-          triggerType: 'creation',
-          itemName: data.name,
-          itemType: isCharacter ? 'Character' : type,
-          submitterName: profile?.username || 'Unknown',
-        }),
-      }).catch((pingErr) => {
-        console.warn('[NARP] Reviewer ping creation alert failed:', pingErr);
-      });
 
       if (onAfterSubmit) onAfterSubmit();
       onClose();

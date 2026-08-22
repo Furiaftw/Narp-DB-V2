@@ -295,6 +295,8 @@ In **System Tools → Audit Log → View log**, there's a list of every role cha
 | `VAPID_PUBLIC_KEY`             | for push | manual                                  | Same public key, read by the Netlify push function. Functions scope.    |
 | `VAPID_PRIVATE_KEY`            | for push | manual (**secret**)                     | Web Push private (VAPID) key. **Server-only secret** — never prefix with `VITE_`. |
 | `VAPID_SUBJECT`                | for push | manual                                  | A `mailto:` contact for the push service, e.g. `mailto:you@example.com`. |
+| `VITE_DISCORD_GUILD_ID`        | for Discord roles | manual                         | The Discord server's guild ID. Used to sync a member's app role from their guild roles, and to list the guild's roles in System Tools' Discord Role Mapping panel. |
+| `DISCORD_BOT_TOKEN`            | for Discord roles/DMs | manual (**secret**)        | Bot token. Needs the bot invited to the guild above. Used to list guild roles (System Tools) and send DMs (claim/approve/deny notices, the reviewer nudge). |
 
 ¹ Only one of the two URL variables is needed. If both are set, `VITE_SUPABASE_URL` wins.
 

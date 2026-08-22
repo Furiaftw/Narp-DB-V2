@@ -215,7 +215,6 @@ export default function PendingJutsuCard({
   currentUserRole,
   refreshTrigger,
   onClaim,
-  onPingSecondApproval,
   currentUserProfile = null,
   refreshPending = null,
   isApproving = false,
@@ -276,12 +275,6 @@ export default function PendingJutsuCard({
       ? (pendingItem.assigned_to.id !== null && pendingItem.assigned_to.id !== undefined)
       : (typeof pendingItem.assigned_to === 'string' && pendingItem.assigned_to.trim() !== ''))
   );
-
-  const SECOND_APPROVAL_PING_COOLDOWN_MS = 24 * 60 * 60 * 1000;
-  const lastPingAt = pendingItem.last_second_approval_ping_at ? new Date(pendingItem.last_second_approval_ping_at).getTime() : 0;
-  const pingCooldownRemainingMs = Math.max(0, SECOND_APPROVAL_PING_COOLDOWN_MS - (Date.now() - lastPingAt));
-  const canPingAgain = pingCooldownRemainingMs <= 0;
-  const secondApprovalPingCount = pendingItem.second_approval_ping_count || 0;
 
   const elapsed = (() => {
     const baseTimeStr = pending.submitted_at;
@@ -539,19 +532,6 @@ export default function PendingJutsuCard({
                   )
                 ) : (
                   <>
-                  {hasStaffPrivileges && onPingSecondApproval && (
-                    <ConfirmButton
-                      onConfirm={() => onPingSecondApproval(pending.id)}
-                      disabled={!canPingAgain}
-                      armedLabel={<>🔔 Confirm ping?</>}
-                      armedClassName="ring-2 ring-violet-300 animate-pulse"
-                      className="bg-violet-100 hover:bg-violet-200 text-violet-700 px-3 py-2 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
-                      title={canPingAgain
-                        ? `Ping the reviewer team for a second reviewer${secondApprovalPingCount ? ` (pinged ${secondApprovalPingCount}×so far)` : ''}`
-                        : `Next ping available in ~${Math.ceil(pingCooldownRemainingMs / 3600000)}h`}>
-                      🔔 {canPingAgain ? 'Ping Team' : `Ping (${Math.ceil(pingCooldownRemainingMs / 3600000)}h)`}
-                    </ConfirmButton>
-                  )}
                   {hasStaffPrivileges && (pending.first_reviewer_id !== currentUserId || ['admin', 'owner'].includes(currentUser.role)) && (
                     canApproveCharacter ? (
                       <ConfirmButton
