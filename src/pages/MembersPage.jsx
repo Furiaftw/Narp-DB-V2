@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Icon } from '../components/ui/Icon';
-import { maskEmail } from '../utils/helpers';
+import { maskEmail, getNetlifyImageUrl, getNetlifyImageSrcSet } from '../utils/helpers';
 
 /* ============================================================================
    MEMBERS PAGE  (route: /members, admin+)
