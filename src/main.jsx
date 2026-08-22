@@ -1,15 +1,16 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
-import { registerSW } from 'virtual:pwa-register';
 import App from './App.jsx';
 import { ErrorBoundary } from './components/ErrorBoundary.jsx';
+import UpdateBanner from './components/ui/UpdateBanner.jsx';
+import { initPWAUpdate } from './pwaUpdate.js';
 import './index.css';
 
 // Register the service worker so push notifications can be delivered even when
-// the site is closed. `immediate` ensures navigator.serviceWorker.ready resolves
-// promptly so subscribeToPush() has a live registration to work with.
-registerSW({ immediate: true });
+// the site is closed, and so a new deploy can be surfaced via UpdateBanner
+// instead of a tab silently running a stale build indefinitely.
+initPWAUpdate();
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')).render(
       <BrowserRouter>
         <App />
       </BrowserRouter>
+      <UpdateBanner />
     </ErrorBoundary>
   </StrictMode>
 );

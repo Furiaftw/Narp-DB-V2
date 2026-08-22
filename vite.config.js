@@ -17,7 +17,13 @@ export default defineConfig({
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.js',
-      registerType: 'autoUpdate',
+      // 'prompt' (not 'autoUpdate'): a silent auto-reload only actually
+      // fires when the browser happens to re-check for a new service worker
+      // (normally just on navigation), so a tab left open for a while can
+      // sit on a stale build indefinitely with no sign anything is wrong.
+      // 'prompt' + the UpdateBanner in src/pwaUpdate.js surfaces it instead
+      // of leaving that silent.
+      registerType: 'prompt',
       includeAssets: ['favicon.ico', 'icons/*.png', 'icons/*.svg'],
       manifest: {
         name: 'SARP Database',

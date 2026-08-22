@@ -185,6 +185,8 @@ Edge functions run on Deno (`deno.lock`); regular functions run on Node.
 
 `vite-plugin-pwa` in `injectManifest` mode with a hand-written service worker at `src/sw.js` (Workbox precache + NetworkFirst for `*.supabase.co` + the `push`/`notificationclick` handlers). `netlify.toml` sets `Cache-Control: max-age=0` on `/sw.js` — keep it that way or clients stop updating. Push requires the four `VAPID_*` / `VITE_VAPID_PUBLIC_KEY` env vars (see `.env.example`); `VAPID_PRIVATE_KEY` is server-only and must never get a `VITE_` prefix.
 
+**Update banner:** `registerType: 'prompt'` (not `'autoUpdate'`) — a new service worker installs in the background but does not take over on its own. `src/pwaUpdate.js` registers it, polls `registration.update()` every 30 minutes and on tab-focus (the browser otherwise only checks on navigation, so a tab left open across a deploy would never notice), and exposes `onNeedRefresh` to a tiny subscriber list. `UpdateBanner` (`src/components/ui/UpdateBanner.jsx`, mounted in `main.jsx` next to `<App>`) shows "A new version is available" with a Refresh button wired to `applyPWAUpdate()`, which posts `SKIP_WAITING` to the waiting worker (handled in `sw.js`) and reloads once it takes control. This exists because two separate "the site is missing features I built" reports both turned out to be a stale build sitting silently in an already-open tab — `autoUpdate` never surfaced that anything was wrong.
+
 ## Conventions and gotchas
 
 - Env vars exposed to the browser must be prefixed `VITE_`; everything else is server-only. Secrets (service role key, VAPID private key) live only in Netlify env vars and are read only by functions.
