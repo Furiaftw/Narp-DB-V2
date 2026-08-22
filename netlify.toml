@@ -40,23 +40,28 @@
   to = "/index.html"
   status = 200
 
+# The SPA shell (index.html, served here for every non-asset path via the
+# rewrite above) must always be revalidated, at every caching layer, so it
+# references the current deploy's hashed asset filenames. This previously
+# only set Netlify-CDN-Cache-Control (the edge layer) and left the ordinary
+# Cache-Control header unset, so a browser that had already cached index.html
+# under the old, unset-header heuristics could keep serving it indefinitely
+# even after the edge was fixed -- exactly what caused stale builds (old
+# "NARP" branding, missing nav tabs) to persist on a phone across deploys.
+# Cache-Control here is intentionally declared BEFORE /assets/* below: when
+# two [[headers]] blocks set the same header for an overlapping path, Netlify
+# uses whichever appears LAST in this file, so /assets/* still wins its own
+# long-lived immutable caching despite also matching this catch-all "/*".
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+    Netlify-CDN-Cache-Control = "public, max-age=0, must-revalidate"
+
 [[headers]]
   for = "/assets/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
-
-# stale-while-revalidate here would let Netlify's edge CDN (a layer in front
-# of both the browser and the service worker) serve a cached index.html up to
-# 24h old on any given request -- non-deterministic per edge node, which is
-# exactly the "sometimes new, sometimes old" symptom this was causing. The
-# SPA shell must always be revalidated so it references the current deploy's
-# hashed asset filenames; /assets/* below is where long-lived caching
-# actually belongs, since those filenames are content-hashed and safe to
-# cache forever.
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Netlify-CDN-Cache-Control = "public, max-age=0, must-revalidate"
 
 [images]
   remote_images = [
