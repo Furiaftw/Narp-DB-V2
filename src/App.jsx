@@ -16,7 +16,6 @@ import {
   onAuthChange,
   fetchMyProfile,
   updateMyUsername,
-  setUserWorkThreadId,
   fetchAllProfiles,
   setUserRole,
   grantWandererTicket,
@@ -297,16 +296,6 @@ export default function App() {
     } catch (err) {
       console.error('[NARP] Failed to unban member:', err);
       alert('Failed to unban member: ' + (err.message || err));
-    }
-  };
-
-  const handleWorkThreadChange = async (userId, threadId) => {
-    try {
-      await setUserWorkThreadId(userId, threadId);
-      setProfilesList(prev => prev.map(p => p.id === userId ? { ...p, work_thread_id: threadId } : p));
-    } catch (err) {
-      console.error('[NARP] Failed to update user work thread:', err);
-      throw err;
     }
   };
 
@@ -1690,7 +1679,6 @@ export default function App() {
                 handleRemoveMember={handleRemoveMember}
                 handleBanMember={handleBanMember}
                 handleUnbanMember={handleUnbanMember}
-                handleWorkThreadChange={handleWorkThreadChange}
               />
             ) : <NoAccess what="The member board is admin-only." />} />
 

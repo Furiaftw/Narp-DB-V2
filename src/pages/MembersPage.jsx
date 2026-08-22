@@ -1,71 +1,17 @@
-import { useState, useEffect } from 'react';
 import { Icon } from '../components/ui/Icon';
 import { maskEmail, getNetlifyImageUrl, getNetlifyImageSrcSet } from '../utils/helpers';
 
 /* ============================================================================
    MEMBERS PAGE  (route: /members, admin+)
-   The member board: role changes, wanderer tickets, work-thread ids and the
-   ban/remove moderation controls. Admins can only move users between
+   The member board: role changes, wanderer tickets, and the ban/remove
+   moderation controls. Admins can only move users between
    user/grader/reviewer; only the owner manages admins.
    ============================================================================ */
-
-/* ============================================================================
-   COMPONENT: MemberWorkThreadInput
-   ============================================================================ */
-export function MemberWorkThreadInput({ member, onSave }) {
-  const [threadInput, setThreadInput] = useState(member.work_thread_id || '');
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState(''); // 'success', 'error', or ''
-
-  useEffect(() => {
-    setThreadInput(member.work_thread_id || '');
-  }, [member.work_thread_id]);
-
-  const handleSave = async () => {
-    try {
-      setSaving(true);
-      setStatus('');
-      await onSave(member.id, threadInput);
-      setStatus('success');
-      setTimeout(() => setStatus(''), 2000);
-    } catch (err) {
-      console.error(err);
-      setStatus('error');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const hasChanged = (threadInput || '').trim() !== (member.work_thread_id || '').trim();
-
-  return (
-    <div className="flex items-center gap-2">
-      <input
-        type="text"
-        placeholder="Thread ID..."
-        value={threadInput}
-        onChange={(e) => setThreadInput(e.target.value)}
-        className="w-36 text-xs px-2 py-1 border border-slate-200 rounded-md bg-white text-slate-800 focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
-      />
-      <button
-        type="button"
-        onClick={handleSave}
-        disabled={saving || !hasChanged}
-        className="text-[10px] px-2 py-1 font-bold rounded-md bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-30 transition-colors shrink-0"
-      >
-        {saving ? '...' : 'Save'}
-      </button>
-      {status === 'success' && (
-        <span className="text-emerald-600 text-[10px] font-bold" title="Saved successfully">✓</span>
-      )}
-    </div>
-  );
-}
 
 export default function MembersPage({
   profilesList, profilesLoading, loadProfiles, profile, isAdmin, isOwner,
   handleRoleChange, handleGrantWandererTicket, handleRemoveMember,
-  handleBanMember, handleUnbanMember, handleWorkThreadChange,
+  handleBanMember, handleUnbanMember,
 }) {
   return (
       <div className="max-w-6xl mx-auto">
@@ -101,7 +47,6 @@ export default function MembersPage({
                       <th className="py-3 px-4">Member</th>
                       <th className="py-3 px-4">Discord User ID</th>
                       <th className="py-3 px-4">Joined At</th>
-                      <th className="py-3 px-4">Work Thread ID</th>
                       <th className="py-3 px-4">Wanderer Ticket</th>
                       <th className="py-3 px-4 text-right">Role</th>
                       <th className="py-3 px-4 text-right">Moderation</th>
@@ -146,9 +91,6 @@ export default function MembersPage({
                           </td>
                           <td className="py-3 px-4 text-slate-500 text-xs">
                             {m.created_at ? new Date(m.created_at).toLocaleDateString() : '—'}
-                          </td>
-                          <td className="py-3 px-4">
-                            <MemberWorkThreadInput member={m} onSave={handleWorkThreadChange} />
                           </td>
                           <td className="py-3 px-4">
                             {m.wanderer_ticket ? (
