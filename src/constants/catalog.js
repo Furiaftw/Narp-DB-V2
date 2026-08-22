@@ -1,6 +1,31 @@
+/* ---------------------------------------------------------------------------
+   CATALOG CONSTANTS — the single source of truth.
+
+   These used to be duplicated: an inline copy in App.jsx (which the running
+   app actually used) and a drifted copy here that nothing live imported. The
+   two had diverged in ways that mattered — this file's MANAGE_TABLES was
+   missing the jutsu_type field and the bloodline slot fields, and still
+   carried the removed Doc Link / Pve options. The App.jsx copies are gone
+   now; this is what everything imports.
+   --------------------------------------------------------------------------- */
+
+export const STORAGE = {
+  CACHE:      'narp_db_cache_v30',
+  ROLE:       'narp_role_v1',
+  TAGS:       'narp_tags_v1',
+  VIEW_MODE:  'narp_view_mode_v1',
+  CART:       'narp_cart_v1',
+  CHAT_READ:  'narp_chat_read_v1',
+  SHUTDOWN_BANNER: 'narp_shutdown_banner_dismissed_v1',
+};
+
+// The read-only cutover date the shutdown banner counts down to.
+export const SHUTDOWN_AT = new Date('2026-08-20T00:00:00Z').getTime();
+
 export const SPECIALIZATION_OPTIONS = ['Bukijutsu', 'Fuinjutsu', 'Genjutsu', 'Medical Ninjutsu', 'Ninjutsu', 'Nintaijutsu', 'Taijutsu', 'Kinjutsu'];
 export const NATURES                = ['Fire', 'Water', 'Lightning', 'Earth', 'Wind', 'Yang', 'Yin', 'Sound'];
-export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode', 'Defensive'];
+export const JUTSU_TYPES            = ['1 Post', 'Continuous', 'Multi-Post', 'Battlemode'];
+export const JUTSU_TYPE_TAG_OPTIONS = ['Offensive', 'Defensive', 'Mobility', 'Utility', 'Sensory', 'Multi-Purpose'];
 export const RANKS                  = ['E', 'D', 'C', 'B', 'A', 'S'];
 export const ORIGIN                 = ['Canon', 'Custom'];
 export const BL_CATS                = ['Canon', 'Custom'];
@@ -11,6 +36,9 @@ export const BM_TIER_TO_RANK        = { Primary: 'A', Secondary: 'B', Tertiary: 
 export const RANK_COST_MAP = { E: '1 CU', D: '2 CU', C: '4 CU', B: '6 CU', A: '8 CU', S: '10 CU' };
 export const RANK_COST_NUM = { E: 1, D: 2, C: 4, B: 6, A: 8, S: 10 };
 
+/* ---------------------------------------------------------------------------
+   DEV-MODE SEED DATA (used only when Supabase is not configured)
+   --------------------------------------------------------------------------- */
 const baseJutsus = [
   { name: 'Fireball',           nature: 'Fire',     rank: ['C'],         types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], bloodline: 'Sharingan' },
   { name: 'Chidori',             nature: 'Lightning', rank: ['B', 'A'],   types: ['1 Post'],     origin: 'Canon',  spec: ['Ninjutsu'], locked: true, multiRank: true },
@@ -41,33 +69,32 @@ const multiplyData = (arr, prefix, times) => {
   }
   return out;
 };
-
 export const STATIC_SEED = {
   jutsus:          multiplyData(baseJutsus, 'j', 8),
   bloodlines:      multiplyData(baseBloodlines, 'bl', 8),
   specializations: SPECIALIZATION_OPTIONS,
+  jutsuTypeTags:   JUTSU_TYPE_TAG_OPTIONS,
 };
 
-export const STORAGE = {
-  CACHE:      'narp_db_cache_v30',
-  ROLE:       'narp_role_v1',
-  TAGS:       'narp_tags_v1',
-  VIEW_MODE:  'narp_view_mode_v1',
-};
+/* ---------------------------------------------------------------------------
+   FORM SCHEMA
 
+/* ---------------------------------------------------------------------------
+   FORM SCHEMA — drives AdminFormModal's field rendering.
+   --------------------------------------------------------------------------- */
 export const MANAGE_TABLES = {
   jutsus: {
     label: 'Jutsus',
     fields: [
       { k: 'name',        l: 'Jutsu Name',                 req: true, col: 1 },
-      { k: 'link',        l: 'Doc Link',                               col: 1 },
-      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, col: 2 },
-      { k: 'types',       l: 'Jutsu Types',     t: 'chip', opts: JUTSU_TYPES, multi: true, col: 1 },
-      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
+      { k: 'nature',      l: 'Nature Type',     t: 'chip', opts: [...NATURES, 'N/A'], multi: true, req: true, col: 2 },
+      { k: 'types',       l: 'Jutsu Category',  t: 'chip', opts: JUTSU_TYPES, multi: true, req: true, col: 1 },
+      { k: 'jutsu_type',  l: 'Jutsu Type',      t: 'ttag-dd', req: true, hideIfInc: { f: 'types', v: 'Battlemode' }, col: 1 },
+      { k: 'rank',        l: 'Rank',            t: 'chip', opts: RANKS, multi: true, req: true, hideIfInc:    { f: 'types', v: 'Battlemode' }, col: 1 },
       { k: 'bm_tier',     l: 'Battlemode Tier', t: 'chip', opts: BM_TIERS,             hideUnlessInc:{ f: 'types', v: 'Battlemode' }, col: 1 },
-      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, col: 1 },
-      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited', 'Pve'], multi: true, col: 1 },
-      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', col: 1 },
+      { k: 'origin',      l: 'Origin',          t: 'chip', opts: ORIGIN, req: true, col: 1 },
+      { k: 'conditions',  l: 'Conditions',      t: 'chip', opts: ['Locked', 'Limited'], multi: true, col: 1 },
+      { k: 'spec',        l: 'Specialization',  t: 'spec-dd', req: true, col: 1 },
       { k: 'bloodline',   l: 'Bloodline',       t: 'bl-select', col: 1 },
       { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },
       { k: 'cost',        l: 'Cost', hidden: true },
@@ -77,11 +104,14 @@ export const MANAGE_TABLES = {
   bloodlines: {
     label: 'Bloodlines',
     fields: [
-      { k: 'name',        l: 'Name',            req: true, col: 1 },
-      { k: 'link',        l: 'Doc Link',                   col: 1 },
-      { k: 'category',    l: 'Category',        t: 'chip', opts: BL_CATS,    req: true, col: 1 },
-      { k: 'subcategory', l: 'Subcategory',     t: 'chip', opts: BL_SUBCATS, req: true, col: 1 },
-      { k: 'custom_tags', l: 'Custom Tags (comma separated)', col: 2 },
+      { k: 'name',                   l: 'Name',                                req: true, col: 1 },
+      { k: 'link',                   l: 'Doc Link',                                       col: 1 },
+      { k: 'proprietary_ability_link', l: 'Proprietary Ability Doc Link',                 col: 1 },
+      { k: 'category',               l: 'Category',    t: 'chip', opts: BL_CATS,    req: true, col: 1 },
+      { k: 'subcategory',            l: 'Subcategory', t: 'chip', opts: BL_SUBCATS, req: true, col: 1 },
+      { k: 'max_slots',              l: 'Max Slots',                                       col: 1 },
+      { k: 'slots',                  l: 'Slots',       t: 'slots', defCountField: 'max_slots', col: 2 },
+      { k: 'custom_tags',            l: 'Custom Tags (comma separated)',                   col: 2 },
     ],
   },
 };

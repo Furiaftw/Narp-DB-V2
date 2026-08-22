@@ -105,12 +105,12 @@ export const fetchMyProfile = async () => {
 
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id, wanderer_ticket')
     .eq('id', session.user.id)
     .maybeSingle();
 
   if (error && error.code === '42703') {
-    // Fallback: work_thread_id column does not exist in profiles table
+    // Fallback: a select column doesn't exist on an older schema
     const fallback = await supabase
       .from('profiles')
       .select('id, email, username, avatar_url, role, discord_id')
@@ -155,76 +155,15 @@ export const updateMyUsername = async (username) => {
   return data;
 };
 
-export const updateMyWorkThreadId = async (threadId) => {
-  if (!supabase) throw new Error('Supabase is not configured');
-  const session = await getCurrentSession();
-  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
-
-  const clean = (threadId || '').trim();
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ work_thread_id: clean || null })
-    .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
-export const updateMyCustomItemThreadId = async (threadId) => {
-  if (!supabase) throw new Error('Supabase is not configured');
-  const session = await getCurrentSession();
-  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
-
-  const clean = (threadId || '').trim();
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ custom_item_thread_id: clean || null })
-    .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
-export const updateMySummonThreadId = async (threadId) => {
-  if (!supabase) throw new Error('Supabase is not configured');
-  const session = await getCurrentSession();
-  if (!session?.user?.id) throw new Error('Must be signed in to set a work thread ID');
-
-  const clean = (threadId || '').trim();
-  const { data, error } = await supabase
-    .from('profiles')
-    .update({ summon_thread_id: clean || null })
-    .eq('id', session.user.id)
-    .select('id, email, username, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
-    .single();
-
-  if (error) throw error;
-  return data;
-};
-
-export const setUserWorkThreadId = async (userId, threadId) => {
-  if (!supabase) return;
-  const clean = (threadId || '').trim();
-  const { error } = await supabase
-    .from('profiles')
-    .update({ work_thread_id: clean || null })
-    .eq('id', userId);
-  if (error) throw error;
-};
-
 export const fetchAllProfiles = async () => {
   if (!supabase) return [];
   let { data, error } = await supabase
     .from('profiles')
-    .select('id, email, username, avatar_url, role, discord_id, created_at, work_thread_id, custom_item_thread_id, summon_thread_id, wanderer_ticket, banned_at')
+    .select('id, email, username, avatar_url, role, discord_id, created_at, wanderer_ticket, banned_at')
     .order('created_at', { ascending: true });
 
   if (error && error.code === '42703') {
-    // Fallback: work_thread_id / banned_at column does not exist in profiles table
+    // Fallback: a select column (e.g. banned_at) doesn't exist on an older schema
     const fallback = await supabase
       .from('profiles')
       .select('id, email, username, avatar_url, role, discord_id, created_at')
@@ -383,7 +322,7 @@ export const fetchPendingJutsus = async () => {
   const profileIds = [...new Set(pending.flatMap(p => [p.submitted_by, p.first_reviewer_id, p.assigned_to]).filter(Boolean))];
   const { data: profiles } = await supabase
     .from('profiles')
-    .select('id, username, email, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .select('id, username, email, avatar_url, role, discord_id')
     .in('id', profileIds);
 
   const profileById = new Map((profiles || []).map(p => [p.id, p]));
@@ -444,15 +383,6 @@ export const reviewPendingJutsu = async (id, reviewerId) => {
       status: 'pending_approval',
       first_reviewer_id: reviewerId,
     })
-    .eq('id', id);
-  if (error) throw error;
-};
-
-export const recordSecondApprovalPing = async (id, count) => {
-  if (!supabase) return;
-  const { error } = await supabase
-    .from('pending_jutsus')
-    .update({ second_approval_ping_count: count, last_second_approval_ping_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw error;
 };
@@ -603,7 +533,7 @@ export const updateMySiteNickname = async (nickname) => {
     .from('profiles')
     .update({ site_nickname: clean })
     .eq('id', session.user.id)
-    .select('id, email, username, site_nickname, avatar_url, role, discord_id, work_thread_id, custom_item_thread_id, summon_thread_id')
+    .select('id, email, username, site_nickname, avatar_url, role, discord_id')
     .single();
   if (error) throw error;
   return data;
@@ -729,9 +659,7 @@ export const fetchRoleChangeLog = async (limit = 100) => {
   return data || [];
 };
 
-/* --- Work log stats (in-app monthly totals; separate from the Discord
-   reviewer-work-log system, which keeps logging the detailed per-item
-   narrative unchanged) ------------------------------------------------------- */
+/* --- Work log stats (in-app monthly totals, shown on the Work Log page) --- */
 
 // Increments a counter for this month/actionType by 1. Defaults to the
 // current user; pass targetUserId to credit another reviewer instead (e.g.

@@ -1,4 +1,9 @@
-import React from 'react';
+import { Icon } from './Icon';
+
+/* ============================================================================
+   COMPONENT: SlotsEditor
+   Edits the JSON slot list a Limited jutsu / bloodline carries.
+   ============================================================================ */
 
 export function SlotsEditor({ value, onChange, defCount = 1 }) {
   const parsed = (() => { try { return JSON.parse(value || '[]'); } catch { return []; } })();
@@ -37,5 +42,4 @@ export function SlotsEditor({ value, onChange, defCount = 1 }) {
     </div>
   );
 }
-
 export default SlotsEditor;

@@ -123,7 +123,6 @@ export default function InboxPage({
   onReview,
   onEdit,
   onClaim,
-  onPingSecondApproval,
   approvingIds,
   collapsedGroups,
   setCollapsedGroups,
@@ -222,7 +221,6 @@ export default function InboxPage({
       currentUserRole={role}
       refreshTrigger={refreshTrigger}
       onClaim={onClaim}
-      onPingSecondApproval={onPingSecondApproval}
       currentUserProfile={profile}
       refreshPending={refreshPending}
       isApproving={approvingIds.has(p.id)}

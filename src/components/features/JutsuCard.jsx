@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
-import Icon from '../ui/Icon';
-import { getSlotStatus, getNatureColor, toArray } from '../../utils/helpers';
+import { useState, useRef, useEffect } from 'react';
+import { Icon } from '../ui/Icon';
+import { toArray, getSlotStatus, getNatureColor } from '../../utils/helpers';
 import { RANK_COST_MAP, RANK_COST_NUM } from '../../constants/catalog';
+import { jutsuSheetHasContent, jutsuDocsHaveContent } from '../../constants/jutsuSheet';
 
 /* ============================================================================
    COMPONENT: JutsuCard
-   UPDATED: Clean layout, proper rounded corners, inset rank/cost box.
+   One catalog row/card, plus the rank picker its "Sheet" button opens for a
+   jutsu that exists at more than one rank.
    ============================================================================ */
-export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, isActualAdmin = false }) {
+
+export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTagsForJutsu, handleCopy, cart, copiedId, isAdmin, onEdit, onDelete, onViewSlots, onViewSheet, onViewHistory, isActualAdmin = false }) {
   const isExpanded = viewMode === 'card' || expRow === j._id;
   const rArr  = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
   const tArr  = toArray(j.types);
@@ -24,8 +27,7 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
     ...toArray(j.nature).filter(n => n && n !== 'N/A').map(n => ({ l: n, c: getNatureColor(n) })),
     j.origin                       && { l: j.origin, c: j.origin === 'Canon' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-cyan-50 text-cyan-700 border-cyan-200' },
     j.locked                       && { l: 'Locked',   ic: 'Lock',  c: 'bg-amber-50 text-amber-700 border-amber-300' },
-    j.pve                          && { l: 'Pve',                    c: 'bg-green-50 text-green-700 border-green-300' },
-    j.limited &&  showAskStaff     && { l: 'Ask a Reviewer',          c: 'bg-amber-100 text-amber-800 border-amber-300' },
+    j.limited &&  showAskStaff     && { l: 'Ask a Reviewer',        c: 'bg-amber-100 text-amber-800 border-amber-300' },
     j.limited && !showAskStaff     && { l: 'Limited',  ic: 'Alert', c: 'bg-rose-100 text-rose-800 border-rose-200' },
     j.limited && j.slots           && { l: remaining > 0 ? `${remaining} open` : 'Full',
                                         c: remaining > 0 ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-red-100 text-red-800 border-red-200' },
@@ -110,6 +112,11 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
         <div className="flex flex-wrap gap-1.5 mb-5 items-center">
           {[...toArray(j.spec), ...tArr, ...cTags].map((s, i) => (
             <span key={i} className="text-xs font-semibold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-md border border-slate-200">
+              {s}
+            </span>
+          ))}
+          {toArray(j.jutsu_type).map((s, i) => (
+            <span key={`jty-${i}`} className="text-xs font-semibold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-200">
               {s}
             </span>
           ))}
@@ -203,15 +210,11 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
 
           {/* Action Buttons (Footer) */}
           <div className="flex gap-2">
-            {j.link && j.link !== '#' ? (
-              <a href={j.link} target="_blank" rel="noopener noreferrer"
-                 className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
-                <Icon n="ExtLink" size={16}/> Doc
-              </a>
-            ) : (
-              <span className="flex-1 bg-slate-50 text-slate-400 font-bold py-2.5 rounded-xl flex justify-center text-sm border border-slate-100">No Link</span>
-            )}
-            
+            <button onClick={(e) => { e.stopPropagation(); onViewSheet && onViewSheet(j); }}
+                    className="flex-1 bg-white border border-slate-200 text-indigo-700 hover:text-indigo-800 hover:border-indigo-300 hover:bg-indigo-50 font-bold py-2.5 rounded-xl flex justify-center items-center gap-2 transition-colors shadow-sm">
+              <Icon n="Book" size={16}/> {jutsuDocsHaveContent(j.sheet, j.multiRank) ? 'Documentation' : 'No Documentation'}
+            </button>
+
             {j.limited && (
               <button onClick={(e) => { e.stopPropagation(); onViewSlots && onViewSlots(j); }}
                       className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 flex items-center justify-center min-w-[50px] transition-colors shadow-sm"
@@ -219,7 +222,15 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
                 <Icon n="Eye" size={18}/>
               </button>
             )}
-            
+
+            {onViewHistory && (
+              <button onClick={(e) => { e.stopPropagation(); onViewHistory(j); }}
+                      className="p-2.5 rounded-xl border bg-white border-slate-200 text-slate-600 hover:bg-amber-50 hover:text-amber-700 hover:border-amber-200 flex items-center justify-center min-w-[50px] transition-colors shadow-sm"
+                      title="Review history (reviewer+ only)">
+                <Icon n="Clock" size={18}/>
+              </button>
+            )}
+
             <button onClick={(e) => { e.stopPropagation(); handleCopy(j); }}
                     className={`p-2.5 rounded-xl border flex items-center justify-center min-w-[50px] transition-colors shadow-sm ${
                       copiedId === j._id ? 'bg-emerald-500 border-emerald-500 text-white'
@@ -237,4 +248,41 @@ export function JutsuCard({ j, viewMode, expRow, setExpRow, pTags, setPersonalTa
   );
 }
 
-export default JutsuCard;
+// Multi-rank jutsus keep separate documentation per rank — this picks which
+// one to open before handing off to the read-only JutsuSheetModal.
+export function JutsuDocRankPicker({ jutsu, onPick, onClose }) {
+  const ranks = toArray(jutsu.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
+  return (
+    <div className="fixed inset-0 z-[80] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6" onClick={onClose}>
+      <div className="bg-white rounded-3xl shadow-2xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+        <div className="p-6">
+          <div className="flex justify-between items-center mb-5">
+            <div>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Choose a version</p>
+              <h2 className="text-lg font-extrabold text-slate-900 tracking-tight">{jutsu.name}</h2>
+            </div>
+            <button onClick={onClose} className="text-slate-400 hover:bg-slate-100 p-2 rounded-full shrink-0 transition-colors">
+              <Icon n="X" size={18} />
+            </button>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">This jutsu has separate documentation for each rank.</p>
+          <div className="flex flex-col gap-2">
+            {ranks.map(r => {
+              const filled = jutsuSheetHasContent(jutsu.sheet?.[r]);
+              return (
+                <button key={r} onClick={() => onPick(r)}
+                        className="flex items-center justify-between gap-3 bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 rounded-xl px-4 py-3 transition-colors">
+                  <span className="flex items-center gap-2.5">
+                    <span className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded-md text-xs font-black border border-slate-300 shadow-sm">{r}</span>
+                    <span className="text-sm font-bold text-slate-700">{r}-Rank</span>
+                  </span>
+                  {!filled && <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wide">No doc</span>}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

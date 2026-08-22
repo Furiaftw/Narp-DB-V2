@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NATURES } from '../constants/catalog';
+import { NATURES, RANK_COST_NUM } from '../constants/catalog';
 
 /* ---------------------------------------------------------------------------
    STORAGE UTILITY
@@ -77,28 +77,6 @@ export const maskEmail = (email) => {
   const maskedName = name.length > 2 ? name[0] + '***' + name[name.length - 1] : '***';
   return `${maskedName}@${domain}`;
 };
-
-export function renderMessageWithLinks(text) {
-  if (!text) return '';
-  const urlRegex = /(https?:\/\/[^\s]+)/g;
-  const parts = text.split(urlRegex);
-  return parts.map((part, index) => {
-    if (/^https?:\/\//.test(part)) {
-      return (
-        <a
-          key={index}
-          href={part}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-blue-500 hover:text-blue-400 hover:underline"
-        >
-          {part}
-        </a>
-      );
-    }
-    return part;
-  });
-}
 
 /* ---------------------------------------------------------------------------
    DISCORD-FLAVORED CHAT MARKDOWN
@@ -281,7 +259,7 @@ export const formatSessionList = (items) => {
     out.push('', `**${heading}**`);
     for (const j of grp.items) {
       const isBm  = toArray(j.types).includes('Battlemode');
-      const ranks = toArray(j.rank).slice().sort((a, b) => (RANK_ORDER_NUM[a] || 0) - (RANK_ORDER_NUM[b] || 0));
+      const ranks = toArray(j.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
 
       let rankStr;
       if (isBm) {
@@ -296,7 +274,6 @@ export const formatSessionList = (items) => {
       if (j.multiRank && !isBm) tags.push('Multi-Rank');
       if (j.locked)             tags.push('Locked');
       if (j.limited)            tags.push('Limited');
-      if (j.pve)                tags.push('Pve');
 
       const display = j.link && j.link !== '#' ? `[${j.name}](${j.link})` : j.name;
       const tagPart = tags.length ? ` · ${tags.join(' · ')}` : '';
@@ -306,165 +283,6 @@ export const formatSessionList = (items) => {
 
   return out.join('\n');
 };
-
-/* ---------------------------------------------------------------------------
-   DISCORD WEBHOOK LOGGING
-   --------------------------------------------------------------------------- */
-export async function sendDiscordLog(itemData, actionType, submitterProfile, firstReviewerProfile, finalApproverProfile, chatTranscript = null, webhookConfig = {}) {
-  const baseUrl = import.meta.env.VITE_DISCORD_LOG_WEBHOOK_URL;
-  if (!baseUrl) return null; // Logging not configured — skip silently.
-
-  const cfg = webhookConfig || {};
-  const isCharacter = itemData?.type === 'Character';
-  const isSummon = itemData?.type === 'Summon';
-  const isCustomItem = itemData?.type === 'Custom Item';
-
-  // Route to the correct forum thread per submission type. Thread IDs set in
-  // System Tools (webhook_config table) win; env vars are the fallback.
-  let threadId = toArray(itemData?.types).includes('Battlemode')
-    ? (cfg.discord_battlemode_thread_id || import.meta.env.VITE_DISCORD_BATTLEMODE_THREAD_ID)
-    : (cfg.discord_jutsu_thread_id || import.meta.env.VITE_DISCORD_JUTSU_THREAD_ID);
-
-  if (isCharacter) {
-    threadId = cfg.discord_oc_thread_id || import.meta.env.VITE_DISCORD_OC_THREAD_ID;
-  } else if (isSummon) {
-    threadId = cfg.discord_summon_thread_id || import.meta.env.VITE_DISCORD_SUMMON_THREAD_ID || threadId;
-  } else if (isCustomItem) {
-    threadId = cfg.discord_custom_item_thread_id || import.meta.env.VITE_DISCORD_CUSTOM_ITEM_THREAD_ID || threadId;
-  }
-
-  const baseWebhookUrl = threadId ? `${baseUrl}?thread_id=${threadId}` : baseUrl;
-  const webhookUrl = baseWebhookUrl.includes('?') ? `${baseWebhookUrl}&wait=true` : `${baseWebhookUrl}?wait=true`;
-
-  // Format a profile into a Discord mention, falling back to plain @username.
-  const ping = (profile) => {
-    if (!profile) return 'Unknown';
-    if (profile.discord_id) return `<@${profile.discord_id}>`;
-    return `@${profile.username || 'unknown'}`;
-  };
-
-  // Determine pings
-  const creatorPing = ping(submitterProfile);
-  const reviewerPing = firstReviewerProfile ? ping(firstReviewerProfile) : ping(submitterProfile);
-  const secondEyes = ping(finalApproverProfile);
-
-  // Decision + colour: green for approvals/creates, red for denials/deletes.
-  const isNegative = /den|reject|delet|cancel/i.test(actionType || '');
-  const decision = isNegative ? 'Denied' : 'Approved';
-  const color = isNegative ? 15158332 : 3066993;
-
-  // Extract other field values
-  const natureVal = itemData?.nature || 'N/A';
-  const rankVal = Array.isArray(itemData?.rank) ? itemData.rank.join(', ') : (itemData?.rank || 'N/A');
-  const typeVal = Array.isArray(itemData?.types) ? itemData.types.join(', ') : (itemData?.types || 'N/A');
-  const specVal = Array.isArray(itemData?.spec) ? itemData.spec.join(', ') : (itemData?.spec || 'N/A');
-  const bloodlineVal = itemData?.bloodline || 'N/A';
-  const linkVal = itemData?.link || 'N/A';
-
-  const creationDate = itemData?._createdAt ? new Date(itemData._createdAt).toLocaleString() : 'N/A';
-  const approvalDate = new Date().toLocaleString();
-
-  let description;
-  if (isCharacter) {
-    const characterDesc = [
-      `**Name Entry Creator:** ${creatorPing}`,
-      `**Name Reviewer:** ${reviewerPing}`,
-      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
-      '',
-      `**Decision:** ${decision}`,
-      '',
-      '**OC Details:**',
-      `Type of Submission: Character`,
-    ];
-    if (itemData?.name && itemData.name !== 'OC Submission') {
-      characterDesc.push(`Character Name: ${itemData.name}`);
-    }
-    if (itemData?.ninja_rank) characterDesc.push(`Ninja Rank: ${itemData.ninja_rank}`);
-    if (itemData?.village)    characterDesc.push(`Village: ${itemData.village}`);
-    if (itemData?.bloodline)  characterDesc.push(`Bloodline: ${itemData.bloodline}`);
-    characterDesc.push(`Link to sheet: ${linkVal}`);
-    if (itemData?.myCharactersLink) {
-      characterDesc.push(`My-Characters Link: ${itemData.myCharactersLink}`);
-    }
-    if (itemData?.upgradesLink) {
-      characterDesc.push(`Upgrades Link: ${itemData.upgradesLink}`);
-    }
-    characterDesc.push(
-      '',
-      '**Dates:**',
-      `Creation Date: ${creationDate}`,
-      `Approval Date: ${approvalDate}`
-    );
-    description = characterDesc.join('\n');
-  } else {
-    description = [
-      `**Name Entry Creator:** ${creatorPing}`,
-      `**Name Reviewer:** ${reviewerPing}`,
-      `**Name 2nd pair of eyes reviewer:** ${secondEyes}`,
-      '',
-      `**Decision:** ${decision}`,
-      '',
-      '**Entry Details:**',
-      `Nature: ${natureVal}`,
-      `Rank: ${rankVal}`,
-      `Type: ${typeVal}`,
-      `Spec: ${specVal}`,
-      `Bloodline: ${bloodlineVal}`,
-      '',
-      '**Link to sheet:**',
-      `${linkVal}`,
-      '',
-      '**Dates:**',
-      `Creation Date: ${creationDate}`,
-      `Approval Date: ${approvalDate}`
-    ].join('\n');
-  }
-
-  const payload = {
-    embeds: [{
-      title: isCharacter ? 'OC Submission' : (itemData?.name || 'Jutsu Entry'),
-      description,
-      color,
-    }],
-  };
-
-  let body;
-  const headers = {};
-
-  if (chatTranscript) {
-    const nameSlug = (itemData?.name || 'entry')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/(^-|-$)/g, '');
-    const fileName = `transcript-${nameSlug || 'entry'}.txt`;
-
-    const blob = new Blob([chatTranscript], { type: 'text/plain' });
-    const formData = new FormData();
-    formData.append('file', blob, fileName);
-    formData.append('payload_json', JSON.stringify(payload));
-    body = formData;
-  } else {
-    headers['Content-Type'] = 'application/json';
-    body = JSON.stringify(payload);
-  }
-
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers,
-      body,
-    });
-    if (!response.ok) {
-      throw new Error(`Discord webhook returned status ${response.status}`);
-    }
-    const data = await response.json();
-    return { messageId: data?.id, threadId: threadId };
-  } catch (err) {
-    // Never let a logging failure block the underlying database action.
-    console.warn('[NARP] Discord log failed:', err);
-    return null;
-  }
-}
 
 /* ---------------------------------------------------------------------------
    NETLIFY IMAGE CDN UTILITIES

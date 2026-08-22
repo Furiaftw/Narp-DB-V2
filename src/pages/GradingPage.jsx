@@ -43,18 +43,6 @@ const authHeaders = async () => {
   return sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {};
 };
 
-// Best-effort Discord notifications — the pipeline works without them.
-const pingReviewers = async (triggerType, itemName, submitterName) => {
-  try {
-    const hdrs = await authHeaders();
-    fetch('/.netlify/functions/reviewer-ping', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...hdrs },
-      body: JSON.stringify({ triggerType, itemName, itemType: 'RP', submitterName }),
-    }).catch(err => console.warn('[NARP] RP ping failed:', err));
-  } catch { /* best-effort */ }
-};
-
 const dmUser = async (discordUserId, message) => {
   if (!discordUserId) return;
   try {
@@ -521,7 +509,6 @@ function UpgradeRequestForm({ char, unspentCredits, cycleUsedCount, jutsus, prof
         attachedCreditIds: attached,
         warnings,
       });
-      pingReviewers('upgrade_request', `${char.character_name}: ${target.label}`, displayName(profile));
       onDone();
     } catch (e) {
       setErr(e.message || 'Failed to submit');
@@ -678,7 +665,6 @@ function SubmitRpView({ profile, profiles, allSheets, mySubmissions, onCancel, o
           claimedTags: p.claimedTags,
         })),
       });
-      pingReviewers('rp_submission', description.slice(0, 80) || 'RP submission', displayName(profile));
       setDescription(''); setThreadUrl(''); setParticipants([emptyParticipant()]);
       onSubmitted();
     } catch (e) {

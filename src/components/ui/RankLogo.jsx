@@ -1,8 +1,15 @@
 import React from 'react';
 import { getNetlifyImageUrl, getNetlifyImageSrcSet } from '../../utils/helpers';
 
+/* ---------------------------------------------------------------------------
+   UNIVERSAL RANK PROFILE LOGO
+   Knows the post-migration tiers (reviewer/grader) and still renders the
+   legacy 'staff'/'oc_staff' strings that historical rows carry.
+   --------------------------------------------------------------------------- */
 export function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
-  const cleanRole = ['owner', 'admin', 'staff', 'user'].includes(role) ? role : 'user';
+  // Legacy DB values from before the grader/reviewer migration still render.
+  const mapped = role === 'staff' ? 'reviewer' : role === 'oc_staff' ? 'grader' : role;
+  const cleanRole = ['owner', 'admin', 'reviewer', 'grader', 'user'].includes(mapped) ? mapped : 'user';
 
   const config = {
     owner: {
@@ -24,12 +31,21 @@ export function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
         </svg>
       )
     },
-    staff: {
+    reviewer: {
       gradient: "from-emerald-400 to-emerald-600 text-emerald-50 shadow-emerald-500/20",
       svg: (
         <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
           {/* Star Badge */}
           <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z" />
+        </svg>
+      )
+    },
+    grader: {
+      gradient: "from-teal-400 to-teal-600 text-teal-50 shadow-teal-500/20",
+      svg: (
+        <svg viewBox="0 0 24 24" fill="currentColor" className="w-1/2 h-1/2">
+          {/* Quill Check */}
+          <path d="M9 16.17 4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z" />
         </svg>
       )
     },
@@ -53,35 +69,4 @@ export function RankLogo({ role, className = "w-10 h-10 rounded-lg" }) {
   );
 }
 
-export function ProfileAvatar({ profile, className = "w-10 h-10 rounded-lg shrink-0 object-cover" }) {
-  const isDiscordAvatar = profile?.avatar_url && (profile.avatar_url.includes('discord') || profile.avatar_url.includes('discordapp'));
-  if (isDiscordAvatar) {
-    let width = 40;
-    let height = 40;
-    if (className.includes('w-6') || className.includes('h-6')) {
-      width = 24;
-      height = 24;
-    } else if (className.includes('w-8') || className.includes('h-8')) {
-      width = 32;
-      height = 32;
-    } else if (className.includes('w-5') || className.includes('h-5')) {
-      width = 20;
-      height = 20;
-    } else if (className.includes('w-3.5') || className.includes('h-3.5')) {
-      width = 14;
-      height = 14;
-    }
-    return (
-      <img
-        src={getNetlifyImageUrl(profile.avatar_url, width)}
-        srcSet={getNetlifyImageSrcSet(profile.avatar_url)}
-        alt={profile.username || 'Avatar'}
-        className={className}
-        width={width}
-        height={height}
-        loading="lazy"
-      />
-    );
-  }
-  return <RankLogo role={profile?.role} className={className} />;
-}
+export default RankLogo;

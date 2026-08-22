@@ -1,254 +1,53 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import Icon from '../ui/Icon';
-import { toArray, getSlotStatus, maskEmail } from '../../utils/helpers';
+import { useState, useEffect } from 'react';
+import { NavLink } from 'react-router-dom';
+import { Icon } from '../ui/Icon';
+import ProfileAvatar from '../ui/ProfileAvatar';
+import { formatBytes } from '../../utils/helpers';
 import {
-  fetchRoleChangeLog,
-  saveSpecializationsToSupabase,
+  isSupabaseConfigured,
+  fetchStorageStats,
+  setSpecializations as saveSpecializationsToSupabase,
+  setJutsuTypeTags as saveJutsuTypeTagsToSupabase,
   updateSubmissionControl,
-  isSupabaseConfigured
+  getCurrentSession,
 } from '../../lib/supabase';
 
 /* ============================================================================
-   MODAL: SlotsViewModal
-   ============================================================================ */
-export function SlotsViewModal({ jutsu, onClose }) {
-  const { parsed, total } = getSlotStatus(jutsu.slots);
-  const filled = parsed.filter(s => s && s.username);
-  const empty  = total - filled.length;
-
-  return (
-    <div className="fixed inset-0 z-[80] bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-md w-full overflow-hidden max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-2 min-w-0">
-            <Icon n="Eye" size={18} className="text-indigo-400 shrink-0" />
-            <div className="min-w-0">
-              <h3 className="font-bold text-base truncate">{jutsu.name}</h3>
-              <p className="text-[10px] uppercase tracking-widest text-slate-400">Slot Holders</p>
-            </div>
-          </div>
-          <button onClick={onClose}><Icon n="X" size={18} /></button>
-        </div>
-
-        <div className="p-5 overflow-y-auto custom-scrollbar">
-          {total === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">No slots configured.</div>
-          ) : (
-            <>
-              <div className="text-xs font-bold text-slate-500 mb-3 flex items-center gap-2">
-                <span>{filled.length} of {total} taken</span>
-                {empty > 0 && <span className="text-emerald-600">· {empty} open</span>}
-              </div>
-              <div className="space-y-1.5">
-                {parsed.map((slot, i) => {
-                  const hasName = !!(slot && slot.username);
-                  const hasLink = !!(slot && slot.discord_link);
-                  return (
-                    <div key={i} className={`flex items-center gap-3 p-3 rounded-xl border ${hasName ? 'bg-slate-50 border-slate-200' : 'bg-white border-dashed border-slate-200'}`}>
-                      <span className="text-[10px] font-bold text-slate-400 w-6 text-center shrink-0">#{i + 1}</span>
-                      {hasName ? (
-                        hasLink ? (
-                          <a href={slot.discord_link}
-                             target="_blank" rel="noopener noreferrer"
-                             className="text-sm font-bold text-indigo-700 hover:text-indigo-900 hover:underline truncate flex-1 flex items-center gap-1.5">
-                            {slot.username}
-                            <Icon n="ExtLink" size={11} className="text-indigo-400 shrink-0" />
-                          </a>
-                        ) : (
-                          <span className="text-sm font-bold text-slate-700 truncate flex-1">{slot.username}</span>
-                        )
-                      ) : (
-                        <span className="text-sm italic text-slate-400 flex-1">Open slot</span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
-   MODAL: AuditLogModal
-   ============================================================================ */
-export function AuditLogModal({ onClose }) {
-  const [entries, setEntries] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState('');
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await fetchRoleChangeLog(200);
-        if (!cancelled) setEntries(list);
-      } catch (e) {
-        if (!cancelled) setError(e.message || 'Failed to load audit log.');
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
-
-  const arrow = (from, to) => {
-    const colors = { user: 'text-slate-500', staff: 'text-emerald-600', admin: 'text-indigo-600', owner: 'text-amber-600' };
-    return (
-      <span className="text-xs font-bold">
-        <span className={colors[from] || ''}>{from === 'staff' ? 'Reviewer' : from === 'owner' ? 'Operator' : (from || '∅')}</span>
-        <span className="mx-1.5 text-slate-300">→</span>
-        <span className={colors[to] || ''}>{to === 'staff' ? 'Reviewer' : to === 'owner' ? 'Operator' : (to || '∅')}</span>
-      </span>
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-2xl w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon n="Clock" size={20} className="text-amber-400" />
-            <h3 className="font-bold text-lg">Audit Log — Role Changes</h3>
-          </div>
-          <button onClick={onClose}><Icon n="X" size={18} /></button>
-        </div>
-
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {error && <div className="mb-4 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-sm font-semibold">{error}</div>}
-          {loading ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">Loading...</div>
-          ) : entries.length === 0 ? (
-            <div className="text-center py-8 text-slate-400 text-sm font-semibold">No role changes recorded yet.</div>
-          ) : (
-            <div className="space-y-1.5">
-              {entries.map(e => (
-                <div key={e.id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs">
-                  <div className="text-slate-400 font-mono shrink-0 w-32 truncate">{new Date(e.changed_at).toLocaleString()}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-bold text-slate-800 truncate">{maskEmail(e.target_email) || '(unknown)'}</div>
-                    <div className="text-slate-500 truncate">by {maskEmail(e.changed_by_email) || 'system'}</div>
-                  </div>
-                  <div className="shrink-0">{arrow(e.old_role, e.new_role)}</div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
-   MODAL: CatalogManagementModal
-   ============================================================================ */
-export function CatalogManagementModal({ which, db, onClose, onEdit, onAdd, onDelete }) {
-  const cfg = {
-    bloodlines: {
-      title:    'Manage Bloodlines',
-      icon:     'Book',
-      list:     db.bloodlines || [],
-      empty:    'No bloodlines yet.',
-      labelFor: b => [b.category, b.subcategory].filter(Boolean).join(' / ') || '—',
-    },
-  }[which];
-
-  const grouped = useMemo(() => {
-    const out = {};
-    cfg.list.forEach(item => {
-      const cat = item.category || 'Uncategorized';
-      (out[cat] = out[cat] || []).push(item);
-    });
-    Object.values(out).forEach(arr => arr.sort((a, b) => (a.name || '').localeCompare(b.name || '')));
-    return Object.entries(out).sort(([a], [b]) => a.localeCompare(b));
-  }, [cfg.list]);
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
-      <div className="bg-white rounded-3xl max-w-3xl w-full overflow-hidden max-h-[90vh] flex flex-col" onClick={e => e.stopPropagation()}>
-        <div className="bg-slate-900 text-white p-5 flex justify-between items-center shrink-0">
-          <div className="flex items-center gap-2">
-            <Icon n={cfg.icon} size={20} className="text-indigo-400" />
-            <h3 className="font-bold text-lg">{cfg.title}</h3>
-            <span className="text-[10px] uppercase font-bold text-slate-400 bg-slate-800 border border-slate-700 px-2 py-0.5 rounded">{cfg.list.length}</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={onAdd}
-                    className="text-xs px-3 py-1.5 font-bold rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white flex items-center gap-1.5">
-              <Icon n="Plus" size={12}/> Add
-            </button>
-            <button onClick={onClose} className="text-slate-400 hover:text-white"><Icon n="X" size={18} /></button>
-          </div>
-        </div>
-
-        <div className="p-6 overflow-y-auto custom-scrollbar">
-          {cfg.list.length === 0 ? (
-            <div className="text-center py-12 text-slate-400 text-sm font-semibold">{cfg.empty}</div>
-          ) : (
-            <div className="space-y-6">
-              {grouped.map(([cat, items]) => (
-                <div key={cat}>
-                  <h4 className="text-xs font-bold uppercase tracking-widest text-slate-500 mb-2 border-b border-slate-100 pb-1">
-                    {cat} <span className="text-slate-400 normal-case font-semibold">({items.length})</span>
-                  </h4>
-                  <div className="space-y-1.5">
-                    {items.map(item => (
-                      <div key={item._id} className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-bold text-slate-800 truncate">{item.name}</div>
-                          <div className="text-xs text-slate-500 truncate flex items-center gap-1.5">
-                            <span>{cfg.labelFor(item)}</span>
-                            {toArray(item.custom_tags).length > 0 && (
-                              <>
-                                <span className="text-slate-300">·</span>
-                                <span className="truncate">{toArray(item.custom_tags).join(', ')}</span>
-                              </>
-                            )}
-                            {item.link && item.link !== '#' && (
-                              <>
-                                <span className="text-slate-300">·</span>
-                                <a href={item.link} target="_blank" rel="noopener noreferrer"
-                                   onClick={e => e.stopPropagation()}
-                                   className="text-indigo-600 hover:underline shrink-0">link</a>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button onClick={() => onEdit(item)}
-                                  className="p-2 text-slate-500 hover:bg-indigo-100 hover:text-indigo-700 rounded-lg">
-                            <Icon n="Edit" size={14}/>
-                          </button>
-                          <button onClick={() => onDelete(item)}
-                                  className="p-2 text-slate-500 hover:bg-rose-100 hover:text-rose-700 rounded-lg">
-                            <Icon n="Trash" size={14}/>
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ============================================================================
    MODAL: SystemToolsModal
+   Owner/admin control panel: submission gates, the Discord notification mute,
+   webhook thread IDs, catalog management and the storage calculator.
    ============================================================================ */
-export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onOpenAuditLog, onManageBL, isOwner, submissionControls, onToggleSubmission, currentUserId }) {
+
+export const SUBMISSION_GATE_TYPES = [
+  { key: 'jutsu_paused',       label: 'Jutsu / Battlemode', color: 'slate'   },
+  { key: 'character_paused',   label: 'OC Submission',      color: 'emerald' },
+  { key: 'custom_item_paused', label: 'Custom Item',        color: 'red'     },
+  { key: 'summon_paused',      label: 'Summon',             color: 'amber'   },
+];
+export const SUBMISSION_GATE_LABELS = Object.fromEntries(SUBMISSION_GATE_TYPES.map(({ key, label }) => [key, label]));
+
+export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, onManageBL, isOwner, isAdmin, isReviewer, webhookConfig = {}, onWebhookConfigSave, submissionControls, onToggleSubmission, currentUserId, profile, onProfileUpdate }) {
   const [msg, setMsg]         = useState('');
   const [newSpec, setNewSpec] = useState('');
   const [pendingDel, setPendingDel] = useState(null);
+  const [newTtag, setNewTtag] = useState('');
+  const [pendingDelTtag, setPendingDelTtag] = useState(null);
   const [togglePending, setTogglePending] = useState({});
+  const [storageStats, setStorageStats] = useState(null);
+  const [storageLoading, setStorageLoading] = useState(false);
+  const [storageError, setStorageError] = useState('');
+
+  const loadStorageStats = async () => {
+    setStorageLoading(true);
+    setStorageError('');
+    try {
+      setStorageStats(await fetchStorageStats());
+    } catch (e) {
+      setStorageError(e.message || 'Failed to calculate storage.');
+    } finally {
+      setStorageLoading(false);
+    }
+  };
 
   const handleToggle = async (key) => {
     if (!isOwner || !isSupabaseConfigured()) return;
@@ -257,7 +56,8 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
     try {
       await updateSubmissionControl(key, newVal, currentUserId);
       onToggleSubmission(key, newVal);
-      setMsg(`${key === 'jutsu_paused' ? 'Jutsu / Battlemode' : key === 'custom_item_paused' ? 'Custom Item' : 'Summon'} submissions ${newVal ? 'paused' : 'reopened'}.`);
+      const label = SUBMISSION_GATE_LABELS[key] || key;
+      setMsg(`${label} submissions ${newVal ? 'paused' : 'reopened'}.`);
     } catch (e) {
       setMsg('Failed to update: ' + (e.message || 'unknown error'));
     } finally {
@@ -289,13 +89,89 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
     setPendingDel(null);
   };
 
+  const addTtag = () => {
+    const v = newTtag.trim();
+    if (!v) return;
+    if (db.jutsuTypeTags.includes(v)) { setMsg(`'${v}' is already in the list.`); return; }
+    setDb(d => {
+      const next = [...d.jutsuTypeTags, v];
+      if (isSupabaseConfigured()) saveJutsuTypeTagsToSupabase(next).catch(e => console.warn('[NARP] save jutsu type tags failed:', e));
+      return { ...d, jutsuTypeTags: next };
+    });
+    setNewTtag('');
+    setMsg(`Added '${v}'.`);
+  };
+
+  const confirmDelTtag = () => {
+    if (!pendingDelTtag) return;
+    setDb(d => {
+      const next = d.jutsuTypeTags.filter(x => x !== pendingDelTtag);
+      if (isSupabaseConfigured()) saveJutsuTypeTagsToSupabase(next).catch(e => console.warn('[NARP] save jutsu type tags failed:', e));
+      return { ...d, jutsuTypeTags: next };
+    });
+    setMsg(`Removed '${pendingDelTtag}'.`);
+    setPendingDelTtag(null);
+  };
+
   const exportJson = () => {
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(db, null, 2));
     const a = document.createElement('a');
     a.href = dataStr;
-    a.download = 'narp_database_backup.json';
+    a.download = 'sarp_database_backup.json';
     a.click();
     setMsg('JSON Exported Successfully');
+  };
+
+  // Snapshot the live DOM (what's actually rendered right now, not the
+  // server-shell index.html) with every stylesheet inlined, so the file
+  // renders standalone — handy for handing the current design to another AI.
+  // Scripts are stripped: this is a static visual snapshot, not a working
+  // copy of the app.
+  const exportHtmlDesign = async () => {
+    setMsg('Preparing HTML export...');
+    try {
+      const styleLinks = Array.from(document.querySelectorAll('link[rel="stylesheet"]'));
+      const cssChunks = await Promise.all(styleLinks.map(async (link) => {
+        try {
+          const res = await fetch(link.href);
+          if (!res.ok) return '';
+          return `/* ${link.href} */\n${await res.text()}`;
+        } catch {
+          return '';
+        }
+      }));
+
+      const clone = document.documentElement.cloneNode(true);
+      clone.querySelectorAll('script').forEach(el => el.remove());
+      clone.querySelectorAll('link[rel="stylesheet"]').forEach(el => el.remove());
+      clone.querySelectorAll('[src], [href]').forEach(el => {
+        for (const attr of ['src', 'href']) {
+          const v = el.getAttribute(attr);
+          if (v && v.startsWith('/') && !v.startsWith('//')) {
+            el.setAttribute(attr, window.location.origin + v);
+          }
+        }
+      });
+
+      const head = clone.querySelector('head');
+      if (head) head.insertAdjacentHTML('beforeend', `<style>\n${cssChunks.join('\n\n')}\n</style>`);
+
+      const html = '<!doctype html>\n'
+        + `<!-- Static design export of ${window.location.href} — captured ${new Date().toISOString()}. `
+        + `Snapshot only, not a working app: scripts are stripped. -->\n`
+        + clone.outerHTML;
+
+      const blob = new Blob([html], { type: 'text/html' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `narp-design-export-${new Date().toISOString().slice(0, 10)}.html`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMsg('HTML design exported.');
+    } catch (e) {
+      setMsg('HTML export failed: ' + (e.message || 'unknown error'));
+    }
   };
 
   const handleSync = async () => {
@@ -327,18 +203,47 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Sync */}
-            <div className="bg-slate-50 rounded-2xl border p-6">
-              <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Refresh" size={20} className="text-indigo-500" /> Synchronization
-              </h3>
-              <p className="text-xs text-slate-500 mb-6">Pull the latest data from the server. Use this if another admin has made changes you haven't seen yet.</p>
-              <button onClick={handleSync} disabled={refreshing}
-                      className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-indigo-700 shadow-md disabled:opacity-50">
-                <Icon n="Refresh" size={16} className={refreshing ? 'animate-spin' : ''}/>
-                {refreshing ? 'Syncing...' : 'Refresh Data'}
-              </button>
-            </div>
+            {/* Storage Calculator */}
+            {isAdmin && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+                  <Icon n="Database" size={20} className="text-indigo-500" /> Storage Calculator
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">How much data the Jutsu/Battlemode catalog, Bloodlines, and Roster are actually using.</p>
+                <button onClick={loadStorageStats} disabled={storageLoading}
+                        className="bg-indigo-600 text-white py-2.5 px-4 rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-indigo-700 disabled:opacity-50">
+                  <Icon n="Refresh" size={14} className={storageLoading ? 'animate-spin' : ''} /> {storageStats ? 'Refresh' : 'Calculate'}
+                </button>
+                {storageError && <p className="text-xs text-rose-600 mt-3 font-semibold">{storageError}</p>}
+                {storageStats && (
+                  <div className="mt-4 overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-slate-400 uppercase text-[10px] font-bold border-b border-slate-200">
+                          <th className="py-2 pr-4">Category</th>
+                          <th className="py-2 pr-4 text-right">Rows</th>
+                          <th className="py-2 pr-4 text-right">Data size</th>
+                          <th className="py-2 text-right">On disk (table + indexes)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {storageStats.map(row => (
+                          <tr key={row.category} className="border-b border-slate-200 last:border-0">
+                            <td className="py-2 pr-4 font-semibold text-slate-700">{row.category}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-500">{row.row_count}</td>
+                            <td className="py-2 pr-4 text-right tabular-nums text-slate-700">{row.data_bytes != null ? formatBytes(row.data_bytes) : '—'}</td>
+                            <td className="py-2 text-right tabular-nums text-slate-700">{row.table_bytes != null ? formatBytes(row.table_bytes) : '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="text-[10px] text-slate-400 mt-2 leading-relaxed">
+                      "Data size" sums each row's own content (name, description, stats, etc.) — Jutsu and Battlemode are split out of the same table. "On disk" is the full Postgres table size, indexes included, which is why it doesn't match the data size exactly.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Audit Log */}
             <div className="bg-slate-50 rounded-2xl border p-6">
@@ -346,20 +251,20 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                 <Icon n="Clock" size={20} className="text-amber-500" /> Audit Log
               </h3>
               <p className="text-xs text-slate-500 mb-6">View the history of role changes — who promoted or demoted whom, and when.</p>
-              <button onClick={onOpenAuditLog}
-                      className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
-                <Icon n="Eye" size={16}/> View Log
-              </button>
+              <NavLink to="/history/audit-log" onClick={onClose}
+                       className="w-full bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-slate-900">
+                <Icon n="Eye" size={16}/> View log
+              </NavLink>
             </div>
 
             {/* Manage Bloodlines */}
             <div className="bg-slate-50 rounded-2xl border p-6">
               <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
-                <Icon n="Book" size={20} className="text-purple-500" /> Bloodlines
+                <Icon n="Book" size={20} className="text-red-600" /> Bloodlines
               </h3>
-              <p className="text-xs text-slate-500 mb-6">Add, edit, or remove bloodlines from the database.</p>
+              <p className="text-xs text-slate-500 mb-6">Add, edit, and remove bloodlines. These populate the bloodline filter dropdown but no longer have a public browse tab.</p>
               <button onClick={onManageBL}
-                      className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-purple-700">
+                      className="w-full bg-red-700 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-red-800">
                 <Icon n="Edit" size={16}/> Manage Bloodlines ({(db.bloodlines || []).length})
               </button>
             </div>
@@ -382,25 +287,38 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
               </div>
             </div>
 
+            {/* Export Site Design (HTML) — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Book" size={20} className="text-violet-500" /> Export Site Design
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-6">
+                  Download the current page as a self-contained HTML file — live markup with every stylesheet inlined, no scripts. Handy for handing the design to another AI.
+                </p>
+                <button onClick={exportHtmlDesign}
+                        className="w-full bg-violet-600 text-white py-3 rounded-xl font-bold flex justify-center gap-2 hover:bg-violet-700">
+                  <Icon n="Download" size={16}/> Download HTML
+                </button>
+              </div>
+            )}
+
             {/* Submission Gates — owner only */}
             {isOwner && (
               <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
                 <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
                   <Icon n="Lock" size={20} className="text-rose-500" /> Submission Gates
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
                 </h3>
-                <p className="text-xs text-slate-500 mb-5">Pause or reopen submission creation for each entry type. Paused types show a notice to users and block form access.</p>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {[
-                    { key: 'jutsu_paused',       label: 'Jutsu / Battlemode', color: 'indigo'  },
-                    { key: 'custom_item_paused',  label: 'Custom Item',        color: 'purple'  },
-                    { key: 'summon_paused',       label: 'Summon',             color: 'amber'   },
-                  ].map(({ key, label, color }) => {
+                <p className="text-xs text-slate-500 mb-5">Temporarily pause or reopen submission creation per entry type. When paused, users see a notice and the form is blocked.</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {SUBMISSION_GATE_TYPES.map(({ key, label, color }) => {
                     const paused  = !!(submissionControls?.[key]);
                     const pending = !!togglePending[key];
-                    const ringCls = { indigo: 'ring-indigo-300', purple: 'ring-purple-300', amber: 'ring-amber-300' }[color];
-                    const bgOn    = { indigo: 'bg-indigo-600', purple: 'bg-purple-600', amber: 'bg-amber-500' }[color];
+                    const trackOn  = { slate: 'bg-slate-700', red: 'bg-red-700', amber: 'bg-amber-500', emerald: 'bg-emerald-600' }[color];
                     return (
-                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-300 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                      <div key={key} className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
                         <div>
                           <div className="text-sm font-bold text-slate-800">{label}</div>
                           <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
@@ -411,7 +329,7 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                           onClick={() => handleToggle(key)}
                           disabled={pending}
                           title={paused ? 'Reopen submissions' : 'Pause submissions'}
-                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 ${ringCls} ${paused ? 'bg-rose-500' : bgOn} disabled:opacity-50`}
+                          className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : `${trackOn} focus:ring-slate-400`} disabled:opacity-50 shrink-0`}
                         >
                           <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
                         </button>
@@ -419,6 +337,42 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                     );
                   })}
                 </div>
+              </div>
+            )}
+
+            {/* Discord Notifications Mute — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Alert" size={20} className="text-rose-500" /> Discord Notifications
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">
+                  Temporarily mute the reviewer nudge DM sent from the review chat's Final Step. Everything still works normally in the app; Discord just stays quiet. (The old webhook-based submission/approval alerts and pings were removed along with Discord forums — DMs to submitters about claims, approvals and denials are unaffected by this switch.)
+                </p>
+                {(() => {
+                  const key = 'discord_notifications_paused';
+                  const paused  = !!(submissionControls?.[key]);
+                  const pending = !!togglePending[key];
+                  return (
+                    <div className={`flex items-center justify-between p-4 rounded-xl border-2 transition-colors max-w-sm ${paused ? 'border-rose-200 bg-rose-50' : 'border-slate-200 bg-white'}`}>
+                      <div>
+                        <div className="text-sm font-bold text-slate-800">All Discord Notifications</div>
+                        <div className={`text-xs font-semibold mt-0.5 ${paused ? 'text-rose-600' : 'text-emerald-600'}`}>
+                          {paused ? 'Muted' : 'Active'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleToggle(key)}
+                        disabled={pending}
+                        title={paused ? 'Unmute Discord notifications' : 'Mute Discord notifications'}
+                        className={`relative w-12 h-6 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-offset-1 ${paused ? 'bg-rose-500 focus:ring-rose-300' : 'bg-slate-700 focus:ring-slate-400'} disabled:opacity-50 shrink-0`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${paused ? 'translate-x-0' : 'translate-x-6'}`} />
+                      </button>
+                    </div>
+                  );
+                })()}
               </div>
             )}
 
@@ -448,6 +402,51 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
                 </button>
               </div>
             </div>
+
+            {/* Manage Jutsu Type Tags */}
+            <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+              <h3 className="text-lg font-bold mb-2 flex items-center gap-2">
+                <Icon n="Tag" size={20} className="text-sky-500" /> Manage Jutsu Type Tags
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">Add or permanently remove tags from the Jutsu Type list (Offensive, Defensive, Mobility, etc.).</p>
+              <div className="flex flex-wrap gap-2 mb-4">
+                {(db.jutsuTypeTags || []).map(s => (
+                  <span key={s} className="bg-white border rounded-lg px-3 py-1.5 text-sm font-semibold flex items-center gap-2 shadow-sm">
+                    {s}
+                    <button onClick={() => setPendingDelTtag(s)} className="text-red-400 hover:text-red-600">
+                      <Icon n="X" size={14}/>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newTtag} onChange={e => setNewTtag(e.target.value)}
+                       onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTtag(); } }}
+                       placeholder="New jutsu type tag..."
+                       className="flex-1 border rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-indigo-500" />
+                <button onClick={addTtag} className="bg-sky-600 hover:bg-sky-700 text-white px-6 py-2 rounded-xl font-bold transition-colors">
+                  Add
+                </button>
+              </div>
+            </div>
+
+            {/* Discord Role Mapping — owner only */}
+            {isOwner && (
+              <div className="bg-slate-50 rounded-2xl border p-6 md:col-span-2">
+                <h3 className="text-lg font-bold mb-1 flex items-center gap-2">
+                  <Icon n="Shield" size={20} className="text-violet-500" /> Discord Role Mapping
+                  <span className="ml-auto text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-300 px-2 py-0.5 rounded">Operator only</span>
+                </h3>
+                <p className="text-xs text-slate-500 mb-5">
+                  Which Discord role grants which site tier, pulled live from the server so you pick from a list instead of typing a role ID by hand. Requires <code className="bg-white border border-slate-200 rounded px-1 py-0.5">VITE_DISCORD_GUILD_ID</code> and <code className="bg-white border border-slate-200 rounded px-1 py-0.5">DISCORD_BOT_TOKEN</code> to be set in Netlify, and the bot to be a member of the server.
+                </p>
+                <DiscordRoleMapping
+                  webhookConfig={webhookConfig}
+                  onWebhookConfigSave={onWebhookConfigSave}
+                />
+                <p className="text-[10px] text-slate-400 mt-4">Changes take effect immediately — no redeploy needed.</p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -464,7 +463,131 @@ export function SystemToolsModal({ db, setDb, onClose, onRefresh, refreshing, on
             </div>
           </div>
         )}
+
+        {/* Confirm-delete sub-modal for jutsu type tags */}
+        {pendingDelTtag && (
+          <div className="fixed inset-0 z-[110] bg-black/60 flex items-center justify-center p-4" onClick={() => setPendingDelTtag(null)}>
+            <div className="bg-white p-6 rounded-3xl max-w-sm w-full" onClick={e => e.stopPropagation()}>
+              <h3 className="font-bold text-xl mb-2 text-slate-900">Remove jutsu type tag?</h3>
+              <p className="text-sm text-slate-600 mb-6">Remove '{pendingDelTtag}' from the global list? Existing jutsus that already use it will keep the value.</p>
+              <div className="flex gap-3">
+                <button onClick={() => setPendingDelTtag(null)} className="flex-1 px-4 py-3 bg-slate-100 text-slate-700 font-bold rounded-xl hover:bg-slate-200">Cancel</button>
+                <button onClick={confirmDelTtag}                className="flex-1 px-4 py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 shadow-md">Remove</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
+
+/* ============================================================================
+   COMPONENT: DiscordRoleMapping
+   Three dropdowns (Admin / Reviewer / Grader), populated from the live
+   Discord server via discord-guild-roles.mjs, saving into the same
+   webhook_config keys the old free-text fields wrote to. Falls back to
+   showing the raw saved ID if the roles can't be loaded yet (bot/guild not
+   configured, or the saved ID no longer exists on the server) so a value
+   is never silently dropped from the dropdown.
+   ============================================================================ */
+const ROLE_MAPPING_FIELDS = [
+  { key: 'discord_admin_role_id',    label: 'Admin' },
+  { key: 'discord_reviewer_role_id', label: 'Reviewer' },
+  { key: 'discord_grader_role_id',   label: 'Grader' },
+];
+
+function DiscordRoleMapping({ webhookConfig, onWebhookConfigSave }) {
+  const [roles, setRoles] = useState(null); // null = not loaded yet
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [savedKey, setSavedKey] = useState(null);
+
+  const loadRoles = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const sess = await getCurrentSession();
+      const res = await fetch('/.netlify/functions/discord-guild-roles', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(sess?.access_token ? { Authorization: `Bearer ${sess.access_token}` } : {}),
+        },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+      setRoles(data.roles || []);
+    } catch (e) {
+      setError(e.message || 'Failed to load Discord roles');
+      setRoles(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleChange = (key, roleId) => {
+    onWebhookConfigSave(key, roleId);
+    setSavedKey(key);
+    setTimeout(() => setSavedKey(k => (k === key ? null : k)), 2000);
+  };
+
+  return (
+    <div className="space-y-4">
+      <button
+        onClick={loadRoles}
+        disabled={loading}
+        className="text-[11px] px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white font-bold disabled:opacity-50 flex items-center gap-1.5"
+      >
+        <Icon n="Refresh" size={12} className={loading ? 'animate-spin' : ''} />
+        {loading ? 'Loading roles…' : roles ? 'Refresh roles' : 'Load roles from Discord'}
+      </button>
+      {error && (
+        <p className="text-red-500 text-[11px] font-semibold bg-red-50 border border-red-200 rounded-lg px-3 py-2">{error}</p>
+      )}
+      <div className="space-y-3">
+        {ROLE_MAPPING_FIELDS.map(({ key, label }) => {
+          const currentValue = webhookConfig[key] || '';
+          const currentKnown = roles?.some(r => r.id === currentValue);
+          return (
+            <div key={key} className="flex flex-col gap-1">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-1.5 sm:gap-2">
+                <label className="text-xs font-bold text-slate-600 sm:w-24 sm:shrink-0">{label}</label>
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  {roles ? (
+                    <select
+                      value={currentKnown ? currentValue : ''}
+                      onChange={e => handleChange(key, e.target.value)}
+                      className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-violet-400 bg-white"
+                    >
+                      <option value="">— none —</option>
+                      {roles.map(r => (
+                        <option key={r.id} value={r.id}>{r.name}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      readOnly
+                      value={currentValue}
+                      placeholder="Load roles above to set this"
+                      className="flex-1 min-w-0 text-xs border border-slate-200 rounded-lg px-3 py-1.5 bg-slate-100 text-slate-500 font-mono"
+                    />
+                  )}
+                  {savedKey === key && <span className="text-emerald-600 text-[10px] font-bold shrink-0">✓ Saved</span>}
+                </div>
+              </div>
+              {roles && currentValue && !currentKnown && (
+                <p className="text-[10px] text-amber-600 sm:ml-[6.5rem]">
+                  Currently saved role ({currentValue}) wasn't found on the server — pick a role above to replace it.
+                </p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export default SystemToolsModal;
