@@ -1,9 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import Icon from '../ui/Icon';
-import { GenericDropdown, BloodlineDropdown } from '../ui/Dropdowns';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Icon } from '../ui/Icon';
+import { BloodlineDropdown, GenericDropdown } from '../ui/Dropdowns';
 import SlotsEditor from '../ui/SlotsEditor';
+import JutsuSheetModal from '../features/JutsuSheetModal';
 import { toArray } from '../../utils/helpers';
-import { BM_TIER_TO_RANK, RANK_COST_MAP, MANAGE_TABLES, RANK_COST_NUM } from '../../constants/catalog';
+import { MANAGE_TABLES, BM_TIER_TO_RANK, RANK_COST_MAP, RANK_COST_NUM } from '../../constants/catalog';
+import { emptyJutsuSheet, normalizeJutsuSheet, jutsuSheetHasContent } from '../../constants/jutsuSheet';
+
+/* ============================================================================
+   MODAL: AdminFormModal
+   Renders a jutsu/bloodline form from the MANAGE_TABLES schema, and folds the
+   jutsu sheet into fd._sheet alongside the rest of the fields.
+   ============================================================================ */
 
 /* ============================================================================
    MODAL: AdminFormModal
@@ -14,7 +22,14 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
   const [fd, setFd]   = useState({});
   const [ddOpen, setDdOpen] = useState(null);
   const [submitting, setSubmitting] = useState(false);
-  const [askSecondApproval, setAskSecondApproval] = useState(false);
+  // Which rank's documentation is currently open for editing; '__single__'
+  // for a non-multi-rank jutsu (only one doc), null when closed.
+  const [editingDocRank, setEditingDocRank] = useState(null);
+  // Admins creating a NEW jutsu default to requesting a second approval;
+  // they can still switch the toggle off for a direct write.
+  const [askSecondApproval, setAskSecondApproval] = useState(
+    () => isAdmin && tab === 'jutsus' && !isPendingEdit && !eRow?._id
+  );
 
   // FIX: Lock the document body scroll so iOS Safari doesn't crash on unmount
   useEffect(() => {
@@ -42,9 +57,19 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
       const conds = [];
       if (eRow.locked)  conds.push('Locked');
       if (eRow.limited) conds.push('Limited');
-      if (eRow.pve)     conds.push('Pve');
       if (conds.length) next.conditions = conds.join(', ');
       next._cCost = !!(eRow._id && eRow.cost && !toArray(eRow.types).includes('Battlemode'));
+      // The doc(s) are a nested object, not a schema field — carried
+      // separately. Internally always keyed by rank ('__single__' when the
+      // jutsu isn't multi-rank) so toggling rank selection mid-edit can't
+      // scramble which doc belongs to which rank.
+      next._sheet = {};
+      if (eRow.multiRank) {
+        const stored = (eRow.sheet && typeof eRow.sheet === 'object') ? eRow.sheet : {};
+        toArray(eRow.rank).forEach(r => { next._sheet[r] = normalizeJutsuSheet(stored[r]); });
+      } else {
+        next._sheet.__single__ = normalizeJutsuSheet(eRow.sheet);
+      }
     }
     setFd(next);
   }, [eRow, tab]);
@@ -75,6 +100,16 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
         rank = toArray(p.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0));
       }
       const conds = toArray(p.conditions);
+      const isMultiRank = rank.length > 1 && !isBm;
+      let sheetToSave = {};
+      if (isMultiRank) {
+        rank.forEach(r => {
+          const s = (p._sheet || {})[r];
+          if (s) sheetToSave[r] = s;
+        });
+      } else {
+        sheetToSave = (p._sheet || {}).__single__ || {};
+      }
       entity = {
         _id:         eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `j-${Date.now()}`),
         name:        p.name || '',
@@ -82,28 +117,34 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
         rank,
         cost:        p.cost || '',
         types,
+        jutsu_type:  toArray(p.jutsu_type),
         origin:      p.origin || '',
         spec:        toArray(p.spec),
         custom_tags: toArray(p.custom_tags),
-        link:        p.link || '',
+        // No longer editable here — the sheet replaces it — but preserve
+        // whatever a legacy jutsu already had rather than wiping it on save.
+        link:        eRow.link || '',
         bloodline:   p.bloodline || '',
         limited:     conds.includes('Limited'),
         locked:      conds.includes('Locked'),
-        pve:         conds.includes('Pve'),
-        multiRank:   rank.length > 1 && !isBm,
+        multiRank:   isMultiRank,
         slots:       conds.includes('Limited') ? (p.slots || '') : '',
         bm_tier:     bmTier,
+        sheet:       sheetToSave,
         _createdAt:  eRow._createdAt || new Date().toISOString(),
       };
     } else if (tab === 'bloodlines') {
       entity = {
-        _id:         eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b-${Date.now()}`),
-        name:        p.name || '',
-        category:    p.category || 'Custom',
-        subcategory: p.subcategory || 'Other',
-        custom_tags: toArray(p.custom_tags),
-        link:        p.link || '',
-        _createdAt:  eRow._createdAt || new Date().toISOString(),
+        _id:                      eRow._id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `b-${Date.now()}`),
+        name:                     p.name || '',
+        category:                 p.category || 'Custom',
+        subcategory:              p.subcategory || 'Other',
+        custom_tags:              toArray(p.custom_tags),
+        link:                     p.link || '',
+        proprietary_ability_link: p.proprietary_ability_link || '',
+        max_slots:                p.max_slots != null && p.max_slots !== '' ? Number(p.max_slots) : 5,
+        slots:                    p.slots || '',
+        _createdAt:               eRow._createdAt || new Date().toISOString(),
       };
     }
     try {
@@ -127,10 +168,26 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
     (!field.hideIfInc     || !toArray(fd[field.hideIfInc.f]).includes(field.hideIfInc.v))
   );
 
+  // Multi-rank jutsus get one documentation doc per rank instead of one
+  // shared doc — computed live off the current rank selection, not the
+  // hydrated eRow, so toggling ranks in the form updates the doc list too.
+  const docIsMultiRank = tab === 'jutsus' && toArray(fd.rank).length > 1 && !toArray(fd.types).includes('Battlemode');
+  const docRanks = docIsMultiRank
+    ? toArray(fd.rank).slice().sort((a, b) => (RANK_COST_NUM[a] || 0) - (RANK_COST_NUM[b] || 0))
+    : ['__single__'];
+  const docFor = (rankKey) => (fd._sheet || {})[rankKey] || emptyJutsuSheet();
+  const setDocFor = (rankKey, next) => setFd({ ...fd, _sheet: { ...(fd._sheet || {}), [rankKey]: next } });
+
   return (
     <div className="fixed inset-0 z-[70] bg-slate-900/60 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
+      {/* FIX: Removed overflow-y-auto from outer wrapper and adjusted padding */}
+      
+      {/* FIX: Set max-h-[90vh] and flex-col to bound the card size securely */}
       <div className="bg-white rounded-3xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col animate-in zoom-in-95 duration-200">
+        
+        {/* FIX: Moved overflow-y-auto down into this content wrapper specifically */}
         <div className="p-6 md:p-8 overflow-y-auto custom-scrollbar flex-1">
+          
           <div className="flex justify-between items-center mb-8 border-b pb-4">
             <h3 className="text-xl font-bold flex items-center gap-3">
               <Icon n={eRow._id ? 'Edit' : 'PlusCir'} size={24} className="text-indigo-500" />
@@ -182,6 +239,14 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
                     onChange={v => setFd({ ...fd, [field.k]: v.join(', ') })}
                     isOpen={ddOpen === field.k}
                     onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
+                ) : field.t === 'ttag-dd' ? (
+                  <GenericDropdown
+                    l="" placeholder="Select Jutsu Type(s)"
+                    opts={(db.jutsuTypeTags || []).map(s => ({ value: s, label: s }))}
+                    sel={toArray(fd[field.k])}
+                    onChange={v => setFd({ ...fd, [field.k]: v.join(', ') })}
+                    isOpen={ddOpen === field.k}
+                    onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
                 ) : field.t === 'bl-select' ? (
                   <BloodlineDropdown
                     l="" placeholder="Select Bloodline"
@@ -192,7 +257,7 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
                     isOpen={ddOpen === field.k}
                     onToggle={() => setDdOpen(ddOpen === field.k ? null : field.k)} />
                 ) : field.t === 'slots' ? (
-                  <SlotsEditor value={fd[field.k] || ''} onChange={v => setFd({ ...fd, [field.k]: v })} defCount={field.defCount} />
+                  <SlotsEditor value={fd[field.k] || ''} onChange={v => setFd({ ...fd, [field.k]: v })} defCount={field.defCount || (field.defCountField ? (parseInt(fd[field.defCountField]) || 1) : 1)} />
                 ) : (
                   <input type="text" value={fd[field.k] || ''}
                          onChange={(e) => setFd({ ...fd, [field.k]: e.target.value })}
@@ -246,12 +311,36 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
             )}
           </div>
 
+          {/* Jutsu Documentation — replaces the old Doc Link with the full in-app write-up */}
+          {tab === 'jutsus' && (
+            <div className="mt-8 p-4 bg-slate-50 border rounded-2xl">
+              <p className="text-sm font-bold text-slate-800">Jutsu Documentation</p>
+              <p className="text-xs text-slate-500 mb-3">
+                {docIsMultiRank
+                  ? 'This jutsu is multi-rank — each rank gets its own documentation.'
+                  : 'Description, mechanics, and restrictions for this jutsu.'}
+              </p>
+              <div className="flex flex-wrap gap-2.5">
+                {docRanks.map(rankKey => {
+                  const filled = jutsuSheetHasContent(docFor(rankKey));
+                  return (
+                    <button key={rankKey} type="button" onClick={() => setEditingDocRank(rankKey)}
+                            className="bg-white border-2 border-indigo-200 text-indigo-700 px-4 py-2 rounded-xl font-bold text-sm hover:bg-indigo-50 flex items-center gap-2">
+                      <Icon n="Edit" size={14}/>
+                      {docIsMultiRank ? `${filled ? 'Edit' : 'Add'} ${rankKey}-Rank Doc` : (filled ? 'Edit Documentation' : 'Add Documentation')}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Ask Second Approval Toggle (Admins/Owners only) */}
           {isAdmin && tab === 'jutsus' && !isPendingEdit && (
             <div className="mt-8 p-4 bg-slate-50 border rounded-2xl flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm font-bold text-slate-800">Request Second Approval</p>
-                <p className="text-xs text-slate-500">Submit this change to the pending queue to require another staff member or admin's review.</p>
+                <p className="text-xs text-slate-500">Submit this change for review by another Reviewer or Admin before it goes live.</p>
               </div>
               <label className="relative inline-flex items-center cursor-pointer shrink-0">
                 <input
@@ -268,15 +357,27 @@ export function AdminFormModal({ tab: rawTab, eRow, onClose, db, onSubmit, willG
           <div className="flex justify-end gap-4 mt-10 pt-6 border-t">
             <button onClick={onClose} className="bg-white border-2 px-8 py-3 rounded-xl font-bold hover:bg-slate-50">Cancel</button>
             <button onClick={handleSave}
-                    disabled={submitting || schema.fields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
+                    disabled={submitting || visibleFields.some(f => f.req && !(fd[f.k] || '').toString().trim())}
                     className="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold flex gap-2 disabled:opacity-50 hover:bg-indigo-700 shadow-md">
               <Icon n="Save" size={18}/> {submitting ? 'Saving...' : ((willGoToPending || askSecondApproval) ? 'Submit for Approval' : 'Save')}
             </button>
           </div>
         </div>
       </div>
+      {editingDocRank && tab === 'jutsus' && (
+        <JutsuSheetModal
+          sheet={docFor(editingDocRank)}
+          onChange={next => setDocFor(editingDocRank, next)}
+          jutsuName={docIsMultiRank ? `${fd.name || ''} (${editingDocRank}-Rank)` : (fd.name || '')}
+          onClose={() => setEditingDocRank(null)}
+        />
+      )}
     </div>
   );
 }
+
+/* ============================================================================
+   MODAL: SystemToolsModal
+   ============================================================================ */
 
 export default AdminFormModal;

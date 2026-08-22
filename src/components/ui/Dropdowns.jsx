@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { Icon } from './Icon';
 import { BL_CATS, BL_SUBCATS } from '../../constants/catalog';
 

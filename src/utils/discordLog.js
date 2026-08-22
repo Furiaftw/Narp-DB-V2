@@ -1,4 +1,5 @@
 import { toArray } from './helpers';
+import { getCurrentSession } from '../lib/supabase';
 
 /* ---------------------------------------------------------------------------
    DISCORD WEBHOOK LOGGING

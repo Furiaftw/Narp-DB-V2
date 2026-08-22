@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Icon } from '../ui/Icon';
 import { toArray, getSlotStatus, getNatureColor } from '../../utils/helpers';
 import { RANK_COST_MAP, RANK_COST_NUM } from '../../constants/catalog';
+import { jutsuSheetHasContent, jutsuDocsHaveContent } from '../../constants/jutsuSheet';
 
 /* ============================================================================
    COMPONENT: JutsuCard
