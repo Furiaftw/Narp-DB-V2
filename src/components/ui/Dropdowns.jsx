@@ -1,25 +1,28 @@
-import React, { useState, useRef, useCallback, useEffect } from 'react';
-import Icon from './Icon';
+import { useState, useRef, useEffect } from 'react';
+import { Icon } from './Icon';
 import { BL_CATS, BL_SUBCATS } from '../../constants/catalog';
 
-/* Compute fixed-position style for a dropdown panel relative to its trigger button.
-   Picks up or down based on available space. */
-function computeFixedPos(triggerEl, maxH) {
+/* ============================================================================
+   DROPDOWN PRIMITIVES
+   Shared by the jutsu filter bar and the admin form. Both panels are
+   fixed-position and measured off their trigger button so they escape any
+   overflow:hidden ancestor.
+   ============================================================================ */
+
+/* Compute fixed-position style for a dropdown panel from the trigger button rect. */
+export function computeDropdownPos(triggerEl, maxH) {
   if (!triggerEl) return { top: 0, left: 0, width: 200, maxHeight: maxH };
   const rect = triggerEl.getBoundingClientRect();
   const spaceBelow = window.innerHeight - rect.bottom - 8;
   const spaceAbove = rect.top - 8;
   const openUp = spaceBelow < 200 && spaceAbove > spaceBelow;
   const clampedLeft = Math.min(rect.left, window.innerWidth - rect.width - 8);
-  const finalLeft = Math.max(8, clampedLeft);
+  const left = Math.max(8, clampedLeft);
   return openUp
-    ? { bottom: window.innerHeight - rect.top + 4, left: finalLeft, width: rect.width, maxHeight: Math.min(spaceAbove, maxH) }
-    : { top: rect.bottom + 4, left: finalLeft, width: rect.width, maxHeight: Math.min(spaceBelow, maxH) };
+    ? { bottom: window.innerHeight - rect.top + 4, left, width: rect.width, maxHeight: Math.min(spaceAbove, maxH) }
+    : { top: rect.bottom + 4, left, width: rect.width, maxHeight: Math.min(spaceBelow, maxH) };
 }
 
-/* ============================================================================
-   COMPONENT: BloodlineDropdown
-   ============================================================================ */
 export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb, isOpen, onToggle, isMulti = true }) {
   const [fCat, setFCat] = useState('All');
   const [fSub, setFSub] = useState('All');
@@ -29,9 +32,7 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
   const [panelStyle, setPanelStyle] = useState({});
 
   const handleToggle = useCallback(() => {
-    if (!isOpen) {
-      setPanelStyle(computeFixedPos(triggerRef.current, 384));
-    }
+    if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 384));
     onToggle();
   }, [isOpen, onToggle]);
 
@@ -63,7 +64,8 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
   const selectAllVisible = () => {
     if (!isMulti) return;
     const visibleNames = filtered.map(b => b.name);
-    onChange(Array.from(new Set([...sel, ...visibleNames])));
+    const next = Array.from(new Set([...sel, ...visibleNames]));
+    onChange(next);
   };
 
   const count = isMulti ? sel.length : (sel ? 1 : 0);
@@ -167,16 +169,14 @@ export function BloodlineDropdown({ l, sel, onChange, placeholder, bloodlinesDb,
 export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, onToggle }) {
   const [str, setStr] = useState('');
   const triggerRef = useRef(null);
-  const panelRef = useRef(null);
   const [panelStyle, setPanelStyle] = useState({});
   const arr = sel || [];
   const filtered = str ? opts.filter(o => (o.label || o).toLowerCase().includes(str.toLowerCase())) : opts;
   const toggle = (v) => onChange(arr.includes(v) ? arr.filter(x => x !== v) : [...arr, v]);
+  const panelRef = useRef(null);
 
   const handleToggle = useCallback(() => {
-    if (!isOpen) {
-      setPanelStyle(computeFixedPos(triggerRef.current, 288));
-    }
+    if (!isOpen) setPanelStyle(computeDropdownPos(triggerRef.current, 288));
     onToggle();
   }, [isOpen, onToggle]);
 
@@ -238,3 +238,7 @@ export function GenericDropdown({ l, opts, sel, onChange, placeholder, isOpen, o
     </div>
   );
 }
+
+/* ============================================================================
+   COMPONENT: SlotsEditor
+   ============================================================================ */
